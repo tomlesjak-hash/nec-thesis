@@ -9,6 +9,25 @@ expert warm-start device (§4.3) to escape the pooled local optimum — now impl
 `Trainer.warmstart_experts`, gate still unsupervised. The HMM forward-filter predict step
 ships with causality/correctness tests as promised (§12.3).
 
+**Increment 8 (2026-07-03) — git + partial Module 12 (point-in-time universe).**
+The workspace is now a git repository (root-level, `.gitignore` excluding the 16 GB QIP /
+10 GB Youtube Model workspaces, Books, MoE papers, `.venv`, data caches and pickled
+artifacts; initial commit `54cec22`, 231 files / 13 MB). `universe.py`: an approximately
+point-in-time S&P 500 universe from Wikipedia's constituents + change tables (cache-first,
+offline-testable parsers; tickers normalized to the price layer's convention).
+`members_asof` reconstructs membership by reverse-chronological event undo (leave-and-
+rejoin resolves correctly; NaN/None-immune guards); `stable_members`/`members_union` for
+window universes; `filter_point_in_time(panel, universe)` drops (name, date) rows outside
+the index; `universe_coverage_report` quantifies the residual. The honest framing is in
+the module docstring: this **fixes survivorship component 1** (backward-looking selection)
+and **makes component 2 measurable** (departed names without free price data — coverage
+column published next to any backtest; live test: the 30-name default universe covers
+<12% of the true index). Not fixed: delisting returns (CRSP territory). Measured against
+real index turnover, the change history is only complete from ~2010 —
+`EARLIEST_RELIABLE = 2011-01-01`, with a warning below it (the 2000s are mostly missing
+from the source). Live-verified incl. TSLA's 2020-12-21 join. Suite: 109 offline + 3
+opt-in network tests, ~27 s.
+
 **Increment 7 (2026-07-03) — single-model baselines (the comparison's other side).**
 `baselines.py`: `RidgeBaseline` (closed form on `x_snap`, intercept unpenalized per
 Module 4; residual-std Gaussian NLL) and `MLPBaseline` (deliberately the *same*

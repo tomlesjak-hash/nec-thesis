@@ -163,6 +163,28 @@ the baselines lose above for structural reasons, not because they're broken.
 LightGBM (syllabus candidate #2) is deliberately not wired in: heavy optional
 dependency, and the repo carries a separate LGBM pipeline.
 
+## Point-in-time universe (partial Module 12 — survivorship mitigation)
+
+```python
+from nec_moe import load_sp500_universe, filter_point_in_time, universe_coverage_report
+
+u = load_sp500_universe("data_cache")            # Wikipedia constituents + change history
+u.members_asof("2018-06-01")                      # membership by reverse-chronological undo
+candidates = u.members_union("2015-01-01", "2024-12-31")  # tickers to attempt downloading
+panel = filter_point_in_time(panel, u)            # drop (name, date) rows outside the index
+print(universe_coverage_report(u, ["2015-01-02", "2020-01-02"], set(prices)))
+```
+
+This kills survivorship **component 1** (backward-looking selection: a name appears on a
+date only if it was in the index then) and makes **component 2 measurable** (departed
+names without free price data → the `coverage` column is the honest number to publish
+next to any backtest; the live test shows the 30-name default universe covers <12% of the
+true index). Not fixed and not claimable: delisting returns (needs CRSP). History is
+reliable from ~2011 (`EARLIEST_RELIABLE`; measured against real index turnover — the
+2000s are mostly missing from the source and `members_asof` warns). The defensible
+posture: *survivorship-mitigated with documented residual coverage*, never
+"survivorship-free".
+
 ## Selection-aware inference (trial registry + deflated Sharpe + FDR)
 
 Every sweep configuration is a logged trial; picking a winner is a recorded event:

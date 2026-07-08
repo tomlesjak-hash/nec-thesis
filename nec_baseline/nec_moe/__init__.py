@@ -75,6 +75,12 @@ from .multiple_testing import (
     sharpe_ratio,
 )
 from .registry import TrialRecord, TrialRegistry
+from .universe import (
+    PointInTimeUniverse,
+    filter_point_in_time,
+    load_sp500_universe,
+    universe_coverage_report,
+)
 from .losses import (
     LoadBalanceBuffer,
     MixtureNLLOutput,
@@ -177,6 +183,10 @@ __all__ = [
     "RegimeAlignmentReport",
     "TrialRecord",
     "TrialRegistry",
+    "PointInTimeUniverse",
+    "load_sp500_universe",
+    "filter_point_in_time",
+    "universe_coverage_report",
     "sharpe_ratio",
     "probabilistic_sharpe_ratio",
     "expected_max_sharpe",

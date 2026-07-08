@@ -1,0 +1,11 @@
+\contentsline {section}{\numberline {6.1}Shallow networks: what one hidden layer computes}{3}{section.1}%
+\contentsline {section}{\numberline {6.2}Deep networks: why composition pays}{3}{section.2}%
+\contentsline {section}{\numberline {6.3}Loss functions: probabilistic commitments, revisited for fat tails}{4}{section.3}%
+\contentsline {section}{\numberline {6.4}Backpropagation, completed}{5}{section.4}%
+\contentsline {section}{\numberline {6.5}Initialization: the derivations}{6}{section.5}%
+\contentsline {section}{\numberline {6.6}Training practice: schedules, clipping, and reading loss curves}{6}{section.6}%
+\contentsline {section}{\numberline {6.7}Normalization layers: batch norm, layer norm, and a financial warning}{7}{section.7}%
+\contentsline {section}{\numberline {6.8}The regularization toolkit}{8}{section.8}%
+\contentsline {section}{\numberline {6.9}Capstone: building and debugging the NEC experts}{9}{section.9}%
+\contentsline {section}{\numberline {6.10}Exercises}{10}{section.10}%
+\contentsline {section}{Source map and what comes next}{12}{section*.12}%

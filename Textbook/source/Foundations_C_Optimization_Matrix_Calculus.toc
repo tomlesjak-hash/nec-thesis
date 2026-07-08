@@ -1,0 +1,12 @@
+\contentsline {section}{\numberline {C.1}The landscape: convex, non-convex, and what ``solved'' means}{3}{section.1}%
+\contentsline {section}{\numberline {C.2}Gradient descent, analyzed exactly}{3}{section.2}%
+\contentsline {subsection}{\numberline {C.2.1}The model problem and the eigenmode decomposition}{3}{subsection.2.1}%
+\contentsline {subsection}{\numberline {C.2.2}Conditioning: the number that runs the show}{4}{subsection.2.2}%
+\contentsline {section}{\numberline {C.3}Stochastic gradients: optimization under measurement noise}{5}{section.3}%
+\contentsline {section}{\numberline {C.4}Momentum: optimization as a damped oscillator}{6}{section.4}%
+\contentsline {section}{\numberline {C.5}Adaptive methods: AdaGrad, RMSProp, Adam}{7}{section.5}%
+\contentsline {section}{\numberline {C.6}Matrix calculus: the differential method}{8}{section.6}%
+\contentsline {section}{\numberline {C.7}Initialization: variance propagation through depth}{9}{section.7}%
+\contentsline {section}{\numberline {C.8}Capstone: reading a training configuration like a physicist}{10}{section.8}%
+\contentsline {section}{\numberline {C.9}Exercises}{11}{section.9}%
+\contentsline {section}{Source map and what comes next}{12}{section*.11}%

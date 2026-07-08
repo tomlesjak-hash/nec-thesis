@@ -1,0 +1,913 @@
+% =====================================================================
+%  Foundations for a Quant Research Pipeline
+%  Chapter: Math Foundations B — Probability and Statistics Essentials
+%  Companion textbook to NEC_thesis_syllabus.md
+%  Sources synthesized: ESL §2.1–2.9; Bishop PRML §1.1–1.6, §2.1–2.3
+% =====================================================================
+\documentclass[11pt]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{mathpazo}
+\usepackage{microtype}
+\usepackage[margin=1.05in]{geometry}
+\usepackage{amsmath,amssymb,amsthm,mathtools,bm}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{tcolorbox}
+\tcbuselibrary{breakable}
+\usepackage{booktabs}
+\usepackage[colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,urlcolor=blue!50!black]{hyperref}
+
+\linespread{1.05}
+\setlength{\parskip}{0.35em}
+
+% ---------- colors ----------
+\definecolor{necblue}{RGB}{20,45,90}
+\definecolor{finmaroon}{RGB}{110,30,30}
+\definecolor{boxbg}{RGB}{245,247,250}
+\definecolor{finbg}{RGB}{250,246,243}
+
+% ---------- chapter-B numbering ----------
+\renewcommand{\thesection}{B.\arabic{section}}
+\numberwithin{equation}{section}
+
+% ---------- theorem environments ----------
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{corollary}[theorem]{Corollary}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{example}[theorem]{Example}
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+
+\newcounter{exercise}
+\renewcommand{\theexercise}{B.\arabic{exercise}}
+\newenvironment{exercise}[1][]{\refstepcounter{exercise}\par\medskip
+  \noindent\textbf{Exercise \theexercise}\if\relax\detokenize{#1}\relax\else\ \textnormal{[#1]}\fi\textbf{.}\ \itshape}{\par\medskip}
+
+% ---------- exercise importance badges (priority for the NEC/MoE thesis track) ----------
+\definecolor{priogray}{RGB}{120,120,120}
+\newcommand{\prioCore}{{\normalfont\small\textbf{\textcolor{necblue}{[\,\ensuremath{\bigstar\bigstar\bigstar}\ Core\,]}}}\hspace{0.5em}}
+\newcommand{\prioWorth}{{\normalfont\small\textbf{\textcolor{finmaroon}{[\,\ensuremath{\bigstar\bigstar}\ Worth it\,]}}}\hspace{0.5em}}
+\newcommand{\prioLow}{{\normalfont\small\textcolor{priogray}{[\,\ensuremath{\bigstar}\ Low priority\,]}}\hspace{0.5em}}
+\newcommand{\prioOpt}{{\normalfont\small\textcolor{priogray}{[\,\ensuremath{\circ}\ Optional\,]}}\hspace{0.5em}}
+\newcommand{\corebadge}{}% superseded by the four \prio badges above
+
+% ---------- boxes ----------
+\newtcolorbox{necbox}{breakable,colback=boxbg,colframe=necblue,
+  boxrule=0.8pt,arc=1.5mm,left=2mm,right=2mm,top=1.5mm,bottom=1.5mm,
+  title={\sffamily\bfseries NEC connection},fonttitle=\small}
+\newtcolorbox{finbox}{breakable,colback=finbg,colframe=finmaroon,
+  boxrule=0.8pt,arc=1.5mm,left=2mm,right=2mm,top=1.5mm,bottom=1.5mm,
+  title={\sffamily\bfseries Finance reality check},fonttitle=\small}
+
+% ---------- operators ----------
+\DeclareMathOperator{\E}{\mathbb{E}}
+\DeclareMathOperator{\Var}{Var}
+\DeclareMathOperator{\Cov}{Cov}
+\DeclareMathOperator{\Corr}{Corr}
+\DeclareMathOperator{\tr}{tr}
+\DeclareMathOperator*{\argmin}{arg\,min}
+\DeclareMathOperator*{\argmax}{arg\,max}
+\newcommand{\KL}[2]{\mathrm{KL}\!\left(#1 \,\middle\|\, #2\right)}
+\newcommand{\Normal}{\mathcal{N}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\x}{\bm{x}}
+\newcommand{\y}{\bm{y}}
+\newcommand{\bmu}{\bm{\mu}}
+\newcommand{\bSigma}{\bm{\Sigma}}
+\newcommand{\T}{\top}
+
+\title{\vspace{-1.2em}{\large\sffamily Foundations for a Quant Research Pipeline}\\[0.4em]
+\textbf{Math Foundations B:\\ Probability and Statistics Essentials}\\[0.3em]
+{\large A single merged treatment of ESL \S2.1--2.9 and Bishop \S1.1--1.6, \S2.1--2.3}}
+\author{Prepared for Tom Koreslesjak \;\textperiodcentered\; companion to \texttt{NEC\_thesis\_syllabus.md}}
+\date{June 2026}
+
+\begin{document}
+\maketitle
+\vspace{-1.5em}
+
+\begin{abstract}
+\noindent This chapter teaches the probability and statistics needed for everything downstream in the syllabus: mixture models, likelihood-based training, gating networks, and honest uncertainty statements about backtests. It merges the two assigned readings --- Hastie--Tibshirani--Friedman (\emph{ESL}) Chapter 2 and Bishop (\emph{PRML}) Chapters 1--2 --- into one non-redundant arc. The destination is fixed in advance: by the end you will be able to derive the mixture-of-experts training objective as a conditional mixture likelihood, explain why it contains a log-sum-exp, and explain why the hard \texttt{argmax} routing in the current NEC code cannot train its gate. All syllabus exercises appear in Section~\ref{sec:exercises}, restated so the chapter is self-contained.
+\end{abstract}
+
+\tableofcontents
+
+\subsection*{How this chapter was assembled (and what was cut)}
+
+ESL Chapter 2 and Bishop Chapters 1--2 overlap heavily: Bayes' rule, Gaussians, maximum likelihood, the bias--variance tradeoff, and the curse of dimensionality each appear in both books. Each topic gets exactly one treatment here, taken from whichever book does it better and rebuilt around return prediction. Deliberately cut, with reasons:
+
+\begin{itemize}[leftmargin=2em,itemsep=0.15em]
+\item \emph{Bishop's beta/Dirichlet conjugate-prior machinery} (\S2.1--2.2). You need the Bernoulli and categorical distributions themselves --- a gate output \emph{is} a categorical distribution --- but full conjugate Bayesian updating is not load-bearing for the thesis. It returns only if you ever go fully Bayesian, which the syllabus does not.
+\item \emph{Bishop's polynomial curve-fitting running example} (\S1.1). Pedagogically fine, but every illustration here uses the object you actually care about: a panel of stock returns.
+\item \emph{Bishop's decision-theory extras} (\S1.5): reject options, general loss matrices. Only the squared-loss, absolute-loss, and 0--1-loss results survive, because those are the ones that define what your models estimate.
+\item \emph{ESL \S2.6--2.8} (taxonomy of estimator classes). Compressed to two paragraphs at the end of Section~\ref{sec:epe}; the ideas reappear properly in Module 4.
+\end{itemize}
+
+Everything in the syllabus topic list survives the relevance check, and the chapter says explicitly, at each step, which later module the material feeds.
+
+\subsection*{Notation}
+
+Random variables are uppercase ($X$, $Y$) where the random/fixed distinction matters, lowercase in formulas where context is clear. Vectors are bold lowercase ($\x \in \R^p$), matrices bold uppercase ($\bm{X}$, $\bSigma$). The data panel is indexed by asset $i$ and date $t$; a generic supervised pair is $(\x, y)$ with $\x$ the feature vector and $y$ the future return. $\Normal(\mu,\sigma^2)$ is the Gaussian; $p(\cdot)$ denotes a density or probability mass function as context dictates; $\E$, $\Var$, $\Cov$ are expectation, variance, covariance. Logs are natural. $K$ is the number of experts in a mixture; $z \in \{1,\dots,K\}$ is the latent expert label; $\pi_k(\x)$ is the gate probability.
+
+% =====================================================================
+\section{Random variables and the geometry of a return panel}\label{sec:rv}
+% =====================================================================
+
+\subsection{Probability without ceremony}
+
+You can run the entire syllabus on a working notion of probability that a physicist already owns. There is a set of possible outcomes $\Omega$; events are subsets of $\Omega$; a probability measure $P$ assigns each event a number in $[0,1]$, with $P(\Omega)=1$ and additivity over disjoint events. A \emph{random variable} is a function from outcomes to numbers: the realized 5-day return of Apple starting tomorrow is a random variable; the number you compute from last week's prices is a realization. Measure theory exists to make this airtight on uncountable spaces; the syllabus deliberately skips it (it is listed under ``omitted with reasons'' in the thesis syllabus), and nothing in this book-line needs it.
+
+Two rules generate essentially all of probability. For random variables $X$ and $Y$ with joint density $p(x,y)$:
+\begin{align}
+\textbf{Sum rule:}\quad & p(x) = \int p(x,y)\,dy
+\qquad\text{(marginalization)} \label{eq:sumrule}\\
+\textbf{Product rule:}\quad & p(x,y) = p(y \mid x)\, p(x). \label{eq:productrule}
+\end{align}
+Bishop builds his whole first chapter on the observation that these two lines, used relentlessly, are the entire machinery. That is the right attitude: when a derivation in this syllabus looks clever, it is almost always \eqref{eq:sumrule} and \eqref{eq:productrule} applied somewhere unexpected. Marginalizing over a latent expert label --- the central move of the whole thesis --- is the sum rule. Bayes' rule is the product rule read in both directions. Keep them in view.
+
+A distribution is described by its \emph{cumulative distribution function} $F(x) = P(X \le x)$, and when $F$ is differentiable, by its \emph{density} $p(x) = F'(x)$. Densities are not probabilities: $p(x)$ can exceed 1, and only integrals of $p$ mean anything. For discrete variables, sums replace integrals throughout and $p$ is a probability mass function.
+
+\subsection{Expectation, variance, covariance}
+
+The expectation of $g(X)$ is
+\begin{equation}
+\E[g(X)] = \int g(x)\, p(x)\, dx,
+\end{equation}
+the density-weighted average --- the exact structural analogue of $\langle \psi | \hat{A} | \psi \rangle$: a weighting of observable values by a state. The single most used property is \emph{linearity}:
+\begin{equation}
+\E[aX + bY] = a\,\E[X] + b\,\E[Y] \qquad \text{always, with no independence assumption.}
+\label{eq:linearity}
+\end{equation}
+This deserves emphasis because it is stronger than intuition suggests. The expected return of a portfolio is the weighted average of expected returns of its holdings \emph{regardless of how the holdings co-move}. Dependence is invisible to first moments; it enters at second order.
+
+Second moments are where the structure lives:
+\begin{align}
+\Var(X) &= \E\big[(X - \E X)^2\big] = \E[X^2] - (\E X)^2,\\
+\Cov(X,Y) &= \E\big[(X - \E X)(Y - \E Y)\big], \qquad
+\Corr(X,Y) = \frac{\Cov(X,Y)}{\sqrt{\Var(X)\Var(Y)}}.
+\end{align}
+Variance is not linear; instead,
+\begin{equation}
+\Var(aX + bY) = a^2 \Var(X) + b^2 \Var(Y) + 2ab\,\Cov(X,Y),
+\label{eq:varsum}
+\end{equation}
+and the cross term is the entire subject of portfolio theory. In vector form: if $\bm{r} \in \R^N$ is a vector of asset returns with covariance matrix $\bSigma$ ($\Sigma_{ij} = \Cov(r_i, r_j)$) and $\bm{w}$ a weight vector, then
+\begin{equation}
+\Var(\bm{w}^\T \bm{r}) = \bm{w}^\T \bSigma\, \bm{w} \;\ge\; 0.
+\label{eq:portvar}
+\end{equation}
+The inequality holds for \emph{every} $\bm{w}$, which is precisely the statement that covariance matrices are positive semidefinite --- the same PSD machinery you proved in Math Foundations A for Gram matrices $\bm{X}^\T\bm{X}$. The sample covariance matrix \emph{is} a scaled Gram matrix of centered data, which is why the two facts are one fact.
+
+Two workhorse consequences, recorded here because several exercises run on them. First, covariance transforms under linear maps the way \eqref{eq:portvar} suggests: for random $\x$ with $\Cov(\x) = \bSigma$ and any fixed matrix $\bm{A}$,
+\begin{equation}
+\Cov(\bm{A}\x) = \bm{A}\, \bSigma\, \bm{A}^\T ,
+\label{eq:covmap}
+\end{equation}
+by the same two-line expansion (write $\Cov(\bm{A}\x) = \E[\bm{A}(\x - \bmu)(\x - \bmu)^\T \bm{A}^\T]$ and pull the constants out of the expectation). Second, the \emph{expectation of a quadratic form}: for $\x$ with mean $\bmu$ and covariance $\bSigma$, and any fixed $\bm{A}$,
+\begin{equation}
+\E\big[\x^\T \bm{A}\, \x\big] = \tr(\bm{A} \bSigma) + \bmu^\T \bm{A}\, \bmu .
+\label{eq:quadform}
+\end{equation}
+The proof is a trace trick worth internalizing: a scalar equals its own trace, so $\x^\T \bm{A} \x = \tr(\bm{A}\, \x\x^\T)$; expectation and trace are both linear, so they commute; and $\E[\x\x^\T] = \bSigma + \bmu\bmu^\T$. The cyclic property of the trace ($\tr(\bm{AB}) = \tr(\bm{BA})$, from Foundations A) is what lets the rearrangement work, and Exercise~\ref{ex:esl25} uses \eqref{eq:covmap}--\eqref{eq:quadform} to compute the prediction error of least squares.
+
+\begin{example}[Diversification in one line]
+For $N$ uncorrelated assets each with variance $\sigma^2$ and equal weights $1/N$, \eqref{eq:portvar} gives portfolio variance $\sigma^2/N$. With equal pairwise correlation $\rho > 0$, it gives $\sigma^2\big[\tfrac{1-\rho}{N} + \rho\big] \to \rho\sigma^2$: diversification eliminates idiosyncratic variance but cannot touch the common factor. This is the first hint that a single dominant ``market mode'' lives in equity covariance matrices --- the same fact you met in Foundations A as ``the first principal component of equity returns is the market.''
+\end{example}
+
+\subsection{Independence is much stronger than zero correlation}
+
+$X$ and $Y$ are \emph{independent} when $p(x,y) = p(x)\,p(y)$, i.e.\ conditioning is uninformative: $p(y \mid x) = p(y)$. Independence implies $\Cov(X,Y) = 0$, but the converse fails, and the standard counterexample is the one that matters in finance. Take $X$ symmetric about zero and $Y = X^2$: then $\Cov(X, X^2) = \E[X^3] = 0$, yet $Y$ is a deterministic function of $X$. Correlation only sees \emph{linear} association.
+
+\begin{finbox}
+Daily returns are nearly uncorrelated with their own past --- that is the efficient-markets core that makes return prediction hard. But \emph{squared} and \emph{absolute} returns are strongly autocorrelated for months: volatility arrives in clusters. So returns are uncorrelated over time yet emphatically \emph{not} independent over time. A model class that assumes i.i.d.\ returns is wrong in exactly the way that matters for regime modeling, and the entire premise of the NEC thesis --- that there are persistent market states worth routing on --- lives in this gap between ``uncorrelated'' and ``independent.'' Section~\ref{sec:tails} quantifies this.
+\end{finbox}
+
+\subsection{Sample analogues, and rank statistics}
+
+Every population quantity above has a sample analogue: the sample mean $\bar{x} = \tfrac1n \sum_i x_i$, sample variance, sample covariance, sample correlation. Two points that recur all semester. First, a sample statistic is itself a random variable --- recompute it on a different sample and you get a different number; its distribution is called a \emph{sampling distribution}, and Section~\ref{sec:estimation} is about exactly that. Second, the \emph{Pearson} sample correlation is the sample analogue of $\Corr$ above and inherits its weakness: it measures linear association and a single extreme observation can move it arbitrarily.
+
+The \emph{Spearman rank correlation} replaces each observation by its rank within the sample and computes Pearson correlation on the ranks. It is invariant to any monotone transformation of either variable and is therefore immune to outliers in level. This is not a side remark:
+
+\begin{necbox}
+The headline evaluation metric of the entire pipeline --- the one the OP pipeline computes and the one your thesis will report --- is the daily cross-sectional \emph{rank information coefficient}: for each date $t$, the Spearman correlation across assets between predicted and realized future returns. The reason it is the Spearman and not the Pearson correlation is the content of Section~\ref{sec:tails}: realized returns are heavy-tailed, and a Pearson IC on a day containing one $-40\%$ earnings blowup measures the blowup, not your model. Rank-IC is the first of several places where the right statistical choice in finance is the one that is robust to tails.
+\end{necbox}
+
+% =====================================================================
+\section{Conditioning: the heart of prediction}\label{sec:cond}
+% =====================================================================
+
+\subsection{Conditional probability and Bayes' rule}
+
+The product rule \eqref{eq:productrule} defines conditional probability; read symmetrically ($p(x,y) = p(x \mid y)p(y)$ as well) and rearranged, it yields
+\begin{equation}
+p(y \mid x) \;=\; \frac{p(x \mid y)\, p(y)}{p(x)},
+\qquad p(x) = \int p(x \mid y)\,p(y)\,dy,
+\label{eq:bayes}
+\end{equation}
+which is Bayes' rule, with the denominator supplied by the sum rule. The interpretive reading: $p(y)$ is what you believed before seeing $x$ (\emph{prior}), $p(x \mid y)$ is how well each candidate $y$ explains the observation (\emph{likelihood}), and $p(y \mid x)$ is the updated belief (\emph{posterior}). Bayes' rule is an accounting identity --- the content is always in what you choose to condition on.
+
+\begin{example}[The calculation everyone gets wrong]\label{ex:regimebayes}
+Suppose crash months occur with probability $P(C) = 0.05$, and a volatility signal fires with probability $0.9$ in a crash month but $0.15$ otherwise. The signal fires. Then
+\[
+P(C \mid \text{fire}) = \frac{0.9 \times 0.05}{0.9 \times 0.05 + 0.15 \times 0.95} \approx 0.24 .
+\]
+A ``90\% accurate'' crash signal that fires leaves you at 24\% crash probability, because crashes are rare and the false-fire mass $0.15 \times 0.95$ is three times the true-fire mass. Base rates dominate accuracy whenever the event is rare. Every claim of regime detection in your thesis must survive this arithmetic.
+\end{example}
+
+\begin{necbox}
+Bayes' rule \eqref{eq:bayes} is, verbatim, the formula for mixture-model \emph{responsibilities}. In a mixture with latent expert label $z$ and gate prior $\pi_k(\x) = p(z = k \mid \x)$, the posterior probability that expert $k$ generated the observed outcome $y$ is
+\[
+r_k \;=\; p(z = k \mid \x, y) \;=\; \frac{\pi_k(\x)\, p(y \mid \x, z = k)}{\sum_{j=1}^{K} \pi_j(\x)\, p(y \mid \x, z = j)} .
+\]
+When you reach EM in Module 8, the ``E step'' is this equation and nothing more. Section~\ref{sec:moe} uses it to show what gradient the gate receives.
+\end{necbox}
+
+\subsection{Conditional expectation and the regression function}
+
+For random variables, conditioning on $X = x$ produces the conditional density $p(y \mid x) = p(x,y)/p(x)$, and the \emph{conditional expectation}
+\begin{equation}
+\E[Y \mid X = x] \;=\; \int y\, p(y \mid x)\, dy,
+\end{equation}
+which, viewed as a function of $x$, is called the \emph{regression function}. Two structural facts about it do constant work.
+
+\begin{lemma}[Tower property]\label{lem:tower}
+$\E\big[\,\E[Y \mid X]\,\big] = \E[Y]$.
+\end{lemma}
+\begin{proof}
+$\E[\E[Y\mid X]] = \int \!\big(\!\int y\, p(y \mid x)\, dy\big) p(x)\, dx = \iint y\, p(x,y)\, dy\, dx = \E[Y]$, using the product rule and Fubini.
+\end{proof}
+
+\begin{proposition}[Law of total variance]\label{prop:totalvar}
+$\Var(Y) = \E\big[\Var(Y \mid X)\big] + \Var\big(\E[Y \mid X]\big)$.
+\end{proposition}
+\begin{proof}
+Expand $\Var(Y) = \E[Y^2] - (\E Y)^2$, apply the tower property to both terms, and regroup: $\E[Y^2] = \E[\E[Y^2 \mid X]] = \E[\Var(Y\mid X) + \E[Y\mid X]^2]$, then subtract $(\E[\E[Y \mid X]])^2$.
+\end{proof}
+
+Proposition~\ref{prop:totalvar} splits outcome variance into \emph{within-state} noise and \emph{between-state} signal. It is worth internalizing as the budget constraint of your field.
+
+\begin{finbox}
+For daily or weekly stock returns, the predictable component $\Var(\E[Y \mid X])$ is a sliver: out-of-sample $R^2$ values in serious cross-sectional return prediction are on the order of a fraction of a percent, and a daily rank-IC of $0.03$--$0.05$ is considered respectable. The overwhelming share of $\Var(Y)$ sits in $\E[\Var(Y \mid X)]$ and no model, however deep, can move it. This is why the field obsesses over evaluation discipline (Module 5): when true signal is 1\% of variance, an evaluation leak of 1\% looks like a doubling of skill. Calibrate your expectations now and you will read every backtest in the literature differently.
+\end{finbox}
+
+\subsection{What ``optimal prediction'' means: loss functions choose the target}
+
+Suppose you must announce a single number $f(x)$ as your prediction of $Y$ when $X = x$, and you are scored by a loss $L(y, f(x))$. Different losses make different functionals of $p(y \mid x)$ optimal --- the loss is not a numerical detail, it defines \emph{what your model is estimating}.
+
+\begin{theorem}[The regression function is $L_2$-optimal]\label{thm:l2opt}
+Among all functions $f$, the expected squared error $\E\big[(Y - f(X))^2\big]$ is minimized by $f^*(x) = \E[Y \mid X = x]$.
+\end{theorem}
+\begin{proof}
+Condition on $X = x$ and add and subtract $f^*(x)$:
+\[
+\E\big[(Y - f(x))^2 \mid X = x\big]
+= \underbrace{\E\big[(Y - f^*(x))^2 \mid X = x\big]}_{\text{independent of } f}
++ \big(f^*(x) - f(x)\big)^2,
+\]
+because the cross term $2\big(f^*(x) - f(x)\big)\,\E\big[Y - f^*(x) \mid X = x\big]$ vanishes by definition of $f^*$. The second term is nonnegative and zero iff $f(x) = f^*(x)$; taking $\E_X$ finishes the claim.
+\end{proof}
+
+The same two-line argument with other losses gives the rest of the dictionary: absolute loss $|y - f(x)|$ is minimized by the conditional \emph{median}; 0--1 loss on a class label is minimized by the \emph{mode} of the posterior, $\hat{G}(x) = \argmax_k p(G = k \mid x)$, the \emph{Bayes classifier}, whose error rate (the \emph{Bayes rate}) is the irreducible floor for classification. ESL \S2.4 is the canonical source for this circle of ideas.
+
+Three consequences worth pinning down. First, when you train a network with mean-squared error on 5-day returns, you have decided that the model's job is to approximate $\E[\text{return} \mid \text{features}]$ --- the conditional mean, not the median, not a quantile. With heavy-tailed $Y$ (Section~\ref{sec:tails}) the mean and median of $p(y\mid x)$ can differ materially, and squared loss makes your fit sensitive to tail events; this is a choice, and you should know you are making it. Second, supervised learning in one sentence: \emph{the regression function $\E[Y \mid X]$ is the unknowable target; a model class plus an estimation procedure is a way of approximating it from a finite sample}. Everything in Modules 4--7 is a different tradeoff in that approximation. Third, $k$-nearest neighbors is the most literal possible implementation --- average the $y$'s whose $x$'s are near $x_0$ --- and ESL Chapter 2's central drama is that this fails in high dimensions (Section~\ref{sec:epe}), forcing structured models on us.
+
+% =====================================================================
+\section{Gaussians, multivariate Gaussians, and conditioning}\label{sec:gauss}
+% =====================================================================
+
+\subsection{The univariate Gaussian}
+
+\begin{equation}
+\Normal(x \mid \mu, \sigma^2) = \frac{1}{\sqrt{2\pi\sigma^2}} \exp\!\Big(\!-\frac{(x-\mu)^2}{2\sigma^2}\Big),
+\qquad \E[X] = \mu,\quad \Var(X) = \sigma^2 .
+\end{equation}
+If $X \sim \Normal(\mu,\sigma^2)$ then $(X-\mu)/\sigma \sim \Normal(0,1)$: every Gaussian is one affine map from the standard one, so all Gaussian tail facts come from one table. Two reference numbers to memorize for later tail comparisons: $P(|Z| > 2) \approx 0.046$ and $P(|Z| > 3) \approx 0.0027$ for standard Gaussian $Z$.
+
+Why does this one density own half of statistics? Three reasons, each proved or used in this chapter: (i) the central limit theorem makes sums of many small independent effects approximately Gaussian (Section~\ref{sec:estimation}); (ii) among all densities on $\R$ with fixed mean and variance, the Gaussian has maximum entropy --- it is the \emph{least committed} assumption given two moments (Section~\ref{sec:info}, Exercise~\ref{ex:maxent}); (iii) the family is closed under everything you want to do --- linear maps, sums of independent copies, marginals, and conditionals of Gaussians are Gaussian --- so calculations stay inside the family. Reason (iii) is the workhorse; this section develops it in $p$ dimensions.
+
+\subsection{The multivariate Gaussian and its geometry}
+
+A \emph{multivariate Gaussian} (or multivariate normal) is the joint distribution of a vector $\x = (x_1, \dots, x_p)$ whose coordinates are each Gaussian and may be \emph{correlated} with one another. It is pinned down by exactly two objects. The first is the \emph{mean vector} $\bmu \in \R^p$, which simply collects the coordinatewise means, $\mu_i = \E[x_i]$. The second is the \emph{covariance matrix} $\bSigma \in \R^{p \times p}$, whose entries are all the pairwise covariances, $\Sigma_{ij} = \Cov(x_i, x_j)$: its diagonal holds the individual variances $\Sigma_{ii} = \Var(x_i)$, and its off-diagonal entries hold the covariances that couple the coordinates --- and those off-diagonal terms are the only thing separating a genuine multivariate Gaussian from $p$ unrelated one-dimensional bell curves. The matrix $\bSigma$ is always symmetric ($\Sigma_{ij} = \Sigma_{ji}$, since $\Cov$ is), and we take it \emph{positive definite}, written $\bSigma \succ 0$ --- the precise statement that every direction in space carries strictly positive variance, which is exactly what guarantees the inverse $\bSigma^{-1}$ exists and the density below makes sense. With these two objects the density of $\x \in \R^p$ is
+\begin{equation}
+\Normal(\x \mid \bmu, \bSigma)
+= \frac{1}{(2\pi)^{p/2} |\bSigma|^{1/2}}
+\exp\!\Big(\!-\tfrac12 (\x - \bmu)^\T \bSigma^{-1} (\x - \bmu)\Big),
+\label{eq:mvn}
+\end{equation}
+with the determinant $|\bSigma|$ and the inverse $\bSigma^{-1}$ doing the jobs that $\sigma^2$ does in one dimension.
+
+It pays to read \eqref{eq:mvn} as the term-by-term generalization of the one-dimensional bell curve. In one dimension the exponent is $-\tfrac12 (x - \mu)^2 / \sigma^2$: the squared distance from the mean, measured in units of variance. In $p$ dimensions that squared, variance-scaled distance becomes the quadratic form
+\begin{equation}
+\Delta^2 = (\x - \bmu)^\T \bSigma^{-1} (\x - \bmu),
+\end{equation}
+called the squared \emph{Mahalanobis distance}. Where ordinary Euclidean distance treats every direction alike, the Mahalanobis distance uses $\bSigma^{-1}$ to rescale each direction by its variance and to ``untilt'' correlated directions, so that one unit always means one standard deviation along whatever combination of coordinates you move. The density depends on $\x$ \emph{only} through this one number, so points at equal Mahalanobis distance from $\bmu$ are equally likely; the prefactor $1/\big((2\pi)^{p/2} |\bSigma|^{1/2}\big)$ is merely the constant that makes the whole thing integrate to one.
+
+Geometrically, the surfaces of constant probability $\Delta^2 = c$ are ellipsoids centered at $\bmu$. In two dimensions they are ellipses: a circle when the coordinates are uncorrelated with equal variance, an axis-aligned ellipse when uncorrelated with unequal variances, and a \emph{tilted} ellipse once they are correlated --- the tilt is the correlation made visible. To expose the axes, diagonalize the covariance by the spectral theorem (Foundations A), $\bSigma = \bm{U}\bm{\Lambda}\bm{U}^\T$, with orthonormal eigenvectors $\bm{u}_j$ and eigenvalues $\lambda_j > 0$: the ellipsoid's principal axes point along the $\bm{u}_j$, with half-lengths proportional to $\sqrt{\lambda_j}$. Changing coordinates to $y_j = \bm{u}_j^\T(\x - \bmu)/\sqrt{\lambda_j}$ --- rotating onto those axes and rescaling each to unit variance, an operation called \emph{whitening} --- collapses the distribution to the standard one, $\bm{y} \sim \Normal(\bm{0}, \bm{I})$, a plain spherical ball. A multivariate Gaussian is therefore nothing more exotic than a standard Gaussian ball stretched along its eigen-axes, rotated, and shifted to $\bmu$; this is the very eigen-geometry of PCA, which just reads these axes off $\bSigma$.
+
+Finally, three \emph{closure properties} we will lean on constantly --- each saying the Gaussian family survives an operation we need. (i) An affine map of a Gaussian is Gaussian: if $\x \sim \Normal(\bmu, \bSigma)$ then $\bm{A}\x + \bm{b} \sim \Normal(\bm{A}\bmu + \bm{b},\, \bm{A}\bSigma\bm{A}^\T)$ --- the rule we just used to whiten, and the rule by which linear models pass Gaussian noise through to their outputs. (ii) A sum of independent Gaussian vectors is Gaussian, with means and covariances adding. (iii) Any subvector of $\x$ is itself Gaussian, with mean and covariance read off as the corresponding block of $\bmu$ and $\bSigma$ --- so discarding some coordinates and keeping the rest (\emph{marginalizing}) costs nothing and never leaves the family. Property (iii) is the easy half of splitting a Gaussian into two groups of coordinates; the hard and far more useful half --- \emph{conditioning} one group on the other --- is the next subsection, and the engine of all Gaussian prediction.
+
+\subsection{Conditioning a Gaussian: the Schur complement formula}\label{sec:gausscond}
+
+This subsection answers the most useful question one can ask of a joint distribution, and the question all prediction is built on: \emph{having observed part of a Gaussian vector, what should you now believe about the rest?} You measure today's market and factor returns; what is your updated distribution for a particular stock's return? For Gaussians the answer is exact, closed-form, and --- the punchline --- a \emph{linear} function of what you observed, with an uncertainty you can compute in advance. That single fact is why linear regression, the Kalman filter, and Gaussian-process regression all exist: each is this one formula in a different costume.
+
+Split the vector into the part to be predicted and the part to be observed. Write $\x = (\x_1, \x_2)$, which simply stacks the sub-vector $\x_1$ (unknown, to be predicted) on top of $\x_2$ (observed). Because $\x_1$ and $\x_2$ are just two groups of coordinates of the same Gaussian $\x$, the mean and covariance split along the very same line into \emph{blocks},
+\[
+\bmu = \begin{pmatrix} \bmu_1 \\ \bmu_2 \end{pmatrix},
+\qquad
+\bSigma = \begin{pmatrix} \bSigma_{11} & \bSigma_{12} \\ \bSigma_{21} & \bSigma_{22} \end{pmatrix},
+\]
+where $\bmu_1 = \E[\x_1]$ and $\bmu_2 = \E[\x_2]$ are the two sub-means, the diagonal blocks $\bSigma_{11} = \Cov(\x_1)$ and $\bSigma_{22} = \Cov(\x_2)$ are the covariances \emph{within} each group, and the off-diagonal block $\bSigma_{12} = \Cov(\x_1, \x_2)$ (with $\bSigma_{21} = \bSigma_{12}^\T$) is the cross-covariance carrying \emph{all} the information one group holds about the other. If $\bSigma_{12} = \bm{0}$ the two groups are independent and observing $\x_2$ teaches you nothing about $\x_1$; everything useful below is squeezed out of $\bSigma_{12}$.
+
+\emph{The bivariate case, worked in full.} Before the matrix statement, do the smallest example completely --- two scalars --- because the general formula is exactly this calculation with the symbols promoted to blocks. Let $x_1, x_2$ be jointly Gaussian with means $\mu_1, \mu_2$, variances $\sigma_1^2, \sigma_2^2$, and correlation $\rho$, so $\Cov(x_1, x_2) = \rho\sigma_1\sigma_2$ and
+\[
+\bSigma = \begin{pmatrix} \sigma_1^2 & \rho\sigma_1\sigma_2 \\ \rho\sigma_1\sigma_2 & \sigma_2^2 \end{pmatrix},
+\qquad
+\bSigma^{-1} = \frac{1}{1-\rho^2}\begin{pmatrix} 1/\sigma_1^2 & -\rho/(\sigma_1\sigma_2) \\ -\rho/(\sigma_1\sigma_2) & 1/\sigma_2^2 \end{pmatrix}
+\]
+(the inverse is the standard $2\times 2$ formula; you can confirm $\bSigma\bSigma^{-1} = \bm{I}$ by hand). To condition on a measured value of $x_2$, use Bayes' rule as $p(x_1 \mid x_2) = p(x_1, x_2)/p(x_2) \propto p(x_1, x_2)$, where ``$\propto$'' means we hold $x_2$ fixed and track only the dependence on $x_1$ --- the denominator $p(x_2)$ is a constant in $x_1$ that the final normalization restores. Writing $u_i = x_i - \mu_i$, the joint exponent is
+\[
+-\tfrac12 (\x - \bmu)^\T \bSigma^{-1} (\x - \bmu)
+= -\frac{1}{2(1-\rho^2)}\left[ \frac{u_1^2}{\sigma_1^2} - \frac{2\rho\, u_1 u_2}{\sigma_1\sigma_2} + \frac{u_2^2}{\sigma_2^2} \right].
+\]
+Keep only the terms that contain $x_1$ (that is, $u_1$); everything else is part of the constant. What survives is a quadratic in $u_1$ of the shape $-\tfrac12\big(A\,u_1^2 - 2B\,u_1\big)$, and here is the one fact that makes Gaussians so easy to manipulate: \emph{any} density proportional to $\exp\!\big(\!-\tfrac12(A u_1^2 - 2B u_1)\big)$ is again Gaussian in $x_1$, with variance $1/A$ and mean (in $u_1$) equal to $B/A$. This is just completing the square, $A u_1^2 - 2B u_1 = A\,(u_1 - B/A)^2 - B^2/A$, which displays a bell curve centered at $u_1 = B/A$ whose ``$1/\sigma^2$'' is $A$. Reading the coefficients off the bracket,
+\[
+A = \frac{1}{(1-\rho^2)\,\sigma_1^2}, \qquad
+B = \frac{\rho\, u_2}{(1-\rho^2)\,\sigma_1\sigma_2},
+\]
+gives the two conditional quantities separately:
+\begin{align*}
+\Var(x_1 \mid x_2)
+&= A^{-1}
+= (1-\rho^2)\,\sigma_1^2,\\
+\E[x_1 \mid x_2]
+&= \mu_1 + B/A
+= \mu_1 + \rho\,(\sigma_1/\sigma_2)(x_2 - \mu_2).
+\end{align*}
+Every feature of the general theorem is already in these two answers. The conditional mean leaves the prior mean $\mu_1$ and moves \emph{linearly} in the observed deviation $x_2 - \mu_2$, with slope $\rho\,\sigma_1/\sigma_2$, which is precisely $\Cov(x_1, x_2)/\Var(x_2)$ --- the slope of the least-squares regression of $x_1$ on $x_2$. The conditional variance $(1-\rho^2)\sigma_1^2$ is never larger than the prior variance $\sigma_1^2$ (observing something can only narrow uncertainty), shrinks to $0$ as $|\rho| \to 1$ (perfect correlation means $x_2$ pins $x_1$ down exactly), and --- the part most people find surprising --- does not depend on \emph{which} value of $x_2$ you happened to observe.
+
+\emph{The general statement.} The vector case is the identical calculation with the scalars promoted to blocks.
+
+\begin{theorem}[Gaussian conditional]\label{thm:gausscond}
+$p(\x_1 \mid \x_2)$ is Gaussian with
+\begin{align}
+\E[\x_1 \mid \x_2] &= \bmu_1 + \bSigma_{12}\bSigma_{22}^{-1}(\x_2 - \bmu_2),
+\label{eq:condmean}\\
+\Cov(\x_1 \mid \x_2) &= \bSigma_{11} - \bSigma_{12}\bSigma_{22}^{-1}\bSigma_{21}
+\;=\vcentcolon\; \bSigma / \bSigma_{22}
+\quad\text{(the Schur complement)}.
+\label{eq:condcov}
+\end{align}
+\end{theorem}
+
+Hold this against the bivariate answers and the symbols line up exactly. The matrix slope $\bSigma_{12}\bSigma_{22}^{-1}$ is the block form of $\rho\sigma_1/\sigma_2 = \Cov/\Var$. The conditional covariance $\bSigma_{11} - \bSigma_{12}\bSigma_{22}^{-1}\bSigma_{21}$ is the block form of $\sigma_1^2 - (\rho\sigma_1\sigma_2)^2/\sigma_2^2 = (1-\rho^2)\sigma_1^2$ --- the prior covariance $\bSigma_{11}$ minus the part of it that $\x_2$ can explain, $\bSigma_{12}\bSigma_{22}^{-1}\bSigma_{21}$. That ``covariance left over after subtracting what $\x_2$ explains'' is important enough across mathematics to carry its own name: the \emph{Schur complement} of $\bSigma_{22}$ in $\bSigma$, written $\bSigma/\bSigma_{22}$.
+
+\emph{Why the formula is what it is.} To prove the theorem in general you repeat the bivariate completing-the-square with blocks, and the cleanest bookkeeping uses the \emph{precision matrix} $\bm{\Lambda} = \bSigma^{-1}$ --- the matrix that actually appears in the exponent --- partitioned conformally with $\bSigma$ into blocks $\bm{\Lambda}_{ij}$. Expanding the joint exponent $-\tfrac12 (\x - \bmu)^\T \bm{\Lambda} (\x - \bmu)$ and collecting the terms in $\x_1$, the coefficient of the $\x_1$-quadratic is the block $\bm{\Lambda}_{11}$. By the same complete-the-square logic as the scalar case --- now ``$1/A$'' becomes the matrix inverse ``$\bm{\Lambda}_{11}^{-1}$'' --- the conditional is Gaussian with
+\begin{align*}
+\Cov(\x_1 \mid \x_2)
+&= \bm{\Lambda}_{11}^{-1},\\
+\E[\x_1 \mid \x_2]
+&= \bmu_1 - \bm{\Lambda}_{11}^{-1}\bm{\Lambda}_{12}(\x_2 - \bmu_2).
+\end{align*}
+These match the theorem once you know how the blocks of $\bm{\Lambda} = \bSigma^{-1}$ relate to the blocks of $\bSigma$ --- the one piece of matrix algebra the derivation needs:
+
+\begin{lemma}[Partitioned inverse]\label{lem:blockinv}
+With $\bSigma$ and $\bm{\Lambda} = \bSigma^{-1}$ partitioned conformally as above, and $\bSigma/\bSigma_{22} \coloneqq \bSigma_{11} - \bSigma_{12}\bSigma_{22}^{-1}\bSigma_{21}$ the Schur complement,
+\begin{equation}
+\bm{\Lambda}_{11} = \big(\bSigma/\bSigma_{22}\big)^{-1},
+\qquad
+\bm{\Lambda}_{12} = -\big(\bSigma/\bSigma_{22}\big)^{-1} \bSigma_{12}\bSigma_{22}^{-1} .
+\label{eq:blockinv}
+\end{equation}
+\end{lemma}
+
+There is nothing mysterious in the lemma: \eqref{eq:blockinv} is what you get by solving $\bSigma\bm{\Lambda} = \bm{I}$ one block-row at a time --- \emph{block Gaussian elimination}, ordinary Gaussian elimination with scalar entries replaced by matrix blocks. Eliminating the second block-row to solve for the first forces the Schur complement $\bSigma/\bSigma_{22}$ to appear as the ``effective'' top-left matrix, the same way integrating out one subsystem of a coupled problem leaves behind an effective description of what remains (a physicist's effective Hamiltonian). Granting the lemma, the two precision-block answers turn into the theorem at sight: $\bm{\Lambda}_{11}^{-1} = \bSigma/\bSigma_{22}$ is the conditional covariance \eqref{eq:condcov}, and $-\bm{\Lambda}_{11}^{-1}\bm{\Lambda}_{12} = \bSigma_{12}\bSigma_{22}^{-1}$ is the slope in the conditional mean \eqref{eq:condmean}. Carrying out this block elimination in full is part (a) of Exercise~\ref{ex:schur} --- and the chapter has now supplied every step it uses, instead of pointing you at Bishop for the gap.
+
+Read \eqref{eq:condmean}--\eqref{eq:condcov} as statements about prediction, because that is what they are. The conditional mean is \emph{linear} in the observed $\x_2$ --- for jointly Gaussian variables, the best possible predictor (Theorem~\ref{thm:l2opt}) is a linear function, which is the deep reason linear regression is the natural first model and why it is exactly optimal in a Gaussian world. The slope $\bSigma_{12}\bSigma_{22}^{-1}$ is the matrix generalization of $\beta = \Cov(Y,X)/\Var(X)$ --- in the scalar case with $X_2$ the market return and $X_1$ a stock return, \eqref{eq:condmean} \emph{is} the market beta regression. And the conditional covariance \eqref{eq:condcov} does not depend on the observed value $\x_2$ at all: in a Gaussian world, observing data shrinks your uncertainty by a precomputable amount no matter what the data say. That convenient property fails for heavy-tailed joints --- one more way Gaussianity is special, not generic.
+
+\begin{remark}
+Equations \eqref{eq:condmean}--\eqref{eq:condcov} are the single most reused formula block in this syllabus's wider neighborhood: they are the update step of the Kalman filter, the predictive equations of Gaussian-process regression, and the conditional step inside probabilistic PCA (Foundations A) and Gaussian mixture experts (Module 8). The syllabus flags them as ``appears constantly''; treat Exercise~\ref{ex:schur} as non-optional.
+\end{remark}
+
+\subsection{Bernoulli and categorical: the gate's distributions}
+
+Two discrete distributions complete the toolkit. The \emph{Bernoulli}: $X \in \{0,1\}$, $P(X=1) = \theta$, $\E X = \theta$, $\Var X = \theta(1-\theta)$. The \emph{categorical}: $z \in \{1,\dots,K\}$ with probabilities $\bm{\pi} = (\pi_1,\dots,\pi_K)$, $\sum_k \pi_k = 1$, conveniently encoded one-hot. This is the full extent of Bishop \S2.1--2.2 that the thesis needs: a gating network's output $\bm{\pi}(\x)$ is precisely a categorical distribution over experts, conditioned on features. The beta/Dirichlet conjugate priors Bishop develops for these distributions are the part we cut; if you ever put priors on gate parameters you know where to find them.
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[Syllabus: Gaussian conditional / Schur complement]\label{ex:schur}
+\prioCore
+Let $\x = (\x_1, \x_2) \sim \Normal(\bmu, \bSigma)$ with the block partition of Section~\ref{sec:gausscond}.
+(a) Prove the partitioned-inverse identities \eqref{eq:blockinv} of Lemma~\ref{lem:blockinv} by solving $\bSigma \bm{\Lambda} = \bm{I}$ block by block (block Gaussian elimination, Foundations A).
+(b) Using them, derive the conditional distribution $p(\x_1 \mid \x_2)$ in closed form, establishing Theorem~\ref{thm:gausscond}: fix $\x_2$ in the joint log-density, which is quadratic in $\x_1$; complete the square; match second-order coefficients to get the conditional covariance \eqref{eq:condcov} and first-order coefficients to get the conditional mean \eqref{eq:condmean}.
+(c) Specialize to the bivariate scalar case and confirm you recover the regression slope $\rho \sigma_1/\sigma_2$ and conditional variance $\sigma_1^2 (1 - \rho^2)$.
+\end{exercise}
+
+
+% =====================================================================
+\section{Estimation: likelihood, MLE, MAP, and sampling variability}\label{sec:estimation}
+% =====================================================================
+
+\subsection{The likelihood function}
+
+A statistical model is a family of densities $p(x \mid \theta)$ indexed by parameters $\theta$. Given observed data $\mathcal{D} = \{x_1, \dots, x_n\}$ modeled as i.i.d.\ draws, the \emph{likelihood} is the joint density read as a function of $\theta$ with the data fixed:
+\begin{equation}
+L(\theta) = \prod_{i=1}^n p(x_i \mid \theta),
+\qquad
+\ell(\theta) = \log L(\theta) = \sum_{i=1}^n \log p(x_i \mid \theta).
+\end{equation}
+The \emph{maximum likelihood estimator} (MLE) is $\hat\theta = \argmax_\theta \ell(\theta)$: the parameter under which the observed data are least surprising. Logs turn products into sums, which is both numerically essential (a product of 5{,}000 densities underflows) and analytically essential (sums differentiate term by term). Training a neural network by minimizing average loss \emph{is} maximizing a log-likelihood whenever the loss is a negative log-density --- squared loss corresponds to a Gaussian observation model, absolute loss to Laplace, cross-entropy to categorical. This identification is the bridge on which the whole deep-learning part of the syllabus travels, and Section~\ref{sec:info} will sharpen it into ``MLE minimizes KL divergence to the data distribution.''
+
+\subsection{The Gaussian MLE, worked completely}\label{sec:gaussmle}
+
+Let $x_1, \dots, x_n \overset{\text{iid}}{\sim} \Normal(\mu, \sigma^2)$. The log-likelihood is
+\begin{equation}
+\ell(\mu, \sigma^2)
+= -\frac{n}{2}\log(2\pi) - \frac{n}{2}\log \sigma^2 - \frac{1}{2\sigma^2}\sum_{i=1}^n (x_i - \mu)^2 .
+\label{eq:gaussll}
+\end{equation}
+Setting $\partial \ell / \partial \mu = \frac{1}{\sigma^2}\sum_i (x_i - \mu) = 0$ gives
+\begin{equation}
+\hat\mu_{\mathrm{ML}} = \bar{x} = \frac1n \sum_{i=1}^n x_i,
+\end{equation}
+and setting $\partial \ell / \partial(\sigma^2) = -\frac{n}{2\sigma^2} + \frac{1}{2\sigma^4}\sum_i (x_i - \mu)^2 = 0$ at $\mu = \hat\mu_{\mathrm{ML}}$ gives
+\begin{equation}
+\hat\sigma^2_{\mathrm{ML}} = \frac1n \sum_{i=1}^n (x_i - \bar{x})^2 .
+\label{eq:varmle}
+\end{equation}
+(That stationarity-of-$\ell$ computation is Bishop's Exercise 1.11; it is folded into Exercise~\ref{ex:gaussmle} here rather than listed twice.) The sample mean and sample variance are not ad hoc summaries --- they are what maximum likelihood demands of a Gaussian model.
+
+Now the first genuinely statistical phenomenon of the chapter: \eqref{eq:varmle} is \emph{biased}. Because $\bar{x}$ is fitted to the same sample, the residuals $x_i - \bar{x}$ are systematically too small, and one can show (Exercise~\ref{ex:gaussmle}) that
+\begin{equation}
+\E\big[\hat\sigma^2_{\mathrm{ML}}\big] = \frac{n-1}{n}\,\sigma^2 ,
+\end{equation}
+so the unbiased version divides by $n - 1$ (\emph{Bessel's correction}): one degree of freedom was spent estimating the mean. The number $\tfrac{n-1}{n}$ is harmless at $n = 10^4$ and a disaster at $n = 20$ --- and ``effective $n = 20$'' happens constantly in finance, e.g.\ when you estimate anything regime-by-regime and one regime contains three months of data. The general lesson generalizes far beyond Gaussians: \emph{evaluating flexibility on the data that tuned it produces optimism}. Bessel's correction is the smallest instance; Module 5's purged cross-validation is the same lesson at pipeline scale.
+
+For completeness, the standard asymptotic facts about MLEs, stated without proof (any mathematical-statistics text has them; we will use them as facts): under regularity conditions the MLE is \emph{consistent} ($\hat\theta \to \theta$ in probability), \emph{asymptotically normal} with variance shrinking like $1/n$, asymptotically \emph{efficient} (no consistent estimator has smaller asymptotic variance), and \emph{invariant} (the MLE of $g(\theta)$ is $g(\hat\theta)$).
+
+\subsection{MAP estimation: regularization is a prior}\label{sec:map}
+
+Treat $\theta$ itself as random with prior $p(\theta)$, and apply Bayes' rule to the parameters:
+\begin{equation}
+p(\theta \mid \mathcal{D}) \propto p(\mathcal{D} \mid \theta)\, p(\theta).
+\end{equation}
+The \emph{maximum a posteriori} (MAP) estimator maximizes the posterior, equivalently
+\begin{equation}
+\hat\theta_{\mathrm{MAP}}
+= \argmax_\theta \;\big[\, \ell(\theta) + \log p(\theta) \,\big],
+\label{eq:map}
+\end{equation}
+a \emph{penalized} log-likelihood. This one line is the probabilistic identity of regularization. A Gaussian prior $\theta \sim \Normal(0, \tau^2 \bm{I})$ contributes $\log p(\theta) = -\|\theta\|_2^2 / 2\tau^2 + \text{const}$: an $L_2$ penalty, i.e.\ ridge regression / weight decay, with $\lambda \propto \sigma^2/\tau^2$ --- you derived exactly this correspondence as the capstone exercise of Foundations A. A Laplace prior contributes an $L_1$ penalty, i.e.\ the lasso; Module 4 develops that pairing. Tight prior (small $\tau$) means strong shrinkage toward zero; diffuse prior means MAP $\to$ MLE. When you later set weight decay on the NEC networks, you are choosing a prior variance for their parameters --- it is worth knowing that the knob has this meaning, because it tells you what the knob \emph{cannot} fix (a wrong model class) and what it can (variance, Section~\ref{sec:epe}).
+
+\subsection{LLN and CLT: why averages work and at what rate}\label{sec:llnclt}
+
+Two small inequalities give the law of large numbers in three lines. \emph{Markov}: for $X \ge 0$ and $a > 0$, $P(X \ge a) \le \E[X]/a$ (the mean bounds the tail). Applying it to $(X - \mu)^2$ gives \emph{Chebyshev}: $P(|X - \mu| \ge \varepsilon) \le \Var(X)/\varepsilon^2$. Now let $\bar{X}_n$ be the mean of $n$ i.i.d.\ copies with variance $\sigma^2$; by \eqref{eq:linearity} and \eqref{eq:varsum}, $\E[\bar X_n] = \mu$ and $\Var(\bar X_n) = \sigma^2 / n$, so Chebyshev gives, for every $\varepsilon > 0$,
+\begin{equation}
+P\big(|\bar{X}_n - \mu| \ge \varepsilon\big) \;\le\; \frac{\sigma^2}{n \varepsilon^2} \;\longrightarrow\; 0 .
+\end{equation}
+That is the \emph{weak law of large numbers}: sample averages converge to expectations. It is the license behind every ``$\approx$'' between a Monte Carlo average and an integral, and behind reading a mean daily IC as an estimate of true skill.
+
+The \emph{central limit theorem} refines the rate into a shape: if $X_1, \dots, X_n$ are i.i.d.\ with mean $\mu$ and finite variance $\sigma^2$, then
+\begin{equation}
+\frac{\bar X_n - \mu}{\sigma / \sqrt{n}} \;\xrightarrow{\;d\;}\; \Normal(0, 1).
+\end{equation}
+A physicist's reading: a macroscopic fluctuation that is the sum of many independent microscopic shocks is Gaussian regardless of the microphysics --- the same universality that gives Maxwell--Boltzmann velocity components or the Gaussian end-to-end distribution of a long polymer. Three working consequences. (i) \emph{Standard errors}: the uncertainty of a sample mean is $\sigma/\sqrt{n}$; halving error costs quadrupling data. (ii) \emph{$t$-statistics}: $(\bar X_n - \mu_0)/(\hat\sigma/\sqrt{n})$ is approximately standard normal under the null --- and the syllabus's ICIR, $\overline{\mathrm{IC}} \big/ (\hat\sigma_{\mathrm{IC}} / \sqrt{T})$, is exactly this $t$-statistic applied to the daily IC series; that is why ICIR $\gtrsim 2$-ish thresholds get glossed as significance (Module 5 adds the multiple-testing caveats that make that gloss too generous). (iii) \emph{Rate of convergence}: CLT convergence is fast in the center of the distribution and slow in the tails, and the heavier the input tails, the slower the tail convergence (Berry--Esseen-type bounds degrade with the third moment). Daily returns summed into monthly returns do look more Gaussian --- the stylized fact of \emph{aggregational Gaussianity} --- but tail quantiles stay non-Gaussian far longer than central quantiles. Never use the CLT to justify a Gaussian claim about extremes.
+
+\subsection{The bootstrap, and its finance failure mode}\label{sec:bootstrap}
+
+You will constantly need the sampling variability of statistics far messier than a mean --- a Sharpe ratio, a decile-spread return, an ICIR. Closed-form standard errors rarely exist. The \emph{bootstrap} (ESL \S8.2 in spirit; the syllabus places it here) is the plug-in answer: the empirical distribution $\hat{F}$ of the sample stands in for the unknown $F$; since you can draw from $\hat F$ --- resample $n$ points \emph{with replacement} from the data --- you can simulate the sampling distribution. Concretely: for $b = 1, \dots, B$ (say $B = 1000$), resample, recompute the statistic $\hat\theta^{*b}$, and use the spread of $\{\hat\theta^{*b}\}$ as the standard error and quantiles of $\{\hat\theta^{*b}\}$ as a confidence interval. The LLN is what makes $\hat F \to F$, so the bootstrap is the LLN eating its own tail --- and its guarantees are asymptotic in both $n$ and $B$.
+
+The assumption doing all the work: the data are i.i.d., so that independent resampling preserves the joint structure. \emph{Financial time series violate this on purpose.} Returns have volatility clustering (Section~\ref{sec:rv}); i.i.d.\ resampling of a return series scrambles the clusters and produces synthetic histories in which volatility regimes do not exist --- it destroys precisely the structure your thesis is about, and it understates the variance of multi-period statistics because it breaks the dependence that makes drawdowns long. The repair is the \emph{block bootstrap}: resample contiguous blocks (weeks or months) so that local dependence survives inside blocks. Recognize the family resemblance to Module 5's purging and embargoing: in finance, every resampling or splitting scheme must respect temporal dependence, or it hallucinates certainty. This warning is the chapter's single most practical sentence about backtest statistics.
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[Syllabus: Gaussian MLE and Bessel; absorbs Bishop Ex.\ 1.11]\label{ex:gaussmle}
+\prioCore
+For $x_1, \dots, x_n$ i.i.d.\ $\Normal(\mu, \sigma^2)$: (a) by setting the derivatives of the log-likelihood \eqref{eq:gaussll} with respect to $\mu$ and $\sigma^2$ to zero, verify $\hat\mu_{\mathrm{ML}} = \bar{x}$ and $\hat\sigma^2_{\mathrm{ML}} = \tfrac1n\sum_i (x_i - \bar x)^2$, checking second-order conditions. (b) Show that the MLE for the variance is biased:
+$\E\big[\hat\sigma^2_{\mathrm{ML}}\big] = \tfrac{n-1}{n}\sigma^2$. (c) Derive the unbiased (Bessel-corrected) estimator, and explain in one sentence, in degrees-of-freedom language, where the missing $\sigma^2/n$ went.
+\end{exercise}
+
+\begin{exercise}[Supplementary: \S\ref{sec:bootstrap} coverage --- the bootstrap]\label{ex:bootstrap}
+\prioCore
+Let $\hat\theta(x_1,\dots,x_n)$ be a statistic; the bootstrap estimates its sampling distribution by resampling $n$ points \emph{with replacement} $B$ times and recomputing $\hat\theta^{*b}$.
+(a) For the sample mean of i.i.d.\ data, show the ideal ($B\to\infty$) bootstrap variance estimate is $\hat\sigma^2/n$ with $\hat\sigma^2 = \tfrac1n\sum_i (x_i - \bar x)^2$ --- so the bootstrap reproduces the textbook standard error, the LLN of \S\ref{sec:llnclt} being what guarantees $\hat F \to F$.
+(b) Now let $x_t$ be a stationary series with autocovariances $\gamma_k = \Cov(x_t, x_{t+k})$. Using the variance-of-a-sum rule \eqref{eq:varsum} (extended to $n$ terms), show
+\[
+\Var(\bar x) = \frac1n\Big(\gamma_0 + 2\sum_{k=1}^{n-1}\big(1 - \tfrac{k}{n}\big)\gamma_k\Big),
+\]
+whereas i.i.d.\ resampling estimates only the $\gamma_0/n$ term. Conclude that for positively autocorrelated data the naive bootstrap \emph{understates} the standard error, and show that for $\gamma_k = \gamma_0\,\rho^{|k|}$ the true-to-naive SE ratio tends to $\sqrt{(1+\rho)/(1-\rho)}$ as $n\to\infty$ \emph{(hint: the geometric long-run variance is $\sum_{k=-\infty}^{\infty}\gamma_k = \gamma_0\tfrac{1+\rho}{1-\rho}$)}.
+(c) State the \emph{block bootstrap} repair --- resample contiguous blocks of length $\ell$ --- and explain in one sentence each how $\ell$ should scale with the dependence horizon and why this is the same discipline as Module 5's purging/embargoing: in finance, every resampling scheme must respect temporal dependence or it hallucinates certainty.
+\end{exercise}
+
+
+% =====================================================================
+\section{The anatomy of prediction error}\label{sec:epe}
+% =====================================================================
+
+\subsection{The bias--variance decomposition}
+
+Fix a test point $x_0$ and suppose the world generates $y = f(x_0) + \varepsilon$ with $\E[\varepsilon] = 0$, $\Var(\varepsilon) = \sigma^2$, and $\varepsilon$ independent of the training sample. Your fitted model $\hat f$ was trained on a random training set $\mathcal{T}$, so $\hat f(x_0)$ is a random variable across hypothetical re-draws of $\mathcal{T}$. The expected prediction error at $x_0$ decomposes \emph{exactly} as
+\begin{equation}
+\E\big[(y - \hat f(x_0))^2\big]
+\;=\;
+\underbrace{\sigma^2}_{\text{irreducible}}
+\;+\;
+\underbrace{\big(\E[\hat f(x_0)] - f(x_0)\big)^2}_{\text{squared bias}}
+\;+\;
+\underbrace{\Var\big(\hat f(x_0)\big)}_{\text{variance}} .
+\label{eq:biasvar}
+\end{equation}
+The derivation is the same add-and-subtract trick as Theorem~\ref{thm:l2opt}, applied twice --- once to split off $\varepsilon$, once to split $\hat f(x_0)$ around its own mean $\E[\hat f(x_0)]$ --- with both cross terms vanishing because $\varepsilon$ is independent noise and a centered variable has mean zero. You will carry it out, checking that the cross terms really die, in Exercise~\ref{ex:biasvar}; ESL's Exercise on the OLS special case (our Exercise~\ref{ex:esl25}) then puts concrete matrices into each slot.
+
+Read the three terms as a budget. \emph{Irreducible error} is Proposition~\ref{prop:totalvar}'s within-state variance --- for returns, almost everything; no model touches it. \emph{Bias} is the systematic gap between the average fit and truth: the price of a restricted model class (a linear model fitting a curved $f$) or of deliberate shrinkage (ridge pulling coefficients toward zero). \emph{Variance} is the wobble of the fit across alternative training samples: the price of flexibility. Flexible models buy low bias at the cost of high variance; rigid models the reverse. The optimal complexity is interior, and \emph{it moves with the signal-to-noise ratio}: when $\sigma^2$ is enormous relative to the variation in $f$ --- the financial regime --- the variance term dominates the tradeoff, and heavily constrained, heavily regularized models win even though their bias is real. This is the statistical one-line explanation for why ridge-style shrinkage and modest architectures are endemic in quant work, and why your thesis baselines must include boring linear models that are hard to beat.
+
+\begin{necbox}
+The decomposition also frames the MoE design question. A single global model fit to all regimes has \emph{bias} in every regime (one function forced to average over heterogeneous states); per-regime experts cut that bias but each sees less data, inflating \emph{variance} --- the Bessel lesson of Section~\ref{sec:gaussmle} at model scale. Soft gating with shared backbones is one way to buy regime-conditional flexibility without paying full per-regime variance. When in Module 8+ you compare $K = 2, 3, 5$ experts, you are walking along \eqref{eq:biasvar}.
+\end{necbox}
+
+\subsection{Local methods and the curse of dimensionality}
+
+Theorem~\ref{thm:l2opt} suggests a model-free algorithm: estimate $\E[Y \mid X = x_0]$ by averaging the $y_i$ of the $k$ training points nearest $x_0$ ($k$-NN). In low dimensions with plenty of data this is hard to beat, and the bias--variance dial is $k$ itself: small $k$, low bias, high variance; large $k$, the reverse. ESL \S2.3 stages the famous comparison between $k$-NN and linear regression as the two poles of the complexity spectrum --- one assumes nothing and pays in variance; the other assumes a global linear form and pays in bias.
+
+In high dimensions, locality itself fails, in several mutually reinforcing ways (ESL \S2.5, Bishop \S1.4 --- merged here, since they tell one story):
+
+\begin{enumerate}[leftmargin=2em,itemsep=0.2em]
+\item \emph{Neighborhoods stop being local.} For data uniform in the unit cube $[0,1]^p$, a hypercubical neighborhood capturing fraction $r$ of the data needs edge length $r^{1/p}$: in $p = 10$ dimensions, capturing just 1\% of the data requires covering $0.01^{1/10} \approx 63\%$ of the range of \emph{every} coordinate. ``Nearest'' neighbors are not near; averaging over them is not conditioning on $x \approx x_0$.
+\item \emph{All the data sit at the boundary.} For $N$ points uniform in the unit ball in $\R^p$, the median distance from the origin to the \emph{closest} point is $d(p, N) = \big(1 - (1/2)^{1/N}\big)^{1/p}$ --- you will derive this in Exercise~\ref{ex:esl23}. For $N = 500$, $p = 10$: $d \approx 0.52$, more than halfway to the boundary. Prediction at a typical point is extrapolation, not interpolation.
+\item \emph{Distances concentrate.} For independent points in high dimension, pairwise distances bunch around their mean: the ratio of the standard deviation of $\|X - Y\|$ to its mean shrinks like $1/\sqrt{d}$ (Exercise~\ref{ex:concentration}). When all distances are nearly equal, ``nearest'' carries almost no information, and distance-based methods lose their discriminating power.
+\end{enumerate}
+
+The escape is structure: assume something global about $f$ --- linearity, additivity, smoothness in a learned representation --- and pool data across the whole space instead of relying on local crowds. ESL's calculation (its eq.\ 2.27--2.28, our Exercise~\ref{ex:esl25}) makes the payoff quantitative: for a correctly specified linear model the expected prediction error grows only like $\sigma^2 (p/N) + \sigma^2$ --- \emph{linearly} in dimension, versus the exponential data demand of local methods. Structure, when approximately right, defeats dimensionality; when wrong, it is bias. That tension --- and the spectrum of compromises between pure $k$-NN and pure linearity (penalized fits, kernels, basis expansions, neural networks) --- is ESL \S2.6--2.8 in two sentences, and it is the agenda of Modules 4 and 6.
+
+\begin{finbox}
+A cross-sectional equity model with 30--80 features is solidly in curse territory: no local method can see ``similar stocks on similar days'' in raw feature space. Every working quant model is therefore structured --- linear factor models, gradient-boosted trees with axis-aligned splits, neural networks with learned low-dimensional representations. The OP pipeline's rank-normalization of features each date is also a dimensionality weapon: it forces every feature onto a common scale so that no axis dominates distances or split criteria spuriously.
+\end{finbox}
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[Syllabus: bias--variance decomposition]\label{ex:biasvar}
+\prioCore
+Let $y = f(x) + \varepsilon$ with $\E[\varepsilon] = 0$, $\Var(\varepsilon) = \sigma^2$, $\varepsilon$ independent of the training set $\mathcal{T}$, and let $\hat f$ be any estimator trained on $\mathcal{T}$. Derive the decomposition \eqref{eq:biasvar} of $\E\big[(y - \hat f(x_0))^2\big]$ (expectation over both $\varepsilon$ and $\mathcal{T}$) into irreducible noise, squared bias, and variance, and verify explicitly that both cross terms vanish, stating the exact assumption each vanishing requires.
+\end{exercise}
+
+
+% =====================================================================
+\section{Information theory: entropy, KL divergence, and log-sum-exp}\label{sec:info}
+% =====================================================================
+
+Bishop \S1.6 is the source here; the selection is ruthless because exactly four objects from information theory are load-bearing for the thesis: entropy (gate diagnostics), KL divergence (what training minimizes), cross-entropy (the gate's loss), and log-sum-exp (the shape of every mixture likelihood).
+
+\subsection{Entropy}
+
+The information content of observing an event of probability $p$ is $-\log p$: rare events are informative, certain events are not, and independent surprises add ($-\log p_1 p_2 = -\log p_1 - \log p_2$). The \emph{entropy} of a discrete distribution is its expected surprise,
+\begin{equation}
+H(\bm{\pi}) = -\sum_{k=1}^K \pi_k \log \pi_k \;\ge\; 0,
+\end{equation}
+with $0 \log 0 \equiv 0$. It is zero iff the distribution is a point mass and maximal, $\log K$, iff uniform (a Lagrange-multiplier computation, or an immediate corollary of Gibbs' inequality below). Entropy measures commitment: low entropy, the distribution has made up its mind; high entropy, it is hedging. The thermodynamic resonance is exact, not metaphorical --- this is Gibbs--Shannon entropy, and the softmax below is a Boltzmann distribution.
+
+\begin{necbox}
+The gate output $\bm{\pi}(\x)$ is a categorical distribution per sample, so its entropy $H(\bm{\pi}(\x))$ is a per-sample diagnostic with a calibrated scale: near $\log K$, the gate is not specializing (uniform mixing --- the model has collapsed to an ensemble average); near $0$, routing is effectively hard (and, per Section~\ref{sec:moe}, gradients to losing experts vanish). The thesis's planned gate diagnostics --- entropy traces over time, expert-utilization histograms, collapse checks --- are this number tracked across the panel. Auxiliary \emph{load-balancing} losses in the sparse-MoE literature (Shazeer et al.\ 2017) are, in this language, penalties that keep batch-level gate entropy from collapsing while allowing per-sample decisiveness.
+\end{necbox}
+
+For continuous densities the analogue is \emph{differential entropy} $h(p) = -\int p \log p$, which can be negative and is not invariant under coordinate changes --- use it only to compare distributions on the same scale. Its star result: for $X \sim \Normal(\mu, \sigma^2)$, $h = \tfrac12 \log(2\pi e \sigma^2)$, and among \emph{all} densities on $\R$ with variance $\sigma^2$, the Gaussian uniquely maximizes $h$ (Exercise~\ref{ex:maxent}). Maximum entropy subject to moment constraints is the precise sense in which the Gaussian is the least-committed two-moment assumption --- the same variational logic as deriving the Boltzmann distribution by maximizing entropy at fixed mean energy, with (mean, variance) playing the role of the conserved quantities.
+
+\subsection{KL divergence and cross-entropy}
+
+The \emph{Kullback--Leibler divergence} from $q$ to $p$ is
+\begin{equation}
+\KL{p}{q} = \E_{x \sim p}\!\left[\log \frac{p(x)}{q(x)}\right]
+= \sum_x p(x) \log \frac{p(x)}{q(x)} ,
+\end{equation}
+the expected log evidence in favor of $p$ over $q$ when data really come from $p$ --- the natural ``how wrong is model $q$'' functional.
+
+\begin{theorem}[Gibbs' inequality]\label{thm:gibbs}
+$\KL{p}{q} \ge 0$, with equality iff $p = q$ (almost everywhere).
+\end{theorem}
+
+The proof is one application of Jensen's inequality ($\E[\varphi(X)] \ge \varphi(\E X)$ for convex $\varphi$) to the convex function $-\log$; the syllabus assigns both steps as Exercise~\ref{ex:jensen}, and flags that this inequality is the engine under every ELBO derivation in Module 8's variational material --- the reason a marginal log-likelihood can be lower-bounded at all is that a KL term was dropped, and Gibbs guarantees the drop is downward. Note carefully what KL is not: not symmetric ($\KL{p}{q} \ne \KL{q}{p}$ in general --- the two orderings penalize over- vs.\ under-coverage very differently) and not a metric. For two Gaussians the divergence has a clean closed form (Exercise~\ref{ex:klgauss}):
+\begin{equation}
+\KL{\Normal(\mu_1,\sigma_1^2)}{\Normal(\mu_2,\sigma_2^2)}
+= \log\frac{\sigma_2}{\sigma_1} + \frac{\sigma_1^2 + (\mu_1 - \mu_2)^2}{2\sigma_2^2} - \frac12 .
+\end{equation}
+
+The \emph{cross-entropy} between $p$ and $q$ is $H(p, q) = -\E_{p}[\log q]$, and the identity
+\begin{equation}
+H(p, q) = H(p) + \KL{p}{q}
+\label{eq:crossent}
+\end{equation}
+explains its role as a loss: minimizing cross-entropy in $q$ minimizes KL, since $H(p)$ is fixed. Now substitute the empirical data distribution $\hat p$ for $p$ and a parametric model $p_\theta$ for $q$: the average negative log-likelihood of the data is exactly $H(\hat p, p_\theta)$, so
+\begin{equation}
+\text{maximum likelihood} \;=\; \min_\theta \KL{\hat p}{\,p_\theta} :
+\end{equation}
+\emph{MLE fits the model to the data in KL geometry.} This closes the loop opened in Section~\ref{sec:estimation} and unifies the chapter: squared loss, cross-entropy loss, and mixture NLLs are all the same object --- a KL projection --- under different observation models. When the model family cannot represent the truth (always), MLE finds the KL-closest member, and the asymmetry of KL tells you \emph{how} it compromises: it weights errors where the \emph{data} put mass, caring little about regions the model populates but data do not.
+
+\emph{Mutual information}, the last definition we need, measures total (not just linear) dependence:
+\begin{equation}
+I(X; Z) = \KL{p(x,z)}{\,p(x)p(z)} = H(Z) - H(Z \mid X) \;\ge\; 0,
+\end{equation}
+zero iff $X \perp Z$. Unlike correlation, it sees the $Y = X^2$ dependence of Section~\ref{sec:rv}. Its thesis use is gate interpretability: $I(z; \text{VIX bucket})$, $I(z; \text{recession dummy})$ quantify how much of the learned routing aligns with recognizable regimes --- the honest version of the claim ``the experts found bull and bear markets.''
+
+\subsection{Log-sum-exp and softmax}\label{sec:lse}
+
+Define, for $\bm{a} \in \R^K$,
+\begin{equation}
+\mathrm{LSE}(\bm{a}) = \log \sum_{k=1}^K e^{a_k} .
+\end{equation}
+Three facts make this function ubiquitous. First, it is a \emph{smooth maximum}:
+\begin{equation}
+\max_k a_k \;<\; \mathrm{LSE}(\bm{a}) \;\le\; \max_k a_k + \log K,
+\label{eq:lsebounds}
+\end{equation}
+(lower bound: keep only the largest term, strict since all terms are positive; upper: replace every term by the largest). When one $a_k$ dominates, LSE $\approx$ max; when several are comparable, LSE exceeds the max by up to $\log K$ --- it ``pays a bonus'' for multiple good options. Second, its gradient is the softmax:
+\begin{equation}
+\frac{\partial\, \mathrm{LSE}(\bm{a})}{\partial a_k}
+= \frac{e^{a_k}}{\sum_j e^{a_j}}
+= \mathrm{softmax}_k(\bm{a}),
+\label{eq:lsegrad}
+\end{equation}
+a Boltzmann distribution over components with $a_k$ as negative energies; $\mathrm{LSE}$ is the log partition function (free energy), and \eqref{eq:lsegrad} is the familiar statistical-mechanics fact that derivatives of $\log Z$ produce occupation probabilities. Dividing $\bm a$ by a temperature $\tau$ interpolates between argmax ($\tau \to 0$, hard routing) and uniform ($\tau \to \infty$). Third, the numerics: $e^{a}$ overflows in double precision near $a \approx 710$, so LSE is \emph{always} computed via the identity
+\begin{equation}
+\mathrm{LSE}(\bm{a}) = m + \log \sum_k e^{a_k - m}, \qquad m = \max_k a_k,
+\label{eq:lsetrick}
+\end{equation}
+which is exact (pull $e^m$ out of the sum) and overflow-proof since every exponent is $\le 0$. Library functions \texttt{logsumexp} and loss functions that fuse softmax with log-likelihood exist precisely to apply \eqref{eq:lsetrick}; when in Module 8 you implement a mixture NLL by exponentiating densities and logging their sum, it will silently produce \texttt{-inf} on exactly the extreme observations that matter --- this subsection is the reason your implementation will not do that.
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[Syllabus: Jensen and Gibbs]\label{ex:jensen}
+\prioCore
+(a) Prove Jensen's inequality: for convex $\varphi$ and integrable $X$, $\E[\varphi(X)] \ge \varphi(\E[X])$. \emph{(Hint: convexity gives a supporting line at $\E[X]$: $\varphi(x) \ge \varphi(\E X) + c\,(x - \E X)$; take expectations.)}
+(b) Use it to prove Theorem~\ref{thm:gibbs}: $\KL{p}{q} \ge 0$ with equality iff $p = q$ almost everywhere, treating the equality condition with care (where does strict convexity of $-\log$ enter?).
+(c) One sentence: why does this inequality guarantee that the variational lower bounds of Module 8 are actually lower bounds?
+\end{exercise}
+
+
+% =====================================================================
+\section{Heavy tails: why returns are not Gaussian}\label{sec:tails}
+% =====================================================================
+
+\subsection{The stylized facts}
+
+Across markets, frequencies, and decades, asset returns exhibit a stable set of departures from the i.i.d.-Gaussian ideal, the \emph{stylized facts} (Tsay Ch.\ 1--3 surveys them; they are background for the whole syllabus):
+fat tails --- the unconditional distribution of daily returns has far more mass in the tails than any Gaussian with the same variance, with sample excess kurtosis of equity indices typically an order of magnitude above the Gaussian value of 0;
+asymmetry --- large down moves are more frequent and more clustered than large up moves;
+volatility clustering --- returns themselves are nearly serially uncorrelated, but $|r_t|$ and $r_t^2$ are positively autocorrelated over long horizons (Section~\ref{sec:rv});
+and aggregational Gaussianity --- as returns are summed over longer horizons, their distribution moves toward (but only slowly in the tails toward) the Gaussian, exactly as the CLT discussion of Section~\ref{sec:llnclt} predicts.
+
+The scale of the tail discrepancy deserves a number. A standard Gaussian puts probability $\Phi(-10) \approx 8 \times 10^{-24}$ on a $10\sigma$ daily move --- at one trading day per $10^{23.1}$, effectively ``never in the age of the universe.'' Equity markets have delivered multiple double-digit-sigma daily moves within living memory (October 1987's index return was on the order of $20$ sample standard deviations). Under a power-law tail $P(|X| > x) \sim C x^{-\nu}$ with tail index $\nu \approx 3$, such events are merely rare. The Gaussian is not slightly wrong about extremes; it is wrong by twenty orders of magnitude, and every risk decision based on Gaussian tails inherits that error.
+
+\subsection{The Student-$t$ family and the existence of moments}
+
+The workhorse heavy-tailed family is the \emph{Student-$t$} with $\nu$ degrees of freedom, location $\mu$ and scale $\sigma$:
+\begin{equation}
+p(x) \;=\; \frac{\Gamma\big(\tfrac{\nu+1}{2}\big)}{\Gamma\big(\tfrac{\nu}{2}\big)\sqrt{\pi \nu}\,\sigma}
+\left(1 + \frac{(x-\mu)^2}{\nu \sigma^2}\right)^{-(\nu+1)/2},
+\label{eq:studentt}
+\end{equation}
+which decays like the power law $|x|^{-(\nu+1)}$ rather than like $e^{-x^2/2}$, and recovers the Gaussian as $\nu \to \infty$. (The normalization is a Beta-function integral of exactly the type you know from physics: substituting $u = (x-\mu)^2/(\nu\sigma^2)$ reduces every moment of \eqref{eq:studentt} to $\int_0^\infty u^{a-1}(1+u)^{-(a+b)}\,du = \mathrm{B}(a,b) = \Gamma(a)\Gamma(b)/\Gamma(a+b)$; Exercise~\ref{ex:studentt} runs on this reduction.) The structural fact, which you will prove in Exercise~\ref{ex:studentt}:
+\begin{equation}
+\E\big[|X|^k\big] < \infty \quad\Longleftrightarrow\quad k < \nu .
+\end{equation}
+A power-law density times $x^k$ integrates only while $k - (\nu + 1) < -1$. So for $\nu > 2$ the variance exists, $\Var(X) = \tfrac{\nu}{\nu - 2}\sigma^2$; the kurtosis exists only for $\nu > 4$, equalling $3 + \tfrac{6}{\nu - 4}$. Daily equity returns fit Student-$t$ with $\nu \approx 3$--$5$. Sit with what that means: the \emph{mean and variance of daily returns are well-defined, but the kurtosis may not exist at all}. A sample kurtosis can always be computed; if $\nu \le 4$ it converges to nothing, drifting upward with sample size as ever-larger extremes arrive on schedule. The practical rules: treat sample kurtosis (and anything built on it) as unstable diagnostics, not parameters; expect variance \emph{estimates} to be dominated by a handful of extreme days even though the variance exists; and note that the CLT still applies ($\nu > 2$ suffices) but with the slow tail convergence already discussed.
+
+\subsection{Where heavy tails come from: mixtures}\label{sec:mixturekurtosis}
+
+Here is the chapter's best bridge, easily missed: \emph{heavy tails are what variance mixing looks like marginally}. Suppose returns are conditionally Gaussian but the world switches between a calm and a stressed state:
+\[
+r \sim \Normal(0, \sigma_1^2) \text{ w.p. } w, \qquad
+r \sim \Normal(0, \sigma_2^2) \text{ w.p. } 1 - w .
+\]
+The mixture's moments are mixtures of moments (tower property again): $\E[r^2] = w\sigma_1^2 + (1-w)\sigma_2^2$ and $\E[r^4] = 3\big(w\sigma_1^4 + (1-w)\sigma_2^4\big)$, each component contributing its Gaussian fourth moment $\E[Z^4] = 3\sigma^4$ --- one integration by parts on $\int z^4 e^{-z^2/2\sigma^2}dz$ gives $\E[Z^4] = 3\sigma^2 \E[Z^2]$, the $n=4$ case of the Gaussian moment recursion. The kurtosis is therefore
+\begin{equation}
+\kappa
+= \frac{\E[r^4]}{(\E[r^2])^2}
+= 3\,\frac{w\sigma_1^4 + (1-w)\sigma_2^4}{\big(w\sigma_1^2 + (1-w)\sigma_2^2\big)^2}
+\;\ge\; 3,
+\label{eq:mixkurt}
+\end{equation}
+with equality iff $\sigma_1 = \sigma_2$, by Jensen's inequality applied to the convex square (or the Cauchy--Schwarz inequality on the variance of the conditional variance). A mixture of Gaussians with unequal variances is \emph{always} leptokurtic. Run it with $\sigma_2 = 3\sigma_1$ and $w = 0.95$: $\kappa \approx 7.7$, two and a half times the Gaussian value, from nothing but occasional visits to a stressed state.
+
+\begin{necbox}
+Equation~\eqref{eq:mixkurt} is the statistical argument \emph{for the entire thesis}. The unconditional heavy tails of returns are exactly what one observes if returns are conditionally near-Gaussian within persistent volatility regimes --- fat tails and volatility clustering are two views of the same latent-state structure. A regime-conditional model (Hamilton's Markov switching classically; a gated mixture of experts in your thesis) does not merely accommodate the stylized facts, it \emph{explains} them: marginalize a regime model over its states and \eqref{eq:mixkurt}-style excess kurtosis falls out. When your proposal needs one paragraph of motivation, it is this one.
+\end{necbox}
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[Supplementary: mixtures are leptokurtic]\label{ex:mixkurt}
+\prioCore
+Let $r$ be drawn from a $K$-component scale mixture of centered Gaussians: $r \mid z = k \sim \Normal(0, \sigma_k^2)$ with $P(z = k) = w_k$. Show that the kurtosis of $r$ is $\kappa = 3\,\E[\sigma_z^4] / \E[\sigma_z^2]^2 \ge 3$, with equality iff all $\sigma_k$ are equal (Jensen or Cauchy--Schwarz), generalizing \eqref{eq:mixkurt}. Conclude in one paragraph: why does this single inequality make regime-switching and mixture-of-experts models the \emph{natural} model class for return data, rather than merely a tolerable one?
+\end{exercise}
+
+
+\subsection{Consequences for modeling and evaluation}
+
+Four practices follow directly, all of which appear in the OP pipeline or in Module 5, and all of which are theorems-in-spirit rather than folklore once this section is absorbed. \emph{Rank everything}: Spearman rank-IC (Section~\ref{sec:rv}) is invariant to monotone transforms and immune to tail magnitudes; a Pearson IC inherits the undefined-fourth-moment instability of returns. \emph{Winsorize or rank-normalize features and targets}: squared-loss fits weight observations by squared residuals, so one $-40\%$ event can dominate a gradient step --- clipping is a crude robust statistic, not data manipulation, when documented. \emph{Distrust moment-hungry statistics}: Sharpe-ratio standard errors require fourth-moment corrections (the Bailey--López de Prado deflated Sharpe in Module 5 contains skewness and kurtosis terms for exactly this reason), and any quantity needing moments beyond the second is on thin ice at $\nu \approx 3$--$5$. \emph{Consider $t$-likelihoods}: replacing Gaussian observation models with Student-$t$ in an expert downweights extreme residuals automatically (the $t$ is an infinite scale-mixture of Gaussians, so this is mixture logic again) --- a natural robustness ablation for the thesis experiments.
+
+
+% =====================================================================
+\section{Capstone: the mixture-of-experts objective, derived}\label{sec:moe}
+% =====================================================================
+
+Everything in this chapter now assembles, in about a page, into the central object of the thesis. This section \emph{is} the syllabus checkpoint for Math Foundations B.
+
+\subsection{The conditional mixture model}
+
+A mixture of experts asserts that the conditional density of the target is
+\begin{equation}
+p(y \mid \x)
+= \sum_{k=1}^{K} \underbrace{\pi_k(\x)}_{\text{gate}} \; \underbrace{p_k(y \mid \x)}_{\text{expert }k},
+\qquad
+\pi_k(\x) = \mathrm{softmax}_k\big(g(\x)\big),
+\label{eq:moedensity}
+\end{equation}
+where $g: \R^p \to \R^K$ produces gate logits and each expert supplies a conditional density, canonically Gaussian: $p_k(y \mid \x) = \Normal\big(y \mid f_k(\x), \sigma_k^2\big)$. Structurally this is the product rule and sum rule of Section~\ref{sec:rv} and nothing else: introduce a latent expert label $z$ with categorical prior $p(z = k \mid \x) = \pi_k(\x)$ (Section~\ref{sec:gauss}'s categorical distribution, conditioned on features), specify $p(y \mid \x, z = k) = p_k(y \mid \x)$, and marginalize $z$ out. The model's predictive mean follows from the tower property (Lemma~\ref{lem:tower}):
+\begin{equation}
+\hat y(\x) = \E[y \mid \x] = \sum_{k=1}^K \pi_k(\x)\, f_k(\x),
+\label{eq:moemean}
+\end{equation}
+which is exactly the corrected-NEC equation in the thesis syllabus (\S1). Note also what the mixture gives you beyond the mean: by the law of total variance (Proposition~\ref{prop:totalvar}), $\Var(y \mid \x) = \sum_k \pi_k \sigma_k^2 + \sum_k \pi_k \big(f_k - \hat y\big)^2$ --- within-expert noise plus between-expert disagreement, a free uncertainty decomposition, and Section~\ref{sec:mixturekurtosis} already showed that this very structure generates the heavy tails of Section~\ref{sec:tails}.
+
+\subsection{The training objective contains a log-sum-exp}
+
+Train by maximum likelihood (Section~\ref{sec:estimation}): the per-sample negative log-likelihood is
+\begin{equation}
+\mathcal{L}_i
+= -\log p(y_i \mid \x_i)
+= -\log \sum_{k=1}^{K} \pi_k(\x_i)\, p_k(y_i \mid \x_i)
+= -\,\mathrm{LSE}_k\Big( \underbrace{\log \pi_k(\x_i) + \log p_k(y_i \mid \x_i)}_{=:\, a_{ik},\ \text{per-expert log-joint}} \Big).
+\label{eq:moenll}
+\end{equation}
+The log cannot pass through the sum --- marginalizing a latent variable inside a log is precisely what creates a log-sum-exp --- so every mixture, HMM, and variational objective in the rest of the syllabus carries this shape. All of Section~\ref{sec:lse} now applies verbatim: \eqref{eq:moenll} must be computed with the max-subtraction trick \eqref{eq:lsetrick}; the bounds \eqref{eq:lsebounds} say the mixture NLL is at most $\log K$ better than the best single expert's NLL on that sample (hedging bonus); and the gradient of an LSE is a softmax --- which is about to become the punchline.
+
+\subsection{What gradient does the gate receive?}
+
+Define the \emph{responsibilities} as in Section~\ref{sec:cond}'s NEC box --- Bayes' rule applied to the latent label:
+\begin{equation}
+r_{ik} = p(z = k \mid \x_i, y_i)
+= \frac{\pi_k(\x_i)\, p_k(y_i \mid \x_i)}{\sum_j \pi_j(\x_i)\, p_j(y_i \mid \x_i)}
+= \mathrm{softmax}_k(\bm{a}_i),
+\end{equation}
+the posterior weight of expert $k$ \emph{after seeing how well it explained} $y_i$. Differentiating \eqref{eq:moenll}: with respect to expert $k$'s parameters $\theta_k$ (chain rule through $a_{ik}$, using \eqref{eq:lsegrad}),
+\begin{equation}
+\frac{\partial \mathcal{L}_i}{\partial \theta_k}
+= -\, r_{ik} \, \frac{\partial}{\partial \theta_k} \log p_k(y_i \mid \x_i),
+\label{eq:expertgrad}
+\end{equation}
+and with respect to the gate logits $g_k$ (one more softmax differentiation --- Exercise~\ref{ex:gategrad} asks you to verify both lines),
+\begin{equation}
+\frac{\partial \mathcal{L}_i}{\partial g_k(\x_i)}
+= \pi_k(\x_i) - r_{ik} .
+\label{eq:gategrad}
+\end{equation}
+These two equations are the whole story of MoE training, and they reward staring. Equation~\eqref{eq:expertgrad}: each expert performs ordinary likelihood learning on each sample, \emph{weighted by its responsibility} --- experts that explain a sample well get pulled harder toward it, a soft specialization dynamic (and the gradient-flavored shadow of EM, where Module 8 will compute responsibilities and weighted fits as separate steps). Equation~\eqref{eq:gategrad}: the gate's gradient is \emph{prior minus posterior} --- it is trained to move its prediction-before-seeing-$y$ toward the Bayes posterior after seeing $y$. The gate is learning to forecast which expert will win. Both signals flow through standard backpropagation with no tricks, \emph{provided the mixture is soft}.
+
+\subsection{Why NEC's argmax routing cannot learn its gate}
+
+The current NEC code computes a 3-class softmax gate and then routes \emph{hard}: the prediction is the extreme expert if $\argmax_k \pi_k \ne 1$, else the normal expert. Two pathologies, now diagnosable in one sentence each. First, $\argmax$ is piecewise constant in the gate parameters --- its derivative is zero almost everywhere --- so the regression loss sends \emph{no gradient} to the classifier through the routing decision: in place of the rich signal \eqref{eq:gategrad}, the gate gets nothing and must be trained on a side objective that need not align with predictive performance. Second, collapsing classes $0$ and $2$ into one branch discards a computed distinction: the model pays for a 3-way posterior and then uses one bit of it. The corrected model of the thesis --- soft mixture \eqref{eq:moemean} trained on NLL \eqref{eq:moenll}, with hard and top-$k$ routing studied as \emph{ablations} (where straight-through or load-balancing devices substitute for the missing gradient) --- is not a stylistic preference; it is the difference between a gate that receives \eqref{eq:gategrad} and one that receives zero.
+
+\medskip
+\noindent\textbf{Checkpoint (from the syllabus).} You should now be able to answer, closed-book: \emph{Why is a mixture-of-experts model a conditional mixture model?} (It defines $p(y \mid \x)$ by marginalizing a feature-conditioned categorical latent over expert densities --- sum and product rule.) \emph{Why does its loss contain a log-sum-exp?} (The NLL puts a log outside the marginalization sum of exponential-family terms; LSE is the log of a sum of exponentials of per-expert log-joints, computed stably by max-subtraction, with softmax responsibilities as its gradient.) If both answers are comfortable --- including being able to produce \eqref{eq:expertgrad} and \eqref{eq:gategrad} --- Math Foundations B has done its job.
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[Supplementary: the gate's gradient]\label{ex:gategrad}
+\prioCore
+Starting from the per-sample NLL \eqref{eq:moenll} with Gaussian experts and softmax gate $\pi_k = e^{g_k}/\sum_j e^{g_j}$:
+(a) derive the expert-parameter gradient \eqref{eq:expertgrad};
+(b) derive the gate-logit gradient \eqref{eq:gategrad}, $\partial \mathcal{L}_i / \partial g_k = \pi_k - r_{ik}$ \emph{(hint: $\log \pi_k = g_k - \mathrm{LSE}(\bm{g})$, so $\partial \log \pi_k / \partial g_j = \delta_{kj} - \pi_j$; sum against the responsibilities)};
+(c) verify that if routing is replaced by hard $\argmax$ selection of a single expert, the gradient reaching the gate logits through the routing decision is zero almost everywhere --- and reconcile this with the cross-entropy gradient $\hat p - y$ you will derive in Module 4: in what precise sense is the soft gate ``doing classification with the responsibilities as soft labels''?
+\end{exercise}
+
+
+% =====================================================================
+\section{Exercises}\label{sec:exercises}
+% =====================================================================
+
+\noindent\textbf{Importance labels.} Each exercise carries a priority badge for the NEC/MoE thesis track, reflecting how load-bearing it is for later chapters --- \emph{not} how hard it is. \prioCore mark the spine of the chapter: do them closed-book before moving on. \prioWorth are high value, a notch below. \prioLow are foundational or illustrative and can wait. \prioOpt is skippable. Two heavy-tail notes: Exercise~\ref{ex:studentt} is \emph{Worth it} because its parts (a) and (c) are conceptually core while part (b) is mostly algebra, and Exercise~\ref{ex:mixkurt} is \emph{Core} because its single inequality is the statistical argument for the whole thesis.
+
+Questions only --- work them against the chapter and check against the source books where tagged. \textbf{Core exercises (\prioCore) appear inline at the end of the section they test}, placed there as checkpoint exercises. This section collects the supplementary exercises only. Bishop's Exercise 1.11 is folded into Exercise~\ref{ex:gaussmle} (inline after \S\ref{sec:estimation}) rather than listed here. Ordering follows the chapter.
+
+\subsection*{On random variables and covariance (Section~\ref{sec:rv})}
+
+\begin{exercise}[Bishop Ex.\ 1.10]
+\prioLow
+Suppose $x$ and $z$ are statistically independent random variables. Show that
+$\E[x + z] = \E[x] + \E[z]$ and $\Var[x + z] = \Var[x] + \Var[z]$.
+State precisely where independence is used --- and note which of the two identities survives without it.
+\end{exercise}
+
+\begin{exercise}[Bishop Ex.\ 2.20]\label{ex:posdef}
+\prioLow
+A symmetric real matrix $\bSigma$ is positive definite if $\bm{a}^\T \bSigma \bm{a} > 0$ for every real vector $\bm{a} \neq \bm{0}$. Show that a necessary and sufficient condition for $\bSigma$ to be positive definite is that all eigenvalues $\lambda_i$ of $\bSigma$ are strictly positive. \emph{(Hint: expand $\bm{a}$ in the orthonormal eigenbasis. This is the strict-inequality sibling of the PSD result you proved in Foundations A for Gram matrices; together they govern when a covariance matrix in \eqref{eq:portvar} is invertible, hence when the MVN density \eqref{eq:mvn} exists.)}
+\end{exercise}
+
+\subsection*{On conditioning and optimal prediction (Section~\ref{sec:cond})}
+
+\begin{exercise}[ESL Ex.\ 2.1]
+\prioLow
+In a $K$-class problem, let the target for class $k$ be the one-hot vector $t_k \in \R^K$ (all zeros except a one in position $k$), and let $\hat{\bm{y}} \in \R^K$ be a model output whose elements sum to one. Show that classifying to the largest element of $\hat{\bm{y}}$ is the same decision as choosing the closest target, $\argmin_k \|t_k - \hat{\bm{y}}\|$.
+\end{exercise}
+
+\subsection*{On prediction error and dimensionality (Section~\ref{sec:epe})}
+
+\begin{exercise}[ESL Ex.\ 2.3]\label{ex:esl23}
+\prioLow
+Consider $N$ data points distributed independently and uniformly in the unit ball in $\R^p$. Derive the formula for the median distance from the origin to the closest data point,
+\[
+d(p, N) = \Big(1 - \big(\tfrac12\big)^{1/N}\Big)^{1/p}.
+\]
+\emph{(Route: the volume of a ball scales like radius to the $p$; write $P(\min_i \|x_i\| > r)$ for i.i.d.\ points and set it to $\tfrac12$.)} Evaluate it for $N = 500$, $p = 10$ and interpret: where does a typical training sample ``live'' relative to a typical prediction point?
+\end{exercise}
+
+\begin{exercise}[ESL Ex.\ 2.5]\label{ex:esl25}
+\prioWorth
+Consider the linear model $y = x^\T \beta + \varepsilon$, $\varepsilon \sim (0, \sigma^2)$ independent across observations, training data $(\bm{X}, \bm{y})$ with $\bm{X}$ the $N \times p$ design matrix, OLS estimate $\hat\beta = (\bm{X}^\T\bm{X})^{-1}\bm{X}^\T \bm{y}$, and a test observation $y_0 = x_0^\T\beta + \varepsilon_0$.
+(a) Show that the expected prediction error at $x_0$ satisfies
+\[
+\mathrm{EPE}(x_0)
+= \E_{y_0 \mid x_0} \E_{\mathcal{T}} \big( y_0 - \hat y_0 \big)^2
+= \sigma^2 + \E_{\mathcal{T}}\big[ x_0^\T (\bm{X}^\T \bm{X})^{-1} x_0 \big]\, \sigma^2 ,
+\]
+i.e.\ irreducible noise plus a variance term and \emph{zero} bias. \emph{(Route: write $\hat\beta = \beta + (\bm{X}^\T\bm{X})^{-1}\bm{X}^\T \bm{\varepsilon}$, show $\E[\hat\beta \mid \bm{X}] = \beta$ and $\Cov(\hat\beta \mid \bm{X}) = \sigma^2 (\bm{X}^\T\bm{X})^{-1}$ via the linear-map rule \eqref{eq:covmap}, then apply the bias--variance decomposition of Exercise~\ref{ex:biasvar} conditionally on $\bm{X}$ --- and identify which step uses the tower argument.)}
+(b) Assuming $\E[X] = 0$ and $N$ large so that $\bm{X}^\T\bm{X} \to N \Cov(X)$, show using the quadratic-form identity \eqref{eq:quadform} (equivalently, the cyclic and linearity properties of the trace) that
+\[
+\E_{x_0}\, \mathrm{EPE}(x_0) \;\approx\; \sigma^2 \,\frac{p}{N} + \sigma^2 .
+\]
+Interpret: for a correctly specified linear model, prediction error grows only \emph{linearly} in dimension --- contrast with Exercises~\ref{ex:esl23} and \ref{ex:concentration}.
+\end{exercise}
+
+\begin{exercise}[Syllabus: distance concentration]\label{ex:concentration}
+\prioLow
+Let $X, Y$ be independent uniform random vectors in $[0,1]^d$ and $D^2 = \|X - Y\|^2 = \sum_{j=1}^d (X_j - Y_j)^2$.
+(a) Compute $\E[D^2]$ and $\Var(D^2)$ as explicit functions of $d$ (each is a sum of i.i.d.\ per-coordinate contributions; compute the needed per-coordinate moments of $(X_j - Y_j)$).
+(b) Show that the coefficient of variation of the \emph{distance} satisfies
+$\mathrm{SD}(D)/\E[D] = O(1/\sqrt{d})$. \emph{(Hint: write $D^2 = \E[D^2](1 + \delta)$ where $\delta$ is a fluctuation with $\E[\delta] = 0$ and, by part (a), $\mathrm{SD}(\delta) = O(1/\sqrt{d})$; expand $D = \E[D^2]^{1/2}\sqrt{1+\delta} \approx \E[D^2]^{1/2}\,(1 + \tfrac{\delta}{2})$ to first order --- the physicist's small-fluctuation expansion, called the delta method in statistics.)}
+(c) Interpret for $k$-NN: if all pairwise distances agree to relative order $d^{-1/2}$, what information is left in the identity of the ``nearest'' neighbors, and what does this do to the conditioning logic of Theorem~\ref{thm:l2opt}?
+\end{exercise}
+
+\begin{exercise}[ESL Ex.\ 2.8 --- optional, computational]
+\prioOpt
+\emph{The one computational exercise of the chapter, kept because the syllabus lists it; it pairs with the Module 1 toolkit.} Compare the classification performance of linear regression and $k$-nearest-neighbor classification on the ZIP-code digits data (available from the ESL book website), restricted to the 2's and 3's, for $k \in \{1, 3, 5, 7, 15\}$. Report training and test error for each method and each $k$, and explain the pattern you see using the bias--variance language of Section~\ref{sec:epe}.
+\end{exercise}
+
+\subsection*{On information theory (Section~\ref{sec:info})}
+
+\begin{exercise}[Syllabus: Gaussian entropy and maximum entropy]\label{ex:maxent}
+\prioWorth
+(a) Derive the differential entropy of the univariate Gaussian: $h\big(\Normal(\mu, \sigma^2)\big) = \tfrac12 \log(2\pi e \sigma^2)$.
+(b) Prove that among all densities $p$ on $\R$ with mean $\mu$ and variance $\sigma^2$, the Gaussian uniquely maximizes differential entropy. \emph{(Two routes; do at least one. Variational: maximize $-\!\int p\log p$ with Lagrange multipliers for normalization, mean, and variance, and identify the exponential-quadratic form of the stationary density. Information-theoretic: expand $\KL{p}{\Normal(\mu,\sigma^2)} \ge 0$ and observe that $\E_p[\log \Normal(x \mid \mu,\sigma^2)]$ depends on $p$ only through its first two moments.)} Connect to statistical mechanics: which constrained-entropy problem produces the Boltzmann distribution, and what plays the role of the moment constraints here?
+\end{exercise}
+
+\begin{exercise}[Syllabus: KL between Gaussians]\label{ex:klgauss}
+\prioLow
+Derive the closed form of $\KL{\Normal(\mu_1, \sigma_1^2)}{\Normal(\mu_2, \sigma_2^2)}$ stated in Section~\ref{sec:info}, and verify three sanity limits: it vanishes when the parameters coincide; it diverges as $\sigma_2 \to 0$ with $\sigma_1$ fixed; and it is visibly asymmetric --- exhibit a parameter pair where swapping the arguments changes the value, and explain which direction punishes an overconfident (too-narrow) model more.
+\end{exercise}
+
+\subsection*{On heavy tails (Section~\ref{sec:tails})}
+
+\begin{exercise}[Syllabus: Student-$t$ moments]\label{ex:studentt}
+\prioWorth
+For the Student-$t$ density \eqref{eq:studentt} with $\nu$ degrees of freedom (location 0, scale $\sigma$), whose tails decay like $|x|^{-(\nu+1)}$:
+(a) show that $\E[|X|^k]$ is finite if and only if $k < \nu$, by examining the convergence of the tail integral;
+(b) for $\nu > 2$, derive $\Var(X) = \tfrac{\nu}{\nu-2}\sigma^2$, and for $\nu > 4$, the excess kurtosis $\tfrac{6}{\nu - 4}$ \emph{(hint: substitute $u = x^2/(\nu\sigma^2)$ to reduce each moment to the Beta-function integral given below \eqref{eq:studentt}, then use $\Gamma(z+1) = z\,\Gamma(z)$)};
+(c) given that daily equity returns are empirically well fit by $\nu \approx 3$--$5$, state precisely which of mean, variance, skewness, kurtosis are guaranteed to exist, and explain what a practitioner should conclude about reported sample kurtosis numbers and about standard errors of variance-based statistics such as the Sharpe ratio.
+\end{exercise}
+
+% =====================================================================
+\section*{Source map and what comes next}
+\addcontentsline{toc}{section}{Source map and what comes next}
+% =====================================================================
+
+\begin{center}
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+Section & Primary source(s) & Feeds directly into \\
+\midrule
+\ref{sec:rv} Random variables, covariance & Bishop \S1.2; ESL \S2.4 & Portfolio math; rank-IC (Module 5) \\
+\ref{sec:cond} Conditioning, regression function & ESL \S2.4; Bishop \S1.2, \S1.5 & All supervised modules; gate posterior \\
+\ref{sec:gauss} Gaussians, Schur complement & Bishop \S2.3 & PPCA (Fnd.\ A), experts, Kalman/GP \\
+\ref{sec:estimation} MLE, MAP, LLN/CLT, bootstrap & Bishop \S1.2.4, \S2.3; ESL \S8.2 & Training-as-MLE; ICIR $t$-stats (Module 5) \\
+\ref{sec:epe} Bias--variance, curse of dim. & ESL \S2.3, \S2.5--2.9; Bishop \S1.4 & Model assessment (Module 5); $K$ choice \\
+\ref{sec:info} Entropy, KL, LSE & Bishop \S1.6 & Losses (Module 4); ELBO (Module 8); gate diagnostics \\
+\ref{sec:tails} Heavy tails, Student-$t$ & Tsay Ch.\ 1 (context); syllabus & Robust evaluation; deflated Sharpe (Module 5) \\
+\ref{sec:moe} Conditional mixtures, MoE NLL & Bishop \S2.3.9 + Ch.\ 9 preview & Modules 8--9 (EM, MoE, NEC correction) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\medskip
+Three threads leave this chapter open on purpose. The softmax gradient and Hessian get their full treatment in Module 4, where \eqref{eq:gategrad} reappears as the cross-entropy gradient $\hat{p} - y$. The sampling-variability material (CLT, bootstrap) becomes operational in Module 5, where ICIR, purged cross-validation, and the deflated Sharpe ratio turn it into an evaluation protocol. And the conditional mixture of Section~\ref{sec:moe} becomes a full learning algorithm in Module 8, where EM alternates the responsibility computation (Bayes' rule, Section~\ref{sec:cond}) with responsibility-weighted fits (equation~\eqref{eq:expertgrad} with the weights frozen). Nothing in those modules requires probability beyond what is now on these pages.
+
+\end{document}

@@ -1,0 +1,625 @@
+% =====================================================================
+%  Foundations for a Quant Research Pipeline
+%  Chapter: Module 9 — Hidden Markov Models and Classical Regime Switching
+%  Companion textbook to NEC_thesis_syllabus.md
+%  Sources synthesized: Bishop §13.1–13.3; Tsay Ch 4.1–4.6 (4.6 focus);
+%  Hamilton (1989) §1–4
+% =====================================================================
+\documentclass[11pt]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{mathpazo}
+\usepackage{microtype}
+\usepackage[margin=1.05in]{geometry}
+\usepackage{amsmath,amssymb,amsthm,mathtools,bm}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{tcolorbox}
+\tcbuselibrary{breakable}
+\usepackage{booktabs}
+\usepackage[colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,urlcolor=blue!50!black]{hyperref}
+
+\linespread{1.05}
+\setlength{\parskip}{0.35em}
+
+% ---------- colors ----------
+\definecolor{necblue}{RGB}{20,45,90}
+\definecolor{finmaroon}{RGB}{110,30,30}
+\definecolor{boxbg}{RGB}{245,247,250}
+\definecolor{finbg}{RGB}{250,246,243}
+
+% ---------- module-9 numbering ----------
+\renewcommand{\thesection}{9.\arabic{section}}
+\numberwithin{equation}{section}
+
+% ---------- theorem environments ----------
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{corollary}[theorem]{Corollary}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{example}[theorem]{Example}
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+
+\newcounter{exercise}
+\renewcommand{\theexercise}{9.\arabic{exercise}}
+\newenvironment{exercise}[1][]{\refstepcounter{exercise}\par\medskip
+  \noindent\textbf{Exercise \theexercise}\if\relax\detokenize{#1}\relax\else\ \textnormal{[#1]}\fi\textbf{.}\ \itshape}{\par\medskip}
+
+% ---------- exercise importance badges (priority for the NEC/MoE thesis track) ----------
+\definecolor{priogray}{RGB}{120,120,120}
+\newcommand{\prioCore}{{\normalfont\small\textbf{\textcolor{necblue}{[\,\ensuremath{\bigstar\bigstar\bigstar}\ Core\,]}}}\hspace{0.5em}}
+\newcommand{\prioWorth}{{\normalfont\small\textbf{\textcolor{finmaroon}{[\,\ensuremath{\bigstar\bigstar}\ Worth it\,]}}}\hspace{0.5em}}
+\newcommand{\prioLow}{{\normalfont\small\textcolor{priogray}{[\,\ensuremath{\bigstar}\ Low priority\,]}}\hspace{0.5em}}
+\newcommand{\prioOpt}{{\normalfont\small\textcolor{priogray}{[\,\ensuremath{\circ}\ Optional\,]}}\hspace{0.5em}}
+\newcommand{\corebadge}{}% superseded by the four \prio badges above
+
+% ---------- boxes ----------
+\newtcolorbox{necbox}{breakable,colback=boxbg,colframe=necblue,
+  boxrule=0.8pt,arc=1.5mm,left=2mm,right=2mm,top=1.5mm,bottom=1.5mm,
+  title={\sffamily\bfseries NEC connection},fonttitle=\small}
+\newtcolorbox{finbox}{breakable,colback=finbg,colframe=finmaroon,
+  boxrule=0.8pt,arc=1.5mm,left=2mm,right=2mm,top=1.5mm,bottom=1.5mm,
+  title={\sffamily\bfseries Finance reality check},fonttitle=\small}
+
+% ---------- operators ----------
+\DeclareMathOperator{\E}{\mathbb{E}}
+\DeclareMathOperator{\Var}{Var}
+\DeclareMathOperator{\Cov}{Cov}
+\DeclareMathOperator{\Corr}{Corr}
+\DeclareMathOperator{\tr}{tr}
+\DeclareMathOperator{\diag}{diag}
+\DeclareMathOperator*{\argmin}{arg\,min}
+\DeclareMathOperator*{\argmax}{arg\,max}
+\newcommand{\Normal}{\mathcal{N}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\x}{\bm{x}}
+\newcommand{\T}{\top}
+\newcommand{\bA}{\bm{A}}
+\newcommand{\brho}{\bm{\rho}}
+\newcommand{\bnu}{\bm{\nu}}
+\newcommand{\alh}{\hat{\alpha}}
+\newcommand{\resp}{\gamma}
+
+\title{\vspace{-1.2em}{\large\sffamily Foundations for a Quant Research Pipeline}\\[0.4em]
+\textbf{Module 9:\\ Hidden Markov Models and Classical Regime Switching}\\[0.3em]
+{\large A single merged treatment of Bishop \S13.1--13.3, Tsay Ch.\ 4.1--4.6,\\ and Hamilton (1989) \S1--4}}
+\author{Prepared for Tom Koreslesjak \;\textperiodcentered\; companion to \texttt{NEC\_thesis\_syllabus.md}}
+\date{July 2026}
+
+\begin{document}
+\maketitle
+\vspace{-1.5em}
+
+\begin{abstract}
+\noindent Module 8 built the mixture: latent labels, responsibilities, EM. This chapter adds the one ingredient the thesis's whole premise turns on --- \emph{time}. Give the latent regime label Markov persistence and the mixture becomes a hidden Markov model; every quantity Module 8 computed per sample now couples across dates, and the E-step becomes dynamic programming: the forward recursion (filtering), the backward recursion (smoothing), Viterbi (decoding), and Baum--Welch (EM with responsibilities computed by forward--backward). The financial half then specializes the machinery to Hamilton's (1989) Markov-switching models --- switching means, switching volatilities, switching regressions --- and proves the two facts that make regime models the natural model class for returns: persistence in a two-state chain produces \emph{exactly} the geometrically decaying autocorrelation of squared returns that Foundations B documented as volatility clustering, on top of the fat tails it already explained. The chapter closes on the thesis's central axis: a precise, provable statement of how Markov-switching gating differs from feature-conditioned MoE gating, in what degenerate case they coincide, and in what representational sense a recurrent encoder with a softmax head contains the filtered Markov gate. The destination: you can derive the full HMM toolkit from scratch, fit and read a Hamilton model as the thesis's classical baseline, and defend --- with derivations, not slogans --- what the NEC's gate can see that Hamilton's cannot, and vice versa.
+\end{abstract}
+
+\tableofcontents
+
+\subsection*{How this chapter was assembled (and what was cut)}
+
+Bishop \S13.1--13.2 supplies the HMM machinery; Hamilton (1989) \S1--4 supplies the econometric specialization (the paper is not in the local library; its assigned content --- the model, the filter, the smoothed inference, the GNP application --- is reconstructed self-contained here); Tsay Ch.\ 4 supplies the classical-regime-model taxonomy, with \S4.6 (Markov switching) kept in full and \S4.1--4.5 compressed into the comparison of Section~\ref{sec:gatevs}. Cuts, with reasons:
+
+\begin{itemize}[leftmargin=2em,itemsep=0.15em]
+\item \emph{Bishop's graphical-model formalism (factor graphs, sum--product, d-separation).} This book never built Bishop Ch.\ 8, and does not need it: every conditional-independence property the chapter uses is proven directly from the joint factorization (Lemma~\ref{lem:hmmci}), and forward--backward is derived from the sum and product rules alone --- the same two rules that have powered everything since (B.1.1)--(B.1.2).
+\item \emph{Linear dynamical systems / Kalman filtering (Bishop \S13.3's second half).} The continuous-state sibling: same graph, Gaussian latents, with the Schur-complement conditioning of Foundations B \S B.3 doing what forward--backward does here. One pointer, no development --- the thesis's regimes are discrete.
+\item \emph{Particle filters, factorial and switching state-space extensions.} Not load-bearing; one sentence acknowledges the family.
+\item \emph{Tsay \S4.1--4.5 (nonlinearity tests, bilinear models, neural-network sections).} The tests are classical diagnostics this pipeline replaces with Module 5's protocol; the threshold and smooth-transition models, however, are kept in compressed form in \S\ref{sec:gatevs} because they are load-bearing \emph{contrast}: a TAR model is a hard one-feature gate and a STAR model is a sigmoid one-feature gate, so classical econometrics already contains the primitive versions of both routing styles the thesis compares.
+\item \emph{Hamilton's numerical-ML and asymptotic-inference apparatus.} We estimate by EM (Baum--Welch), not by direct numerical maximization with analytic standard errors; and the classical problem of \emph{testing} the number of regimes (nuisance parameters unidentified under the null --- the boundary pathology) gets a remark tied to Module 8's Exercise on choosing $K$, not a treatment.
+\item \emph{Semi-Markov / duration-dependent switching.} One sentence: geometric sojourns are a modeling choice, not a law.
+\end{itemize}
+
+\textbf{Audit findings (errors in the assigned material, corrected here).} (i) The syllabus's forward-recursion exercise states the complexity comparison as ``$O(NT^2)$ via the recursion versus $O(T^N)$ naive.'' Both expressions are garbled: for $K$ states and $T$ steps the recursion costs $O(K^2 T)$ and the naive sum over state paths costs $O(K^T \cdot T)$ --- the exponent belongs on the state count, not the horizon. Exercise~\ref{ex:forward} asks for the correct accounting. (ii) The syllabus assigns Bishop Exercise 13.1, which asks for d-separation --- a tool this book deliberately never built. Bishop's own Exercise 13.2 proves the identical claims directly from the sum and product rules (verified against the local copy); Exercise~\ref{ex:ci} therefore merges 13.1's claims with 13.2's method. (iii) The syllabus assigns ``two Tsay Ch.\ 4 end-of-chapter problems tied to Markov switching or volatility regimes'' without naming them, and Tsay is not in the local library; two problems are constructed here in that stated spirit --- one analytical (Exercise~\ref{ex:msmoments}) and one applied (Exercise~\ref{ex:applied}) --- and flagged as constructions.
+
+Three tools are \emph{added} because the exercises are unsolvable without them (standing policy): the closed-form spectral decomposition of a two-state transition matrix and its powers (\S\ref{sec:markov}), the indicator-autocovariance lemma that converts persistence into autocorrelation (\S\ref{sec:markov}), and the scaled (normalized) forward--backward recursions that make any of this computable at $T$ beyond a few dozen (\S\ref{sec:forward}--\ref{sec:smooth}).
+
+\subsection*{Notation}
+
+Time runs $t = 1, \dots, T$. The latent regime is $s_t \in \{1, \dots, K\}$; the observation is $o_t$ (a return $r_t$, or a vector, as context dictates). The \emph{transition matrix} $\bA = [a_{ij}]$ is row-stochastic with $a_{ij} = P(s_{t+1} = j \mid s_t = i)$; the \emph{initial distribution} is $\rho_i = P(s_1 = i)$ and the \emph{stationary distribution} is $\bnu$ ($\bnu^\T \bA = \bnu^\T$). The symbol $\pi$ is reserved, as everywhere in this book, for mixture weights and gate outputs. \emph{Emission densities} are $b_j(o) = p(o \mid s = j)$. Sequences abbreviate as $o_{1:t} = (o_1, \dots, o_t)$. The dynamic-programming quantities: forward $\alpha_t(j) = p(o_{1:t}, s_t = j)$ and its normalized (filtered) version $\alh_t(j) = p(s_t = j \mid o_{1:t})$ with scaling factors $c_t = p(o_t \mid o_{1:t-1})$; backward $\beta_t(i) = p(o_{t+1:T} \mid s_t = i)$; smoothed marginals $\resp_t(i) = p(s_t = i \mid o_{1:T})$ and pairwise marginals $\xi_t(i,j) = p(s_t = i, s_{t+1} = j \mid o_{1:T})$; Viterbi values $\delta_t(j)$. Translation: Bishop writes $z_n$ (one-hot) for our $s_t$, $x_n$ for our $o_t$, $\pi$ for our $\brho$; Hamilton writes $\xi_{t|t}$ for our filtered vector $\alh_t$. Cross-references follow the ledger: (B.$\cdot$), (C.$\cdot$), (D.$\cdot$), (4.$\cdot$)--(8.$\cdot$).
+
+% =====================================================================
+\section{Markov chains: the arithmetic of persistence}\label{sec:markov}
+% =====================================================================
+
+The thesis's founding hypothesis is that markets occupy \emph{persistent} latent states. Before hiding anything, quantify persistence itself. A (first-order, homogeneous) \emph{Markov chain} on $\{1, \dots, K\}$ is a sequence $s_1, s_2, \dots$ whose future depends on the past only through the present:
+\begin{equation}
+P(s_{t+1} = j \mid s_t = i,\, s_{t-1}, \dots, s_1) \;=\; P(s_{t+1} = j \mid s_t = i) \;=\; a_{ij},
+\label{eq:markovdef}
+\end{equation}
+with $\bA = [a_{ij}]$ row-stochastic ($a_{ij} \ge 0$, $\sum_j a_{ij} = 1$). Multi-step transitions are matrix powers --- condition on the intermediate state and apply the sum and product rules (B.1.1)--(B.1.2):
+\begin{equation}
+P(s_{t+n} = j \mid s_t = i)
+= \sum_{k} P(s_{t+n} = j \mid s_{t+1} = k)\, a_{ik}
+= \big[\bA^n\big]_{ij}
+\label{eq:chapman}
+\end{equation}
+by induction (the Chapman--Kolmogorov equation). A distribution $\bnu$ is \emph{stationary} when $\bnu^\T \bA = \bnu^\T$: start the chain there and every marginal stays there. For an irreducible aperiodic chain (every state reachable, no deterministic cycling --- always true of the regime chains in this chapter, whose entries are strictly positive), the stationary distribution exists, is unique, and is the limit of $[\bA^n]_{i\cdot}$ from every start --- a fact we will read off explicitly in the two-state case rather than prove in general.
+
+\emph{The two-state chain, worked in full.} Parameterize by the two switching probabilities,
+\begin{equation}
+\bA = \begin{pmatrix} 1 - a & a \\ b & 1 - b \end{pmatrix},
+\qquad a = P(1 \to 2), \quad b = P(2 \to 1), \quad a, b \in (0, 1).
+\label{eq:twostate}
+\end{equation}
+Row-stochasticity makes $\bm 1 = (1,1)^\T$ a right eigenvector with eigenvalue $1$; the trace then hands over the second eigenvalue for free, $\lambda_2 = \tr \bA - 1 = 1 - a - b$, with right eigenvector $(a, -b)^\T$ (check: $\bA (a, -b)^\T = ((1-a)a - ab,\; ba - (1-b)b)^\T = (1 - a - b)(a, -b)^\T$). Solving $\bnu^\T \bA = \bnu^\T$ with $\nu_1 + \nu_2 = 1$:
+\begin{equation}
+\bnu = \Big( \frac{b}{a + b},\; \frac{a}{a + b} \Big),
+\qquad
+\lambda_2 = 1 - a - b .
+\label{eq:twostationary}
+\end{equation}
+Diagonalizing and raising to the $n$-th power (the spectral calculation of Foundations A, executed on a $2 \times 2$) gives the closed form for every multi-step transition probability at once:
+\begin{equation}
+\bA^n \;=\;
+\underbrace{\begin{pmatrix} \nu_1 & \nu_2 \\ \nu_1 & \nu_2 \end{pmatrix}}_{\text{rank-one: } \bm 1 \bnu^\T}
+\;+\; \lambda_2^{\,n}
+\underbrace{\begin{pmatrix} \nu_2 & -\nu_2 \\ -\nu_1 & \nu_1 \end{pmatrix}}_{\text{deviation from stationarity}} .
+\label{eq:Apower}
+\end{equation}
+(Verify $n = 0$ gives $\bm I$ and $n = 1$ gives \eqref{eq:twostate}; Exercise~\ref{ex:markovchain} derives it.) Equation \eqref{eq:Apower} is the whole story of mixing: the chain forgets its initial state geometrically at rate $|\lambda_2|$, the \emph{second} eigenvalue --- the same spectral-gap logic as gradient descent's slow mode (C \S C.2) and the recurrent Jacobian's radius (Module 7's Gelfand lemma), the fourth appearance of this book's geometric-amplification motif, now measuring \emph{memory in probability} rather than in signal.
+
+\emph{Sojourn times.} How long does a visit to state $i$ last? Departure is a sequence of independent ``stay'' events followed by one ``leave'': $P(D_i = d) = a_{ii}^{\,d-1}(1 - a_{ii})$ for $d = 1, 2, \dots$ --- geometric. Its mean is the geometric series you can sum blind: with $p = a_{ii}$,
+\begin{equation}
+\E[D_i] = (1 - p)\sum_{d \ge 1} d\, p^{d-1}
+= (1-p)\,\frac{d}{dp}\Big(\sum_{d \ge 0} p^{d}\Big)
+= \frac{1 - p}{(1-p)^2}
+= \frac{1}{1 - a_{ii}} .
+\label{eq:sojourn}
+\end{equation}
+Persistence has units: $a_{ii} = 0.99$ on daily data is a hundred-day regime on average; $a_{ii} = 0.5$ is not a regime at all but a coin flip. Note also what the geometric form asserts: exit risk is \emph{memoryless} --- a regime that has lasted fifty days is no more ``due'' to end than one that started yesterday. That is a modeling choice inherited from \eqref{eq:markovdef}, not a discovered law (semi-Markov models relax it; this book does not need to).
+
+\emph{From persistence to autocorrelation --- the tool the finance sections run on.} Let $I_t = \mathbf{1}[s_t = 1]$ for a stationary two-state chain.
+
+\begin{lemma}[Indicator autocovariance]\label{lem:indcov}
+For the stationary two-state chain \eqref{eq:twostate}, and any lag $k \ge 0$,
+\[
+\Cov(I_t,\, I_{t+k}) \;=\; \nu_1 \nu_2\, \lambda_2^{\,k}.
+\]
+\end{lemma}
+\begin{proof}
+$\E[I_t I_{t+k}] = P(s_t = 1, s_{t+k} = 1) = \nu_1 [\bA^k]_{11}$, and \eqref{eq:Apower} gives $[\bA^k]_{11} = \nu_1 + \lambda_2^k \nu_2$. Hence $\E[I_t I_{t+k}] = \nu_1^2 + \nu_1\nu_2 \lambda_2^k$, and subtracting $\E[I_t]\E[I_{t+k}] = \nu_1^2$ leaves $\nu_1\nu_2\lambda_2^k$. (At $k = 0$ this is $\nu_1(1 - \nu_1)$, the Bernoulli variance --- B \S B.3.4 --- as it must be.)
+\end{proof}
+
+Everything the state touches inherits this geometric decay: any function of $s_t$ has autocovariance proportional to $\lambda_2^{|k|}$ (Exercise~\ref{ex:markovchain}(d) extends the lemma to arbitrary $f(s_t)$). Hold onto that: in \S\ref{sec:hamilton} it becomes the volatility-clustering theorem.
+
+\begin{finbox}
+Hamilton's (1989) original estimates make the numbers concrete: on quarterly U.S.\ GNP growth (1951--1984), a two-state switching-mean model put the stay probabilities near $0.90$ for expansions and $0.75$ for contractions --- expected durations \eqref{eq:sojourn} of roughly $10$ and $4$ quarters, numbers that line up with NBER business-cycle dating the model never saw. The corresponding $\lambda_2 \approx 0.65$: macro-regime memory halves in about a quarter and a half. Daily financial regimes sit much closer to the persistent edge --- stay probabilities of $0.97$--$0.995$, durations of weeks to months, $\lambda_2$ of $0.95$--$0.99$ --- which is exactly the range where the distinction between ``persistent state'' and ``i.i.d.\ mixture'' carries real money: it is the difference between a regime signal you can hold and one you must re-guess daily.
+\end{finbox}
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[Syllabus foundation: the two-state chain, end to end]\label{ex:markovchain}
+\prioCore
+Work with the two-state chain \eqref{eq:twostate}, $a, b \in (0,1)$.
+(a) Verify the eigenpairs claimed in the text ($\lambda_1 = 1$ with right eigenvector $\bm 1$; $\lambda_2 = 1 - a - b$ with right eigenvector $(a, -b)^\T$), assemble the spectral decomposition, and derive the matrix-power formula \eqref{eq:Apower}. Confirm the $n \to \infty$ limit is the rank-one matrix $\bm 1 \bnu^\T$ and identify the convergence rate.
+(b) Derive the stationary distribution \eqref{eq:twostationary} from $\bnu^\T \bA = \bnu^\T$, and interpret $\nu_1 = b/(a+b)$ as a balance condition: in stationarity, probability flux $1 \to 2$ equals flux $2 \to 1$ ($\nu_1 a = \nu_2 b$ --- detailed balance, automatic for two states).
+(c) Derive the sojourn distribution and its mean \eqref{eq:sojourn}. Evaluate expected durations for Hamilton's estimates ($a_{11} \approx 0.90$, $a_{22} \approx 0.75$, quarterly) and for a daily calm/stressed specification ($a_{11} = 0.99$, $a_{22} = 0.97$); state each $\lambda_2$ and the lag at which regime autocovariance \eqref{lem:indcov} halves.
+(d) Extend Lemma~\ref{lem:indcov}: for any function $f$ of the state of a stationary two-state chain, show $\Cov\big(f(s_t), f(s_{t+k})\big) = \nu_1\nu_2\,\big(f(1) - f(2)\big)^2\, \lambda_2^{\,k}$. \emph{(Route: write $f(s_t) = f(2) + (f(1) - f(2))\, I_t$ and apply the lemma --- linearity of covariance, B \S B.1.2.)}
+\end{exercise}
+
+
+% =====================================================================
+\section{The hidden Markov model}\label{sec:hmm}
+% =====================================================================
+
+Now hide the chain. A \emph{hidden Markov model} attaches an emission to each step: the state sequence $s_{1:T}$ evolves by \eqref{eq:markovdef}, and each observation $o_t$ is drawn from the emission density of the current state, independently of everything else given $s_t$. The joint density --- the object every algorithm in this chapter manipulates --- factorizes as
+\begin{equation}
+p(o_{1:T},\, s_{1:T})
+\;=\; \rho_{s_1}\, b_{s_1}(o_1) \prod_{t=2}^{T} a_{s_{t-1} s_t}\, b_{s_t}(o_t).
+\label{eq:hmmjoint}
+\end{equation}
+Two conditional-independence properties, used constantly below, follow directly from this factorization --- no graphical-model machinery required:
+
+\begin{lemma}[HMM conditional independence]\label{lem:hmmci}
+Under \eqref{eq:hmmjoint}: (i) given $s_t$, the past $(o_{1:t}, s_{1:t-1})$ and the future $(o_{t+1:T}, s_{t+1:T})$ are independent; (ii) given the state sequence $s_{1:T}$, the observations are independent, with $o_t$ depending only on $s_t$.
+\end{lemma}
+\begin{proof}
+Fix $s_t$. The factorization \eqref{eq:hmmjoint} splits as $\big[\rho_{s_1} b_{s_1}(o_1)\prod_{u=2}^{t} a_{s_{u-1}s_u} b_{s_u}(o_u)\big] \cdot \big[\prod_{u=t+1}^{T} a_{s_{u-1}s_u} b_{s_u}(o_u)\big]$, the first bracket a function of the past and $s_t$ only, the second of the future and $s_t$ only. A joint density that factorizes into (past, $s_t$) $\times$ (future, $s_t$) is, after conditioning on $s_t$, a product --- which is the definition of conditional independence (B \S B.1.3). Claim (ii) is read directly off \eqref{eq:hmmjoint}: fix $s_{1:T}$ and the density is $\prod_t b_{s_t}(o_t)$ times a constant.
+\end{proof}
+
+\emph{What hiding does to the observations.} The state chain is Markov; the \emph{observation} process is emphatically not. Marginalizing \eqref{eq:hmmjoint} over states, the predictive density of the next observation is
+\begin{equation}
+p(o_t \mid o_{1:t-1})
+\;=\; \sum_{j} p(s_t = j \mid o_{1:t-1})\; b_j(o_t),
+\label{eq:predictive}
+\end{equation}
+a mixture whose weights --- the \emph{predictive belief} $p(s_t \mid o_{1:t-1})$ --- depend on the \emph{entire} history $o_{1:t-1}$, not on any fixed number of lags: a long calm stretch sharpens the belief toward the calm state in a way no finite window of recent observations can summarize. This is Bishop's Exercise 13.3 in one sentence --- the HMM's observable process satisfies no conditional-independence property at any finite order --- and Exercise~\ref{ex:ci} proves it both structurally and by explicit counterexample. It is also, verbatim, the stylized fact that motivated the thesis: returns whose \emph{levels} are nearly uncorrelated but whose \emph{distribution} tomorrow depends on the whole past through a slowly-moving latent state (B \S B.1.3). The HMM is the smallest probabilistic machine with that behavior.
+
+\emph{Relation to Module 8, stated once and used everywhere.} Set every row of $\bA$ equal to $\bnu^\T$: then $s_t$ are i.i.d.\ draws from $\bnu$, \eqref{eq:hmmjoint} collapses to $\prod_t \nu_{s_t} b_{s_t}(o_t)$, and marginalizing gives $\prod_t \sum_k \nu_k b_k(o_t)$ --- exactly the static mixture (8.1.1). \emph{The HMM is Module 8's mixture with one new parameter object, the transition matrix; everything the transition matrix adds beyond its stationary row is persistence.} That sentence is made into a theorem in \S\ref{sec:gatevs}. Two extensions get a sentence each because both reappear: an \emph{autoregressive} HMM lets the emission condition on lagged observations, $b_j(o_t \mid o_{t-1:t-p})$ --- legal, since lags are observed, and it is Hamilton's actual specification (\S\ref{sec:hamilton}); an \emph{input--output} HMM lets transitions or emissions condition on exogenous features $\x_t$ --- the halfway house between this chapter and the NEC's gate.
+
+\begin{necbox}
+Foundations D \S D.6 warned that mean-field factorization fails exactly when latents are strongly coupled --- and flagged consecutive regime labels under persistence as the coming example. This chapter is that example. The posterior $p(s_{1:T} \mid o_{1:T})$ couples all $T$ labels through the chain, a factorized $q(s_{1:T}) = \prod_t q_t(s_t)$ would erase the very persistence the model exists to capture --- and the resolution is not approximation but \emph{structure}: the exact posterior is itself Markov, and forward--backward computes its marginals in $O(K^2 T)$. This is the one place in the book where the honest answer to an intractable-looking posterior is ``it is tractable after all, if you respect its graph.''
+\end{necbox}
+
+% =====================================================================
+\section{Filtering: the forward recursion}\label{sec:forward}
+% =====================================================================
+
+The first computational question: what is the likelihood $p(o_{1:T})$, and what does the model believe about the current regime as data arrive? Both are answered by one recursion. Define the \emph{forward variable}
+\begin{equation}
+\alpha_t(j) \;=\; p(o_{1:t},\, s_t = j).
+\label{eq:alphadef}
+\end{equation}
+Derive its recursion from the two rules and Lemma~\ref{lem:hmmci}, every step shown:
+\begin{align}
+\alpha_t(j)
+&= \sum_{i} p(o_{1:t},\, s_{t-1} = i,\, s_t = j)
+&&\text{(sum rule: marginalize $s_{t-1}$)}\notag\\
+&= \sum_{i} p(o_{1:t-1},\, s_{t-1} = i)\; p(s_t = j \mid o_{1:t-1}, s_{t-1} = i)\notag\\
+&\hspace{7.5em} \times\; p(o_t \mid o_{1:t-1},\, s_{t-1} = i,\, s_t = j)
+&&\text{(product rule, twice)}\notag\\
+&= \sum_{i} \alpha_{t-1}(i)\; a_{ij}\; b_j(o_t)
+&&\text{(Lemma \ref{lem:hmmci}: drop the extras)}\notag\\
+&= \Big( \sum_i \alpha_{t-1}(i)\, a_{ij} \Big)\, b_j(o_t),
+\qquad \alpha_1(j) = \rho_j\, b_j(o_1).
+\label{eq:forward}
+\end{align}
+The middle line is where the model earns its keep: the transition term loses its conditioning on $o_{1:t-1}$ and the emission term loses everything but $s_t = j$, both by Lemma~\ref{lem:hmmci}(i)--(ii). The likelihood falls out at the end, $p(o_{1:T}) = \sum_j \alpha_T(j)$, and the cost accounting is the syllabus's own exercise (with its typo corrected --- see the audit note in the preface): each of $T$ steps updates $K$ entries, each entry summing over $K$ predecessors, so the recursion costs $O(K^2 T)$; the naive alternative sums \eqref{eq:hmmjoint} over all $K^T$ state paths at $O(T)$ work each, $O(K^T\, T)$ --- the recursion turns an exponential path sum into a linear-in-$T$ matrix product. In vector form, with $\bm b_t = (b_1(o_t), \dots, b_K(o_t))^\T$ and $\odot$ elementwise: $\bm\alpha_t = (\bA^\T \bm\alpha_{t-1}) \odot \bm b_t$.
+
+\emph{Scaling, or the recursion you can actually run.} Each factor in \eqref{eq:forward} multiplies in one emission density and one transition probability, so $\alpha_t$ decays (or grows, for densities $> 1$) \emph{geometrically} in $t$ --- the same amplification arithmetic as (C \S C.7) and Module 7's $\rho^T$, and numerically fatal by $T$ in the low hundreds (Exercise~\ref{ex:forward}(c) quantifies; Module 8's Exercise on the log-domain pipeline did the same for one date). Two standard repairs. The \emph{log-domain} route: run \eqref{eq:forward} on $\log \alpha$ with LSE (B.6.10) --- always available, the mixture pipeline of Module 8 with a transition sum inside. The \emph{normalized} route --- more work, more insight: propagate the \emph{filtered posterior} $\alh_t(j) = p(s_t = j \mid o_{1:t})$ instead, in a predict--update pair,
+\begin{equation}
+\underbrace{p_{t|t-1}(j) = \sum_i \alh_{t-1}(i)\, a_{ij}}_{\text{predict: push belief through the chain}}
+\qquad
+\underbrace{\alh_t(j) = \frac{p_{t|t-1}(j)\; b_j(o_t)}{c_t}}_{\text{update: reweight by evidence (Bayes)}},
+\qquad
+c_t = \sum_j p_{t|t-1}(j)\, b_j(o_t),
+\label{eq:filter}
+\end{equation}
+with $\alh_1(j) = \rho_j b_j(o_1)/c_1$. The normalizers are not waste product: $c_t = p(o_t \mid o_{1:t-1})$ is the one-step predictive density \eqref{eq:predictive}, so the log-likelihood assembles as
+\begin{equation}
+\log p(o_{1:T}) \;=\; \sum_{t=1}^{T} \log c_t ,
+\label{eq:loglik}
+\end{equation}
+each term a bounded log-density --- nothing underflows, and the running sum is the model's cumulative one-step-ahead forecast score (a compression reading, D \S D.2: the HMM is charged per date for how well it predicted that date). The update step of \eqref{eq:filter} is Bayes' rule (B.2.1's arithmetic) applied at every $t$: predict--update is sequential Bayesian learning, and everything from the Kalman filter to Hamilton's filter (\S\ref{sec:hamilton}) is this pair with a different emission model.
+
+\begin{necbox}
+A physicist has seen \eqref{eq:forward} before: $\bm\alpha_t = (\bA^\T \bm\alpha_{t-1}) \odot \bm b_t$ is a \emph{transfer-matrix} recursion --- the likelihood is a path sum over latent trajectories, computed by contracting one time-slice at a time, exactly how the 1-D Ising partition function is evaluated; the forward variable propagates like a Green's function with the emissions acting as site-dependent absorption. The math syllabus flags this analogy deliberately: ``dynamic programming'' here is the discrete, probabilistic sibling of propagator composition --- and the reason the exponential path sum collapses is the same both times: the chain structure lets the sum factor through one interface at a time.
+\end{necbox}
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[Syllabus: the forward recursion, in full]\label{ex:forward}
+\prioCore
+(a) Derive the forward recursion \eqref{eq:forward} from the factorization \eqref{eq:hmmjoint}, showing every application of the sum rule, the product rule, and Lemma~\ref{lem:hmmci} --- in particular, state exactly which conditional-independence claim deletes which conditioning variables in the middle line.
+(b) Do the complexity accounting correctly (the syllabus's stated ``$O(NT^2)$ vs.\ $O(T^N)$'' is garbled --- fix it): show the recursion costs $O(K^2 T)$ operations and the naive path sum $O(K^T \cdot T)$, and evaluate both for $K = 3$, $T = 1000$. One sentence: which structural property of \eqref{eq:hmmjoint} makes the collapse possible?
+(c) Scaling: argue that $\log \alpha_t(j)$ drifts linearly in $t$ (at rate set by the typical log emission density plus log transition probability), so raw $\alpha$ under- or overflows geometrically; then derive the normalized predict--update recursion \eqref{eq:filter} from \eqref{eq:forward} by dividing through by $p(o_{1:t})$, identify $c_t$ as the one-step predictive density, and prove the log-likelihood identity \eqref{eq:loglik} by telescoping $p(o_{1:T}) = \prod_t p(o_t \mid o_{1:t-1})$.
+(d) State the log-domain alternative (LSE over $\log \alpha_{t-1}(i) + \log a_{ij}$, then $+\log b_j(o_t)$ --- Module 8's pipeline with a transition sum inside), and give one reason to prefer each route in practice (interpretability of $\alh$ and $c_t$ vs.\ uniformity with the rest of a log-domain codebase).
+\end{exercise}
+
+
+% =====================================================================
+\section{Smoothing: the backward recursion, $\gamma$, and $\xi$}\label{sec:smooth}
+% =====================================================================
+
+Filtering asks what you know \emph{now}; learning (Baum--Welch, \S\ref{sec:bw}) needs what you know about each date \emph{after seeing everything}. The missing half is the \emph{backward variable}
+\begin{equation}
+\beta_t(i) \;=\; p(o_{t+1:T} \mid s_t = i),
+\qquad \beta_T(i) \equiv 1,
+\label{eq:betadef}
+\end{equation}
+the probability of the entire remaining future given the present state ($\beta_T = 1$ because an empty future has probability one --- the empty product). Its recursion runs right to left, by the same three moves as \eqref{eq:forward}:
+\begin{align}
+\beta_t(i)
+&= \sum_j p(o_{t+1:T},\, s_{t+1} = j \mid s_t = i)
+&&\text{(sum rule)}\notag\\
+&= \sum_j p(s_{t+1} = j \mid s_t = i)\; p(o_{t+1} \mid s_{t+1} = j)\; p(o_{t+2:T} \mid s_{t+1} = j)
+&&\text{(product rule + Lemma \ref{lem:hmmci})}\notag\\
+&= \sum_j a_{ij}\; b_j(o_{t+1})\; \beta_{t+1}(j).
+\label{eq:backward}
+\end{align}
+Note the asymmetry of the pair, worth internalizing rather than memorizing: $\alpha$ \emph{contains} its own date's emission, $\beta$ does not --- $\alpha_t \beta_t$ therefore covers each factor of \eqref{eq:hmmjoint} exactly once, which is precisely why the smoothing formulas below have no double-counting corrections.
+
+\emph{Smoothed marginals.} Because the past-and-present block $(o_{1:t}, s_t)$ and the future block $o_{t+1:T}$ are linked only through $s_t$ (Lemma~\ref{lem:hmmci}(i)),
+\begin{equation}
+p(o_{1:T},\, s_t = i) = \alpha_t(i)\, \beta_t(i)
+\qquad\Longrightarrow\qquad
+\resp_t(i) \;=\; p(s_t = i \mid o_{1:T}) \;=\; \frac{\alpha_t(i)\, \beta_t(i)}{p(o_{1:T})},
+\label{eq:gamma}
+\end{equation}
+with $p(o_{1:T}) = \sum_j \alpha_t(j)\beta_t(j)$ for \emph{every} $t$ --- a free numerical consistency check across the whole sequence. The pairwise version, needed by the M-step's transition counts, comes from one more application of the same logic:
+\begin{equation}
+\xi_t(i, j) \;=\; p(s_t = i,\, s_{t+1} = j \mid o_{1:T})
+\;=\; \frac{\alpha_t(i)\; a_{ij}\; b_j(o_{t+1})\; \beta_{t+1}(j)}{p(o_{1:T})} .
+\label{eq:xi}
+\end{equation}
+Read the numerator left to right: everything up to $t$ ending in state $i$; the transition; the next emission; everything after. The marginals are consistent by construction: $\sum_j \xi_t(i,j) = \resp_t(i)$ and $\sum_i \xi_t(i,j) = \resp_{t+1}(j)$ (Exercise~\ref{ex:smooth} verifies both).
+
+\emph{Scaled versions.} In practice one runs the normalized filter \eqref{eq:filter} and the correspondingly scaled backward pass $\hat\beta_t(i) = \beta_t(i) \big/ \prod_{u > t} c_u$, whose recursion is \eqref{eq:backward} with an extra division by $c_{t+1}$. Then the smoothing formulas lose their explicit normalizers: $\resp_t(i) = \alh_t(i)\hat\beta_t(i)$ and $\xi_t(i,j) = \alh_t(i)\, a_{ij}\, b_j(o_{t+1})\, \hat\beta_{t+1}(j)/c_{t+1}$ --- every quantity $O(1)$, every formula one line from its unscaled parent (Exercise~\ref{ex:smooth}(d) derives both; the applied milestone implements them).
+
+\begin{finbox}
+The filtering/smoothing distinction is not bookkeeping --- in this pipeline it is a \emph{leakage boundary}. The filtered probability $\alh_t$ uses data through $t$: it is computable in real time and legal as a trading input. The smoothed probability $\resp_t$ uses $o_{t+1:T}$: it knows the future, by construction --- a regime flag for 2008-09-15 computed by smoothing over data through 2009 ``knew'' Lehman was coming. The classic Markov-switching backtest sin is fitting a model on the full sample and feeding \emph{smoothed} regime probabilities into a strategy as if they had been available in real time; the resulting regime timing looks clairvoyant because it is. Module 5 \S5.4's information-set discipline, restated for this chapter: \emph{smoothed quantities may describe history (regime dating, exhibits, diagnostics); only filtered quantities --- from models fit on data available at the time, per the walk-forward protocol --- may touch a backtest.} Exercise~\ref{ex:hamilton}(d) turns this into the thesis's protocol clause.
+\end{finbox}
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[Syllabus: backward recursion and forward--backward smoothing]\label{ex:smooth}
+\prioCore
+(a) Derive the backward recursion \eqref{eq:backward} symmetrically to Exercise~\ref{ex:forward}(a), stating where each conditional-independence property enters, and justify the terminal condition $\beta_T \equiv 1$ in one sentence.
+(b) Prove the splice identity $p(o_{1:T}, s_t = i) = \alpha_t(i)\beta_t(i)$ from Lemma~\ref{lem:hmmci}(i), conclude the smoothed marginal \eqref{eq:gamma}, and explain why $\sum_j \alpha_t(j)\beta_t(j)$ is independent of $t$ --- then turn that into a unit test for an implementation.
+(c) Derive the pairwise marginal \eqref{eq:xi} and verify both consistency conditions: $\sum_j \xi_t(i,j) = \resp_t(i)$ and $\sum_i \xi_t(i,j) = \resp_{t+1}(j)$.
+(d) Scaled smoothing: define $\hat\beta_t(i) = \beta_t(i)/\prod_{u>t} c_u$, derive its recursion (one extra division by $c_{t+1}$ relative to \eqref{eq:backward}), and show $\resp_t = \alh_t \odot \hat\beta_t$ and the scaled $\xi$ formula stated in the text. Why is every scaled quantity $O(1)$?
+(e) One sentence each: what question does $\alh_t$ answer, what question does $\resp_t$ answer, and which one is allowed inside a backtest (cite the information-set rule of Module 5 \S5.4)?
+\end{exercise}
+
+
+% =====================================================================
+\section{Decoding: Viterbi}\label{sec:viterbi}
+% =====================================================================
+
+Filtering and smoothing deliver per-date \emph{probabilities}. A different question --- ``what is the single most probable regime \emph{history}?'' --- has a different answer, and conflating the two is a real error, not a pedantic one. The \emph{Viterbi algorithm} computes the joint MAP path $\argmax_{s_{1:T}} p(s_{1:T} \mid o_{1:T})$ by replacing the forward recursion's sum with a max. Define
+\begin{equation}
+\delta_t(j) \;=\; \max_{s_{1:t-1}}\; p(o_{1:t},\, s_{1:t-1},\, s_t = j),
+\label{eq:deltadef}
+\end{equation}
+the probability of the best partial path ending in state $j$. Because $\max$ distributes over products of nonnegative factors exactly as $\sum$ distributes over sums --- both are instances of the same distributive law, which is the entire ``max-product vs.\ sum-product'' slogan --- the derivation of \eqref{eq:forward} goes through with $\sum_i$ replaced by $\max_i$:
+\begin{equation}
+\delta_t(j) = \Big( \max_i\; \delta_{t-1}(i)\, a_{ij} \Big)\, b_j(o_t),
+\qquad
+\psi_t(j) = \argmax_i\; \delta_{t-1}(i)\, a_{ij},
+\qquad
+\delta_1(j) = \rho_j b_j(o_1),
+\label{eq:viterbi}
+\end{equation}
+with \emph{backpointers} $\psi_t(j)$ recording which predecessor achieved each max. Terminate with $s_T^\ast = \argmax_j \delta_T(j)$ and reconstruct backward, $s_{t}^\ast = \psi_{t+1}(s_{t+1}^\ast)$ --- the standard dynamic-programming traceback. Cost: $O(K^2 T)$, same as forward; numerics: run it on $\log \delta$, where the products become sums and nothing underflows (no LSE needed --- max commutes with log).
+
+\emph{Why the argmax of the marginals is not the MAP path.} The pointwise-most-probable sequence $\tilde s_t = \argmax_i \resp_t(i)$ maximizes the number of individually correct dates; the Viterbi path maximizes the probability of the \emph{whole trajectory}. They differ whenever the marginals are individually ambivalent but the chain is strict about transitions --- in the extreme, the pointwise sequence can chain two states with $a_{ij} = 0$ and have \emph{zero} posterior probability as a path (Exercise~\ref{ex:viterbi}(d) constructs exactly this). The division of labor for the thesis: Viterbi for regime \emph{dating} exhibits (one coherent historical narrative, e.g.\ shading recession bands); smoothed marginals for per-date diagnostic probabilities; filtered probabilities --- and only these --- for anything that trades. And when a probability will be \emph{used} downstream (position sizing, gate weighting), report the probability, not its argmax: hardening a posterior discards calibrated information, which is Module 4 \S4.9's proper-scoring lesson and the NEC defect-1 story (B \S B.8.4) in classical costume.
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[Syllabus: Viterbi as max-product]\label{ex:viterbi}
+\prioCore
+(a) Derive the Viterbi recursion \eqref{eq:viterbi} by repeating the forward derivation \eqref{eq:forward} with $\max$ in place of $\sum$, and state the one algebraic property of $(\max, \times)$ on nonnegative reals that makes the substitution legitimate (distributivity: $\max_i c\, x_i = c \max_i x_i$ for $c \ge 0$).
+(b) Prove correctness of the traceback: if $\delta_t(j)$ is the value of the best partial path ending in $(t, j)$, show by induction that following backpointers from $\argmax_j \delta_T(j)$ reconstructs a maximizer of $p(o_{1:T}, s_{1:T})$, and explain why maximizing the joint is equivalent to maximizing the posterior $p(s_{1:T} \mid o_{1:T})$.
+(c) State the log-domain form and explain in one sentence why Viterbi needs only $\log$, while the forward recursion needs LSE.
+(d) Construct a three-state, two-step example in which the pointwise sequence $\tilde s_t = \argmax_i \resp_t(i)$ has posterior probability \emph{zero} as a path. \emph{(Hint --- verified realizable: forbid $1 \to 3$ by setting $a_{13} = 0$; give state 1 a slight edge in the time-1 marginal (e.g.\ $\resp_1 \approx (0.52,\, 0.48,\, 0)$) while routing state 2's transition mass into state 3 ($a_{23} \approx 0.9$); let the time-2 evidence favor state 3. Then $\resp_2$'s winner is state 3, so the pointwise sequence is $(1, 3)$ --- a path of posterior probability exactly zero --- while Viterbi returns $(2, 3)$.)} One sentence: which quantity --- Viterbi path, smoothed marginals, filtered probabilities --- does the thesis report where, and why?
+\end{exercise}
+
+
+% =====================================================================
+\section{Baum--Welch: EM with dynamic programming inside}\label{sec:bw}
+% =====================================================================
+
+Estimation closes the loop with Module 8. The incomplete-data log-likelihood $\log p(o_{1:T} \mid \theta)$, $\theta = (\brho, \bA, \{\text{emission params}\})$, has the same log-outside-the-sum obstruction as (8.2.1) --- now with $K^T$ terms instead of $K$. The EM resolution is unchanged (D \S D.5, executed in Module 8); what changes is only \emph{how the E-step is computed}. Writing $z_{tk} = \mathbf{1}[s_t = k]$ one-hot, the complete-data log-likelihood of \eqref{eq:hmmjoint} is
+\begin{equation}
+\log p(o_{1:T}, s_{1:T} \mid \theta)
+= \sum_k z_{1k} \log \rho_k
+\;+\; \sum_{t=2}^{T} \sum_{i,j} z_{t-1,i}\, z_{tj} \log a_{ij}
+\;+\; \sum_{t=1}^{T} \sum_k z_{tk} \log b_k(o_t),
+\label{eq:hmmcomplete}
+\end{equation}
+linear in the indicators and their adjacent products --- so the E-step needs exactly two kinds of posterior expectations: $\E[z_{tk} \mid o_{1:T}] = \resp_t(k)$ and $\E[z_{t-1,i} z_{tj} \mid o_{1:T}] = \xi_{t-1}(i,j)$. \emph{That is the entire reason forward--backward exists in this chapter}: the smoothed marginals are the expected sufficient statistics of \eqref{eq:hmmcomplete}, computed in $O(K^2T)$ by dynamic programming --- Module 8's responsibilities, upgraded from a per-sample Bayes rule (8.3.1) to a per-sequence one. The expected complete-data objective $Q(\theta) = \E_q[\log p(o, s \mid \theta)]$ then splits into three independent blocks --- initial, transition, emission --- and each maximizes in closed form (Exercise~\ref{ex:baumwelch}, which absorbs Bishop's Exercise 13.5):
+\begin{equation}
+\hat\rho_k = \resp_1(k),
+\qquad
+\hat a_{ij} = \frac{\sum_{t=1}^{T-1} \xi_t(i,j)}{\sum_{t=1}^{T-1} \resp_t(i)},
+\qquad
+\hat\mu_k = \frac{\sum_t \resp_t(k)\, o_t}{\sum_t \resp_t(k)},
+\quad
+\hat\sigma_k^2 = \frac{\sum_t \resp_t(k)\, (o_t - \hat\mu_k)^2}{\sum_t \resp_t(k)}
+\label{eq:bwmstep}
+\end{equation}
+(Gaussian emissions shown; the emission block is \emph{verbatim} Module 8's weighted MLE (8.3.2), because \eqref{eq:hmmcomplete}'s emission term is identical to the mixture's --- the chain changes how responsibilities are computed, not what is done with them). Read the transition update as soft counting: $\hat a_{ij}$ is expected transitions $i \to j$ over expected visits to $i$ --- the complete-data frequency estimate with hard counts softened, exactly the pattern of (8.3.2). Iterate E and M; monotonicity is inherited wholesale from Foundations D (Ex.\ D.3(d)), since Baum--Welch \emph{is} EM with a structured posterior.
+
+\emph{Failure modes: the Module 8 trio plus two of its own.} Collapse (a state claims one observation, $\sigma_k \to 0$, likelihood unbounded), label switching ($K!$ relabelings --- now of \emph{regime histories}), and local optima (multiple restarts, log them in the Module 5 registry) all transfer unchanged, with the same remedies (variance floors or MAP-EM; a declared alignment statistic; $K$-means-style initialization of emissions). New, chain-specific: (i) \emph{freezing}, $\bA \to \bm I$ --- with overlapping emissions, EM can explain the data as ``one regime per long block'' and push diagonal entries to 1, at which point states stop mixing and the model degenerates into a changepoint fit; watch expected durations \eqref{eq:sojourn} during training, and floor off-diagonals if needed. (ii) \emph{Zero-locking}: any $\rho_k$ or $a_{ij}$ initialized (or driven) to exactly zero stays zero forever --- the updates \eqref{eq:bwmstep} multiply through $\xi \propto a_{ij}$, so a zero transition can never resurrect (Bishop's Exercise 13.6, absorbed as Exercise~\ref{ex:baumwelch}(e)). Initialize strictly positive unless a zero is a modeling assertion.
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[Syllabus: Baum--Welch, from $Q$ to closed forms; absorbs Bishop Ex.\ 13.5--13.6]\label{ex:baumwelch}
+\prioCore
+(a) Take expectations of \eqref{eq:hmmcomplete} under the posterior $q(s_{1:T}) = p(s_{1:T} \mid o_{1:T}, \theta^{\mathrm{old}})$ and show $Q(\theta)$ depends on $q$ only through $\{\resp_t(k)\}$ and $\{\xi_t(i,j)\}$ --- the expected sufficient statistics --- and splits into three additively separate blocks.
+(b) Maximize the initial and transition blocks under their simplex constraints with Lagrange multipliers (the KKT machinery of Module 4 \S4.3; this is Bishop Ex.\ 13.5 in this book's notation): derive $\hat\rho_k = \resp_1(k)$ and $\hat a_{ij} = \sum_{t<T} \xi_t(i,j) / \sum_{t<T} \resp_t(i)$, and check each multiplier's value against the constraint it enforces.
+(c) Maximize the Gaussian emission block and recover the weighted-MLE forms in \eqref{eq:bwmstep}; state in one sentence why this block is identical to Module 8's M-step (8.3.2).
+(d) Assemble the full algorithm (scaled E-step \eqref{eq:filter}/\eqref{eq:gamma}/\eqref{eq:xi}, M-step \eqref{eq:bwmstep}), state its per-iteration cost, and cite the monotonicity guarantee it inherits (D, Ex.\ D.3(d)) --- no re-proof.
+(e) Zero-locking (Bishop Ex.\ 13.6): show that if $a_{ij} = 0$ at some iteration then $\xi_t(i,j) = 0$ for all $t$, hence $\hat a_{ij} = 0$ at every subsequent iteration (and similarly for $\rho_k$); state the initialization rule this implies.
+\end{exercise}
+
+
+% =====================================================================
+\section{Hamilton's Markov-switching models: the classical baseline}\label{sec:hamilton}
+% =====================================================================
+
+Hamilton (1989) is, in this chapter's language, an HMM with Gaussian emissions whose parameters --- means, volatilities, regression coefficients --- switch with the state; his filter, derived independently in econometrics, is the normalized forward recursion \eqref{eq:filter}. That identification is the syllabus's own exercise, and it is worth doing carefully because the econometric costume obscures how little is new.
+
+\emph{Markov-switching mean and volatility.} The baseline specification for a return series:
+\begin{equation}
+r_t = \mu_{s_t} + \sigma_{s_t}\, \varepsilon_t,
+\qquad \varepsilon_t \overset{\text{iid}}{\sim} \Normal(0, 1),
+\qquad s_t \sim \text{two-state chain \eqref{eq:twostate}}.
+\label{eq:msmodel}
+\end{equation}
+As an HMM: emission densities $b_j(r_t) = \Normal(r_t \mid \mu_j, \sigma_j^2)$, everything else untouched. The \emph{Hamilton filter} is \eqref{eq:filter} with these emissions --- predict the regime with the chain, update with the Gaussian likelihood of today's return, collect $\log c_t$ for the sample log-likelihood \eqref{eq:loglik}. Nothing else changes: that is the entire answer to ``what changes between the general HMM filter and Hamilton's,'' and Exercise~\ref{ex:hamilton}(a) has you verify it line by line. (Hamilton's paper works with $\hat\xi_{t|t}$, his notation for our $\alh_t$, and estimates by numerically maximizing \eqref{eq:loglik}; Baum--Welch maximizes the same objective by EM --- two optimizers, one likelihood. Smoothed inference in econometrics is associated with Kim (1994); it is our $\resp_t$, computed by the backward pass.)
+
+\emph{Hamilton's actual model, and MS regression.} The 1989 specification is autoregressive --- quarterly GNP growth with a switching mean and AR(4) dynamics in the deviations, $y_t - \mu_{s_t} = \sum_{\ell=1}^{4} \phi_\ell (y_{t-\ell} - \mu_{s_{t-\ell}}) + \varepsilon_t$. In HMM terms this is an \emph{autoregressive} HMM (\S\ref{sec:hmm}): emissions condition on \emph{observed} lags, which leaves every recursion of this chapter intact --- $b_j$ simply gains observed arguments. (Hamilton's lagged-\emph{state} dependence enlarges the state to the tuple $(s_t, \dots, s_{t-4})$, a bookkeeping expansion of $K$; Exercise~\ref{ex:hamilton}(b) handles the clean one-lag case and notes the general bookkeeping.) The version the thesis cares about is \emph{Markov-switching regression}:
+\begin{equation}
+y_t = \x_t^\T \bm\beta_{s_t} + \sigma_{s_t}\, \varepsilon_t
+\qquad\Longleftrightarrow\qquad
+b_j(y_t \mid \x_t) = \Normal\big(y_t \mid \x_t^\T \bm\beta_j,\; \sigma_j^2\big):
+\label{eq:msreg}
+\end{equation}
+per-regime linear predictors with a Markov-switching label --- \emph{linear experts with a Markov gate}. The Baum--Welch M-step for \eqref{eq:msreg} is a $\resp$-weighted least squares per regime (Module 4's Exercise 4.9, the third time it has been the M-step), and the whole model is the generative twin of the NEC that Section~\ref{sec:gatevs} dissects.
+
+\emph{Why regime models fit returns: both stylized facts from one mechanism.} Foundations B \S B.7.3 proved that mixing Gaussian variances produces excess kurtosis. Persistence now delivers the second stylized fact. Under \eqref{eq:msmodel} with $\mu_1 = \mu_2 = 0$ (volatility switching only, the empirically dominant effect), stationarity, and $I_t = \mathbf{1}[s_t = 1]$:
+
+\begin{proposition}[Persistence is volatility clustering]\label{prop:volclust}
+$r_t^2 = \sigma_{s_t}^2 \varepsilon_t^2$ with $\varepsilon$ independent of the chain, so for $k \ge 1$,
+\[
+\Cov\big(r_t^2,\, r_{t+k}^2\big)
+= \Cov\big(\sigma_{s_t}^2,\, \sigma_{s_{t+k}}^2\big)
+= \nu_1 \nu_2\, \big(\sigma_1^2 - \sigma_2^2\big)^2\, \lambda_2^{\,k}
+\;>\; 0
+\quad (\sigma_1 \ne \sigma_2,\ \lambda_2 > 0),
+\]
+while $\Cov(r_t, r_{t+k}) = 0$: returns uncorrelated, squared returns positively autocorrelated with geometric decay at rate $\lambda_2$.
+\end{proposition}
+\begin{proof}
+Independence of $\varepsilon$ from the chain and $\E[\varepsilon_t^2] = 1$ give $\Cov(r_t^2, r_{t+k}^2) = \Cov(\sigma^2_{s_t}, \sigma^2_{s_{t+k}})$ for $k \ge 1$ (the $\varepsilon^2$ factors integrate out --- B \S B.1.3's independence rules). Write $\sigma^2_{s_t} = \sigma_2^2 + (\sigma_1^2 - \sigma_2^2) I_t$ and apply Lemma~\ref{lem:indcov} with linearity of covariance. For the levels: $\E[r_t r_{t+k}] = \E[\sigma_{s_t}\sigma_{s_{t+k}}]\,\E[\varepsilon_t]\E[\varepsilon_{t+k}] = 0$.
+\end{proof}
+
+This one proposition is the quantitative completion of the thesis's founding argument: a two-parameter latent chain reproduces \emph{both} halves of Foundations B \S B.7's stylized-fact list --- fat tails from variance mixing (B.7.3, weights now $\bnu$), volatility clustering from persistence --- and identifies the ACF decay rate of $r^2$ with the chain's second eigenvalue. Calibration: daily $a_{11} = 0.99$, $a_{22} = 0.97$ gives $\lambda_2 = 0.96$, a squared-return ACF half-life of $\log 2 / \log(1/0.96) \approx 17$ trading days, and expected regime durations of $100$ and $\approx 33$ days --- the weeks-to-months persistence the NEC's gate is being built to see. Exercise~\ref{ex:msmoments} generalizes to $K$ states and switching means (where return \emph{levels} acquire autocorrelation --- predictability itself as a regime effect).
+
+\emph{Choosing and testing the number of regimes.} The likelihood-ratio test of ``$K$ vs.\ $K-1$ regimes'' is nonstandard: under the null, the extra regime's parameters are unidentified (any $\mu, \sigma$ works when its weight is zero) and the parameter sits on a boundary, so the usual $\chi^2$ asymptotics fail --- the same boundary pathology flagged for mixtures in Module 8's Exercise on choosing $K$, and the honest reason applied work reports information criteria, held-out likelihood (D \S D.2's compression reading), and robustness across $K$ rather than a single $p$-value.
+
+\begin{necbox}
+The Hamilton model is the thesis's \emph{classical baseline} --- the model the corrected NEC must beat for the thesis to claim that feature-conditioned gating adds value beyond persistence alone. That framing dictates the protocol: fit \eqref{eq:msmodel} (and, as a stronger variant, \eqref{eq:msreg} on the same features the NEC sees) by Baum--Welch with restarts, on training windows only; produce \emph{filtered} probabilities out of sample by running \eqref{eq:filter} forward with frozen parameters; evaluate under exactly the Module 5 protocol as every other contestant; align regime labels across folds by a declared statistic (ascending $\sigma_k$) before any per-regime table. A Hamilton baseline evaluated on smoothed probabilities is not a baseline, it is an oracle --- and beating an oracle is neither required nor possible.
+\end{necbox}
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[Syllabus: the Hamilton filter as HMM filtering]\label{ex:hamilton}
+\prioCore
+(a) Specialize the normalized forward recursion \eqref{eq:filter} to the Markov-switching mean--volatility model \eqref{eq:msmodel}: write the predict and update steps explicitly with Gaussian emissions, give the log-likelihood \eqref{eq:loglik} in terms of the $c_t$, and answer the syllabus's question precisely: what changes relative to the general HMM filter, and what does not? (Answer shape: only the emission model $b_j$; the recursion, the normalizers, and the likelihood assembly are untouched.)
+(b) Autoregressive emissions: for the one-lag switching-mean model $y_t - \mu_{s_t} = \phi\,(y_{t-1} - \mu_{s_{t-1}}) + \varepsilon_t$, show that conditioning on the \emph{observed} lag $y_{t-1}$ leaves the filter's structure intact once the state is enlarged to the pair $(s_t, s_{t-1})$ (write the enlarged transition matrix and its size), and state the general bookkeeping for $p$ lags of state dependence. Why does dependence on lagged \emph{observations} alone (no lagged state) require no enlargement at all?
+(c) Markov-switching regression \eqref{eq:msreg}: write its Baum--Welch M-step and verify the coefficient update is responsibility-weighted least squares per regime (Module 4, Ex.\ 4.9) with weights $\resp_t(k)/\sigma_k^2$, and the variance update the $\resp$-weighted mean squared residual --- the third appearance of this M-step pattern (after Module 8's Exercises on the GMM and the MoE).
+(d) The leakage clause: state precisely which of $\alh_t$ (filtered) and $\resp_t$ (smoothed) is legal as a real-time trading input and why, invoking Module 5 \S5.4's information-set discipline; then write the two-sentence protocol clause the thesis's Hamilton baseline must satisfy (fit window, frozen-parameter out-of-sample filtering, label alignment across folds).
+\end{exercise}
+
+
+% =====================================================================
+\section{Markov gating versus feature gating: the thesis's axis}\label{sec:gatevs}
+% =====================================================================
+
+Everything is now in place to state the thesis's central comparison as mathematics rather than as a slogan. Three regime-switching mechanisms compete, and classical econometrics already contains two of them.
+
+\emph{The classical taxonomy (Tsay Ch.\ 4, compressed).} A \emph{threshold} model (TAR/SETAR) switches on an \emph{observed} trigger: regime $= \mathbf{1}[q_{t-d} > c]$ for a threshold variable $q$ (a lagged return, a volatility proxy), delay $d$, threshold $c$ --- a hard, one-feature gate, $\argmax$ routing included. A \emph{smooth-transition} model (STAR) replaces the indicator with a logistic weight, $G(q_{t-d}) = \sigma\big(\kappa\,(q_{t-d} - c)\big)$, blending two regressions continuously --- a \emph{sigmoid gate on one feature}, Module 4's logistic machinery in 1970s--80s econometric dress, temperature $1/\kappa$ and all (B \S B.6.3). A \emph{Markov-switching} model (Hamilton) makes the regime \emph{latent and persistent}: no observed trigger, state inferred by filtering, memory supplied by $\bA$. The classical literature thus separates the two design axes the NEC entangles: \emph{what drives the regime} (observed features vs.\ latent state) and \emph{what carries its memory} (the features' own dynamics vs.\ an explicit transition matrix).
+
+\emph{The two gates, formalized.} Write both as latent-label models for $y_t$ given information at $t$ (experts $p_k(y_t \mid \x_t)$ shared, so the comparison isolates the gate):
+\begin{align}
+\text{Markov gate (Hamilton):}\qquad
+& p(s_{1:T}) = \rho_{s_1} \prod_{t \ge 2} a_{s_{t-1} s_t},
+\label{eq:markovgate}\\
+\text{Feature gate (MoE / NEC):}\qquad
+& p(z_t = k \mid \x_t) = \pi_k(\x_t) = \mathrm{softmax}_k\big(g(\x_t)\big).
+\label{eq:featuregate}
+\end{align}
+Under \eqref{eq:markovgate} beliefs are updated by filtering \eqref{eq:filter}; under \eqref{eq:featuregate} the labels are independent across $t$ given the features. The structural difference is the \emph{joint law of the labels}: under \eqref{eq:markovgate} the labels are mutually dependent --- the likelihood couples all dates and inference requires the machinery of this chapter --- while under \eqref{eq:featuregate} the labels are conditionally independent given the feature path, the likelihood factorizes date by date into Module 8's per-sample mixtures, and ``inference'' is a forward pass. Persistence, if the feature gate exhibits any, is inherited from persistence \emph{in the features}; persistence in the Markov gate is a free-standing parameter.
+
+\begin{proposition}[Degenerate equivalence]\label{prop:degenerate}
+If the transition matrix has identical rows, $a_{ij} = \nu_j$ for all $i$ (equivalently $\bA = \bm 1 \bnu^\T$, equivalently $\lambda_2 = \dots = \lambda_K = 0$), then the labels are i.i.d.\ $\bnu$, the Markov-gated model's likelihood collapses to the static mixture $\prod_t \sum_k \nu_k\, p_k(y_t \mid \x_t)$, and it coincides with the feature-gated model \eqref{eq:featuregate} with a constant gate $\pi_k(\x) \equiv \nu_k$. Conversely, a feature gate that ignores its features is a Markov gate with identical rows: \emph{the two mechanisms intersect exactly at the memoryless, feature-blind mixture of Module 8}.
+\end{proposition}
+
+Exercise~\ref{ex:gatevs} proves it, and the reading is the syllabus's requested sentence made precise: \emph{everything the transition matrix encodes beyond its stationary distribution is persistence; everything the gate encodes beyond a constant is feature response.} The two models are not rivals on a single scale --- they extend the same base model along orthogonal axes, which is why the thesis's phrase is ``replaces \emph{or augments}.''
+
+\emph{The containment direction: filtering is a recurrent gate.} The predict--update map \eqref{eq:filter} is a deterministic function
+\begin{equation}
+\alh_t \;=\; F\big( \alh_{t-1},\, o_t \big)
+\;=\; \frac{ \big(\bA^\T \alh_{t-1}\big) \odot \bm b(o_t) }{ \bm 1^\T \big[ \big(\bA^\T \alh_{t-1}\big) \odot \bm b(o_t) \big] } :
+\label{eq:beliefrnn}
+\end{equation}
+a recurrent cell whose hidden state is the belief vector on the simplex --- a tiny, hand-specified recurrent encoder in Module 7's exact sense, with $K - 1$ effective dimensions --- followed by a gate that reads the state. A learned recurrent encoder with a softmax head --- exactly the NEC's architecture --- can therefore \emph{represent} filtered Markov gating whenever the emissions' inputs are among its features: the belief update is just one particular parameterization of a recurrent transition. That is the precise sense in which feature-conditioned recurrent gating \emph{contains} the Hamilton gate representationally. Two honest counterweights keep the claim from inflating. First, containment is not attainment: the NEC must \emph{learn} from finite, noisy data a map the Hamilton model gets by assumption for two parameters --- the bias--variance budget (B.5.1) prices that gap, and at financial SNR the two-parameter prior is formidable. Second, the data-processing inequality (D, Theorem D.1.1) caps both: gate informativeness about future returns cannot exceed the window's information, however the routing is parameterized --- Markov, learned, or hybrid.
+
+\begin{finbox}
+What each gate buys, in the currency the thesis trades in. The Markov gate buys \emph{sample efficiency and interpretability}: persistence enters as two-ish parameters, expected durations \eqref{eq:sojourn} are readable numbers a committee can check against known market history, and the filter's probabilities come with a generative model's calibration story. Its cost: the gate is blind to everything except the modeled series --- cross-sectional breadth, exogenous conditioning variables, nonlinear feature interactions are all invisible, and its generative emissions inherit the tail fragility that made Module 4 \S4.7 prefer discriminative fits on ugly features. The feature gate buys \emph{conditioning breadth} --- anything in $\x_t$, including encoder summaries of the same history the filter reads --- at the price of learning persistence from data, more parameters, and the training pathologies of B \S B.8. The NEC's bet, stated in this chapter's language: that markets' regime variable is better identified by a wide feature set read through a learned recurrent belief than by the return series read through a two-parameter chain. The Hamilton baseline exists to make that bet falsifiable.
+\end{finbox}
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[Syllabus: Markov gating vs.\ feature-conditioned gating, proven]\label{ex:gatevs}
+\prioCore
+Throughout, share the experts $p_k(y_t \mid \x_t)$ so that only the gates differ.
+(a) State the structural difference precisely: write the joint law of $(y_{1:T}, \text{labels})$ under the Markov gate \eqref{eq:markovgate} and under the feature gate \eqref{eq:featuregate}, and identify which conditional-independence statement holds for the labels in each (labels coupled through the chain vs.\ labels independent given the feature path). Conclude which model's likelihood factorizes over $t$ and which requires this chapter's recursions.
+(b) Prove Proposition~\ref{prop:degenerate}: (i) identical rows $\Rightarrow$ the chain forgets its past in one step, so labels are i.i.d.\ $\bnu$ (show $p(s_t \mid s_{t-1}) = \nu_{s_t}$ and induct); (ii) the resulting likelihood equals the static mixture (8.1.1)-style product; (iii) a constant feature gate gives the same product; (iv) verify the eigenvalue characterization: $\bA = \bm 1\bnu^\T$ iff all non-unit eigenvalues vanish.
+(c) The containment direction: verify that the filter map \eqref{eq:beliefrnn} is a well-defined recurrent update on the probability simplex (nonnegativity, normalization), and argue in one paragraph that a recurrent encoder over inputs including $o_t$, followed by a softmax head, can represent this map --- then state the two counterweights from the text (finite-sample learnability; the DPI ceiling, D Theorem D.1.1) that keep representational containment from implying empirical dominance.
+(d) Two sentences each: what the Markov gate wins (persistence as a two-parameter prior; readable durations; calibrated generative probabilities) and what the feature gate wins (conditioning breadth; discriminative robustness, Module 4 \S4.7); and one sentence on why the thesis therefore runs \emph{both} under the single pre-registered protocol of Module 5 \S5.9.
+\end{exercise}
+
+
+% =====================================================================
+\section{Capstone: the classical baseline, assembled}\label{sec:capstone}
+% =====================================================================
+
+The chapter's deliverable to the thesis is a baseline you can fit, evaluate, and defend line by line.
+
+\emph{Model menu.} Primary: two- and three-state Markov-switching mean--volatility \eqref{eq:msmodel} on the target return series. Stronger variant (closer fight): Markov-switching regression \eqref{eq:msreg} on the same features the NEC consumes. Both fitted per training window of the walk-forward protocol.
+
+\emph{Fitting.} Baum--Welch \eqref{eq:bwmstep} with the scaled E-step \eqref{eq:filter}--\eqref{eq:xi}; emissions initialized from a volatility-sorted split (or $K$-means on rolling volatility), transitions initialized persistent ($a_{ii} \approx 0.95$, strictly positive off-diagonals --- zero-locking, Exercise~\ref{ex:baumwelch}(e)); variance floors against collapse; multiple restarts with every restart logged in the Module 5 trial registry; convergence monitored on \eqref{eq:loglik}, which must be monotone under full EM steps.
+
+\emph{Out-of-sample protocol.} Freeze parameters at the end of each training window; run the filter \eqref{eq:filter} forward through the test block; everything the strategy or the evaluation sees is \emph{filtered} (Exercise~\ref{ex:hamilton}(d)'s clause). Smoothed probabilities and Viterbi paths appear only in historical exhibits, labeled as such.
+
+\emph{Reporting.} Align regimes across folds by ascending $\sigma_k$ before averaging anything per-regime (Module 8's label-switching clause, now with histories); report the duration table $1/(1 - \hat a_{kk})$ against eyeball market history; report per-regime means, volatilities, and --- for \eqref{eq:msreg} --- coefficients with the Module 4 \S4.1 caveats about correlated features.
+
+\emph{Comparison.} The NEC-vs-Hamilton contrast enters the pre-registered headline family of Module 5 \S5.9, evaluated on the identical metric stack. If the NEC cannot beat a two-parameter persistence prior after costs, that is a finding about where the information is --- and Proposition~\ref{prop:degenerate} plus the containment argument of \S\ref{sec:gatevs} tell you exactly which axis to interrogate next.
+
+\medskip
+\noindent\textbf{Checkpoint (from the syllabus).} Closed book: derive the forward recursion \eqref{eq:forward} with the correct complexity accounting; derive the backward recursion and assemble $\resp_t$ and $\xi_t$ \eqref{eq:gamma}--\eqref{eq:xi}; derive Viterbi \eqref{eq:viterbi} with backpointer reconstruction and say when its answer differs from the argmax of the marginals; derive Baum--Welch \eqref{eq:bwmstep} from the expected complete-data log-likelihood; specialize the filter to Hamilton's model and say what changes (only the emissions); and state precisely --- Proposition~\ref{prop:degenerate} and its surrounding argument --- how Markov-switching gating differs from feature-conditioned gating, where they coincide, and in what sense a recurrent feature gate contains the filtered Markov gate. If all of that is comfortable, the classical baseline holds no mysteries, and Foundations E's Gumbel machinery (next) is the last mathematical prerequisite before Module 10's routing theory.
+
+% =====================================================================
+\section{Exercises}\label{sec:exercises}
+% =====================================================================
+
+\noindent\textbf{Importance labels.} Each exercise carries a priority badge for the NEC/MoE thesis track, reflecting how load-bearing it is --- \emph{not} how hard it is. \prioCore mark what the checkpoint and the baseline demand closed-book: the persistence arithmetic every duration and decay number runs on (\ref{ex:markovchain}), the four algorithms (\ref{ex:forward}, \ref{ex:smooth}, \ref{ex:viterbi}, \ref{ex:baumwelch}), the Hamilton specialization with its leakage clause (\ref{ex:hamilton}), and the gating comparison that is the thesis's axis (\ref{ex:gatevs}). \prioWorth a notch below: the conditional-independence bookkeeping with the not-Markov punchline (\ref{ex:ci} --- conceptually important, cited more than recomputed), the Markov-switching moment theory extending Proposition~\ref{prop:volclust} (\ref{ex:msmoments}), and the applied milestone (\ref{ex:applied}).
+
+Questions only, as established. The syllabus's seven analytical exercises all appear (its complexity claim corrected --- see the preface audit note); Bishop 13.1's claims are assigned via 13.2's direct method since d-separation was never built, with 13.3 alongside (\ref{ex:ci}) and 13.5--13.6 absorbed into \ref{ex:baumwelch}; the two unnamed Tsay problems are constructed in the syllabus's stated spirit and flagged (\ref{ex:msmoments}, \ref{ex:applied}). \textbf{Core exercises (\prioCore) sit inline in the chapter body as checkpoint exercises, at the end of the section they test}; this section collects the supplementary exercises only. Solvability audit: each exercise names its in-text tools.
+
+\subsection*{On conditional independence (Section~\ref{sec:hmm})}
+
+\begin{exercise}[Bishop Ex.\ 13.1's claims by 13.2's method, plus Ex.\ 13.3]\label{ex:ci}
+\prioWorth
+(Bishop assigns 13.1 via d-separation, a tool this book never built; Bishop's own 13.2 proves the same claims from the sum and product rules, so that is the assignment here.)
+(a) For the (fully observed) first-order Markov model $p(o_{1:T}) = p(o_1)\prod_{t \ge 2} p(o_t \mid o_{t-1})$, prove $p(o_t \mid o_{1:t-1}) = p(o_t \mid o_{t-1})$ directly: marginalize nothing, just divide the factorization by its own leading partial product.
+(b) For the second-order model $p(o_{1:T}) = p(o_1, o_2) \prod_{t \ge 3} p(o_t \mid o_{t-1}, o_{t-2})$, prove the analogous $p(o_t \mid o_{1:t-1}) = p(o_t \mid o_{t-1}, o_{t-2})$.
+(c) Complete the proof of Lemma~\ref{lem:hmmci}(i) in full detail: exhibit the two factors, apply the definition of conditional independence, and state where positivity of the conditioning event is used.
+(d) (Bishop 13.3, direct route.) Show the HMM's \emph{observed} process satisfies no such property at any order: express $p(o_t \mid o_{1:t-1})$ via the predictive belief \eqref{eq:predictive}, argue the belief is a non-degenerate function of the entire history whenever emissions differ and the chain is not i.i.d., and confirm with an explicit two-state numerical counterexample --- binary emissions, three time steps --- in which $p(o_3 \mid o_2, o_1)$ differs across values of $o_1$. One sentence: which financial stylized fact is this the abstract form of (B \S B.1.3)?
+\end{exercise}
+
+\subsection*{On Markov-switching moment structure (Section~\ref{sec:hamilton})}
+
+\begin{exercise}[Constructed in Tsay's spirit (see preface): MS moments, general $K$]\label{ex:msmoments}
+\prioWorth
+Take the stationary $K$-state Markov-switching model $r_t = \mu_{s_t} + \sigma_{s_t}\varepsilon_t$, $\varepsilon_t$ i.i.d.\ $\Normal(0,1)$ independent of the chain, stationary distribution $\bnu$.
+(a) Unconditional moments: derive $\E[r_t] = \sum_k \nu_k \mu_k$, $\Var(r_t) = \sum_k \nu_k(\sigma_k^2 + \mu_k^2) - (\sum_k \nu_k \mu_k)^2$ (tower property and law of total variance, B Lemma B.2.2 / Prop.\ B.2.3 --- the same computation as Module 8's mixture-moments exercise, weights now $\bnu$), and, for $\mu_k \equiv 0$, the kurtosis $3\,\E[\sigma_z^4]/\E[\sigma_z^2]^2 \ge 3$ of (B, Ex.\ B.6).
+(b) Level autocorrelation from switching \emph{means}: for $K = 2$ with $\sigma_1 = \sigma_2$, show $\Cov(r_t, r_{t+k}) = \nu_1\nu_2\,(\mu_1 - \mu_2)^2\, \lambda_2^{\,k}$ for $k \ge 1$ (Exercise~\ref{ex:markovchain}(d) with $f = \mu$), and interpret: persistent switching \emph{means} are return predictability itself --- the object the entire pipeline hunts --- while switching \emph{variances} \eqref{prop:volclust} produce clustering with zero level correlation. State the magnitude honestly: with realistic $|\mu_1 - \mu_2|$ of a few basis points daily, compare this autocovariance to the noise floor of B \S B.2's variance budget.
+(c) General-$K$ squared-return autocovariance: show $\Cov(r_t^2, r_{t+k}^2) = \sum_{i,j} \nu_i \big([\bA^k]_{ij} - \nu_j\big)\,\sigma_i^2 \sigma_j^2$ for $k \ge 1$ (with $\mu \equiv 0$), and verify it reduces to Proposition~\ref{prop:volclust} at $K = 2$. Which spectral property of $\bA$ governs the decay for general $K$?
+(d) Estimation caveat, one paragraph: the sample kurtosis and squared-return ACF that would identify these parameters are exactly the moment estimates B \S B.7 warned are unstable at $\nu \approx 3$--$5$ tails; state what this implies about preferring likelihood-based fitting (Baum--Welch) over moment matching for regime models.
+\end{exercise}
+
+\subsection*{Applied milestone (Section~\ref{sec:capstone})}
+
+\begin{exercise}[Constructed in Tsay's spirit (see preface); applied milestone --- optional, computational]\label{ex:applied}
+\prioWorth
+\emph{The math syllabus's ``implement the forward algorithm'' milestone and the second Tsay-style problem, merged; the chapter's one computational exercise, per house policy.}
+(i) Implement the scaled filter \eqref{eq:filter}, scaled smoother (Exercise~\ref{ex:smooth}(d)), Viterbi in log domain, and Baum--Welch \eqref{eq:bwmstep} for $K = 2$ Gaussian emissions. Unit tests from this chapter: $\sum_j \alpha_t(j)\beta_t(j)$ constant in $t$; $\xi$ consistency (Exercise~\ref{ex:smooth}(c)); likelihood \eqref{eq:loglik} monotone across EM iterations; forward/backward against brute-force enumeration of all $K^T$ paths on a toy problem ($K = 2$, $T \le 10$).
+(ii) Simulate the daily calibration of \S\ref{sec:hamilton} ($a_{11} = 0.99$, $a_{22} = 0.97$, $\sigma_2/\sigma_1 = 3$, $\mu \equiv 0$, $T = 4000$): verify Baum--Welch recovers the parameters across restarts; compare the fitted duration table $1/(1 - \hat a_{kk})$ to truth; plot the squared-return sample ACF against Proposition~\ref{prop:volclust}'s $\lambda_2^k$ line.
+(iii) Compare filtered vs.\ smoothed probabilities around simulated regime breaks: measure the recognition lag of $\alh_t$ (dates until the filtered probability crosses $\tfrac12$ after a true switch) and confirm the smoothed $\resp_t$ ``recognizes'' the break earlier only because it reads the future --- the leakage of Exercise~\ref{ex:hamilton}(d) made visible.
+(iv) If run on a real daily index series afterward: report fitted durations, per-regime moments, and the filtered-probability trace, and state which Module 5 clauses the exercise deliberately did not satisfy (single series, in-sample fit --- this is a lab, not a backtest).
+\end{exercise}
+
+% =====================================================================
+\section*{Source map and what comes next}
+\addcontentsline{toc}{section}{Source map and what comes next}
+% =====================================================================
+
+\begin{center}
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+Section & Primary source(s) & Feeds directly into \\
+\midrule
+\ref{sec:markov} Markov chains, persistence & standard + Hamilton \S2 & durations; clustering theorem \\
+\ref{sec:hmm} HMM, conditional independence & Bishop \S13.1 & every recursion below \\
+\ref{sec:forward} Forward / filtering & Bishop \S13.2 & likelihood; Hamilton filter \\
+\ref{sec:smooth} Backward, $\gamma$, $\xi$ & Bishop \S13.2 & Baum--Welch E-step; leakage boundary \\
+\ref{sec:viterbi} Viterbi & Bishop \S13.2 & regime-dating exhibits \\
+\ref{sec:bw} Baum--Welch & Bishop \S13.2 + D, Module 8 & fitting the baseline \\
+\ref{sec:hamilton} Markov-switching models & Hamilton (1989); Tsay \S4.6 & the thesis's classical baseline \\
+\ref{sec:gatevs} Gating comparison & Tsay \S4.1--4.5 + synthesis & the thesis's central claim \\
+\ref{sec:capstone} Baseline protocol & synthesis + Module 5 & the proposal's baseline section \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\medskip
+Part IV's modeling core is complete: static mixtures (Module 8) and their persistent, filtered extension (this chapter) --- the two classical poles of the thesis's design space, with the corrected NEC positioned between them by Proposition~\ref{prop:degenerate} and the containment argument of \S\ref{sec:gatevs}. What remains before the thesis's own model is engineering mathematics: Foundations E derives the Gumbel-max trick, the Gumbel-Softmax relaxation, and the reparameterization toolkit (extending D \S D.7), and Module 10 uses them for stochastic routing, load balancing, and the MoE training tricks the sparse-gating literature runs on. Nothing in either requires sequence machinery beyond what is now on these pages.
+
+\end{document}

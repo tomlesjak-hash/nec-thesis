@@ -1,0 +1,429 @@
+% =====================================================================
+%  Foundations for a Quant Research Pipeline
+%  Chapter: Math Foundations C — Optimization Theory and Matrix
+%  Calculus for Neural Networks
+%  Companion textbook to NEC_thesis_syllabus.md
+%  Sources synthesized: Boyd & Vandenberghe Ch 1, §3.1–3.2, §9.1–9.3;
+%  Goodfellow Ch 4, §8.1–8.3; Petersen & Pedersen, Matrix Cookbook §2
+% =====================================================================
+\documentclass[11pt]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{mathpazo}
+\usepackage{microtype}
+\usepackage[margin=1.05in]{geometry}
+\usepackage{amsmath,amssymb,amsthm,mathtools,bm}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{tcolorbox}
+\tcbuselibrary{breakable}
+\usepackage{booktabs}
+\usepackage[colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,urlcolor=blue!50!black]{hyperref}
+
+\linespread{1.05}
+\setlength{\parskip}{0.35em}
+
+% ---------- colors ----------
+\definecolor{necblue}{RGB}{20,45,90}
+\definecolor{finmaroon}{RGB}{110,30,30}
+\definecolor{boxbg}{RGB}{245,247,250}
+\definecolor{finbg}{RGB}{250,246,243}
+
+% ---------- chapter-C numbering ----------
+\renewcommand{\thesection}{C.\arabic{section}}
+\numberwithin{equation}{section}
+
+% ---------- theorem environments ----------
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{corollary}[theorem]{Corollary}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{example}[theorem]{Example}
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+
+\newcounter{exercise}
+\renewcommand{\theexercise}{C.\arabic{exercise}}
+\newenvironment{exercise}[1][]{\refstepcounter{exercise}\par\medskip
+  \noindent\textbf{Exercise \theexercise}\if\relax\detokenize{#1}\relax\else\ \textnormal{[#1]}\fi\textbf{.}\ \itshape}{\par\medskip}
+
+% ---------- exercise importance badges (priority for the NEC/MoE thesis track) ----------
+\definecolor{priogray}{RGB}{120,120,120}
+\newcommand{\prioCore}{{\normalfont\small\textbf{\textcolor{necblue}{[\,\ensuremath{\bigstar\bigstar\bigstar}\ Core\,]}}}\hspace{0.5em}}
+\newcommand{\prioWorth}{{\normalfont\small\textbf{\textcolor{finmaroon}{[\,\ensuremath{\bigstar\bigstar}\ Worth it\,]}}}\hspace{0.5em}}
+\newcommand{\prioLow}{{\normalfont\small\textcolor{priogray}{[\,\ensuremath{\bigstar}\ Low priority\,]}}\hspace{0.5em}}
+\newcommand{\prioOpt}{{\normalfont\small\textcolor{priogray}{[\,\ensuremath{\circ}\ Optional\,]}}\hspace{0.5em}}
+\newcommand{\corebadge}{}% superseded by the four \prio badges above
+
+% ---------- boxes ----------
+\newtcolorbox{necbox}{breakable,colback=boxbg,colframe=necblue,
+  boxrule=0.8pt,arc=1.5mm,left=2mm,right=2mm,top=1.5mm,bottom=1.5mm,
+  title={\sffamily\bfseries NEC connection},fonttitle=\small}
+\newtcolorbox{finbox}{breakable,colback=finbg,colframe=finmaroon,
+  boxrule=0.8pt,arc=1.5mm,left=2mm,right=2mm,top=1.5mm,bottom=1.5mm,
+  title={\sffamily\bfseries Finance reality check},fonttitle=\small}
+
+% ---------- operators ----------
+\DeclareMathOperator{\E}{\mathbb{E}}
+\DeclareMathOperator{\Var}{Var}
+\DeclareMathOperator{\Cov}{Cov}
+\DeclareMathOperator{\tr}{tr}
+\DeclareMathOperator{\diag}{diag}
+\DeclareMathOperator*{\argmin}{arg\,min}
+\DeclareMathOperator*{\argmax}{arg\,max}
+\newcommand{\Normal}{\mathcal{N}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\x}{\bm{x}}
+\newcommand{\X}{\bm{X}}
+\newcommand{\y}{\bm{y}}
+\newcommand{\bbeta}{\bm{\beta}}
+\newcommand{\T}{\top}
+\newcommand{\lmax}{\lambda_{\max}}
+\newcommand{\lmin}{\lambda_{\min}}
+
+\title{\vspace{-1.2em}{\large\sffamily Foundations for a Quant Research Pipeline}\\[0.4em]
+\textbf{Math Foundations C:\\ Optimization Theory and Matrix Calculus\\ for Neural Networks}\\[0.3em]
+{\large A single merged treatment of Boyd--Vandenberghe Ch.\ 1, \S3.1--3.2, \S9.1--9.3,\\ Goodfellow Ch.\ 4 and \S8.1--8.3, and the Matrix Cookbook \S2}}
+\author{Prepared for Tom Koreslesjak \;\textperiodcentered\; companion to \texttt{NEC\_thesis\_syllabus.md}}
+\date{June 2026}
+
+\begin{document}
+\maketitle
+\vspace{-1.5em}
+
+\begin{abstract}
+\noindent Everything trained in the rest of this syllabus --- expert networks, sequence encoders, the gate --- is trained by a stochastic first-order method on a non-convex objective. This chapter builds the theory that makes such training legible: gradient descent analyzed exactly on the quadratic model problem (where every phenomenon --- step-size limits, conditioning, momentum, preconditioning --- is visible in closed form), the stochastic correction for minibatch noise, momentum as a damped oscillator, Adam as bias-corrected per-coordinate preconditioning, the matrix calculus that powers backpropagation (one differential trick replaces a zoo of memorized identities), and the variance-propagation logic of initialization. The destination: by the end you can read a training configuration --- optimizer, learning rate, schedule, batch size, clipping, weight decay --- and explain what each knob does in the language of eigenvalues and variances, which is the level Module 6 assumes when backpropagation is derived in full.
+\end{abstract}
+
+\tableofcontents
+
+\subsection*{How this chapter was assembled (and what was cut)}
+
+Boyd--Vandenberghe supplies the convex-analysis spine, Goodfellow the neural-network corrections to it, and the Matrix Cookbook the calculus --- though the chapter teaches the \emph{differential method} that generates the Cookbook's tables rather than the tables themselves. Cuts, with reasons:
+
+\begin{itemize}[leftmargin=2em,itemsep=0.15em]
+\item \emph{Boyd's duality, interior-point, and constrained-optimization apparatus.} The KKT slice this syllabus needs was already built in Module 4 \S4.3 and is cross-referenced, not repeated. Likewise Goodfellow \S4.4's constrained-optimization detour.
+\item \emph{Second-order methods at depth (Boyd \S9.5 onward).} Newton's method appeared, working, as IRLS in Module 4 \S4.8; at neural-network scale exact Newton is off the table ($p \times p$ Hessians with $p$ in the millions), so it survives here only as the ideal that preconditioning and Adam imperfectly imitate. L-BFGS gets one sentence.
+\item \emph{Goodfellow \S8.2's cliffs and long-term dependencies.} Deferred to Module 7, where exploding gradients through recurrence are load-bearing rather than anecdotal.
+\item \emph{Matrix Cookbook \S2.1 (determinant derivatives).} One identity is stated for the road ($\partial \log|\bm{A}| = \bm{A}^{-\T}$); its workout belongs to Module 8, where $\log|\bm\Sigma|$ terms appear in Gaussian mixture likelihoods. The Cookbook's \S8 (Gaussian moments) is, per the syllabus, a skim-now-return-later reference for Foundations D.
+\item \emph{Nesterov acceleration theory.} The method is described and its rate stated; the proof machinery (estimate sequences) is omitted --- the gain over heavy-ball momentum is modest in the stochastic regime where this pipeline lives.
+\end{itemize}
+
+One deliberate de-duplication against the syllabus itself: the syllabus lists the momentum-ODE and SGD-on-quadratic derivations under \emph{both} Foundations C and Module 6. They are done \emph{here}, once; the Module 6 chapter will cross-reference. The same policy holds for Adam's bias correction (checkpoint here, exercise there): derived here, Exercise~\ref{ex:adam}.
+
+\subsection*{Notation}
+
+As before; new conventions for this chapter. The objective is $f: \R^p \to \R$, typically an average loss $f(\bbeta) = \tfrac1N \sum_i \mathcal{L}_i(\bbeta)$; iterates are $\bbeta_t$, step size (learning rate) $\eta$, minibatch gradient $\tilde{\bm g}_t$. On the quadratic model problem, $\bm{A} \succ 0$ is symmetric with eigenvalues $\lmin = \lambda_1 \le \dots \le \lambda_p = \lmax$ and condition number $\kappa = \lmax/\lmin$. Gradients are column vectors shaped like their variable ($\nabla_{\bm W} \mathcal{L}$ has the shape of $\bm W$) --- the convention every deep-learning framework uses.
+
+% =====================================================================
+\section{The landscape: convex, non-convex, and what ``solved'' means}\label{sec:landscape}
+% =====================================================================
+
+Recall from Module 4 what convexity buys. A function $f$ is convex when $f(\theta \bm u + (1-\theta)\bm v) \le \theta f(\bm u) + (1-\theta) f(\bm v)$; for twice-differentiable $f$, equivalently $\nabla^2 f \succeq 0$ everywhere. The two consequences that made Modules 4--5 comfortable: every local minimum is global, and first-order conditions ($\nabla f = 0$, or $0 \in \partial f$) are sufficient certificates. Every training objective so far --- least squares, ridge, lasso, logistic and softmax regression with or without $L_2$ penalty --- was convex in its parameters, which is why those chapters could speak of \emph{the} solution.
+
+Neural networks end that comfort, for reasons worth knowing precisely rather than vaguely. Compose one hidden layer, $f(\bm W_1, \bm W_2) = \mathcal{L}\big(\bm W_2\, \sigma(\bm W_1 \x)\big)$: even with convex $\mathcal{L}$ and the mildest nonlinearity $\sigma$, the composition is non-convex in $(\bm W_1, \bm W_2)$ --- convexity survives affine pre-composition (Module 4, Exercise 4.6(d)) but not nonlinear pre-composition. Two structural sources make this non-convexity \emph{generic} rather than incidental. \emph{Permutation symmetry}: relabeling the $m$ hidden units of a layer (permuting rows of $\bm W_1$ and columns of $\bm W_2$ together) leaves the function unchanged, so every minimum comes in $m!$ copies; a function with $m!$ equivalent minima cannot be convex (a convex function's minimizers form a single convex set, and the average of two permuted-copy minimizers is not generally a minimizer). \emph{Scale symmetry}: with ReLU-family activations, $(c\bm W_1, \bm W_2/c)$ is function-preserving for $c > 0$, carving flat valleys through the landscape.
+
+What rescues the enterprise is a redefinition of success. In the convex chapters, ``solved'' meant the global optimum. Here it means: \emph{found parameters with low training loss that generalize} --- and for that, the empirical situation (Goodfellow \S8.2, refined by a decade of practice) is kinder than the worst case: in high dimensions, critical points with high loss are overwhelmingly \emph{saddle points} rather than bad local minima (a local minimum requires \emph{every} Hessian eigenvalue positive; at a random high-loss critical point, $p$ independent-ish curvatures all positive is exponentially unlikely), and gradient methods with noise escape saddles. The practical enemy is not getting \emph{trapped} --- it is moving \emph{slowly} across ill-conditioned plateaus and valley floors. That is why this chapter spends its effort on conditioning, not on global-optimality theory: the quadratic model problem of the next section is exactly the local picture of a valley floor, and everything it teaches transfers.
+
+% =====================================================================
+\section{Gradient descent, analyzed exactly}\label{sec:gd}
+% =====================================================================
+
+\subsection{The model problem and the eigenmode decomposition}
+
+Fix the strongly convex quadratic
+\begin{equation}
+f(\bbeta) = \tfrac12 \bbeta^\T \bm{A} \bbeta - \bm{b}^\T \bbeta,
+\qquad \bm{A} \succ 0,
+\qquad \nabla f(\bbeta) = \bm{A}\bbeta - \bm{b},
+\qquad \bbeta^\ast = \bm{A}^{-1}\bm{b}.
+\label{eq:quadprob}
+\end{equation}
+This is the right model problem three times over: it is the local Taylor picture of any smooth objective near a minimum (with $\bm A$ the Hessian); it is \emph{exactly} least squares ($\bm A = \X^\T\X/N$); and it is fully solvable, so every optimization phenomenon can be exhibited rather than asserted. Gradient descent iterates $\bbeta_{t+1} = \bbeta_t - \eta\, \nabla f(\bbeta_t)$, and the error $\bm{e}_t = \bbeta_t - \bbeta^\ast$ obeys the exact linear recursion
+\begin{equation}
+\bm{e}_{t+1} = (\bm{I} - \eta \bm{A})\, \bm{e}_t
+\qquad\Longrightarrow\qquad
+\bm{e}_t = (\bm{I} - \eta \bm{A})^t\, \bm{e}_0 .
+\label{eq:gditer}
+\end{equation}
+Now diagonalize, $\bm{A} = \bm{U}\bm{\Lambda}\bm{U}^\T$ (Foundations A), and write the error in the eigenbasis, $\tilde{e}_{j,t} = \bm{u}_j^\T \bm{e}_t$:
+\begin{equation}
+\tilde e_{j,t} = (1 - \eta \lambda_j)^t\, \tilde e_{j,0} .
+\label{eq:modes}
+\end{equation}
+Gradient descent decouples into $p$ independent scalar geometric decays, one per curvature direction --- precisely the normal-mode decomposition of coupled linear relaxation, with $1/\eta\lambda_j$ playing each mode's relaxation time. Everything in Sections \ref{sec:gd}--\ref{sec:adaptive} is bookkeeping on \eqref{eq:modes}:
+
+\begin{itemize}[leftmargin=2em,itemsep=0.15em]
+\item \emph{Stability.} Every mode contracts iff $|1 - \eta\lambda_j| < 1$ for all $j$, i.e.\ $\eta < 2/\lmax$: the stiffest direction sets the step-size ceiling. Above it, the stiff mode oscillates with growing amplitude --- the divergence every practitioner has met as a loss curve exploding after a learning-rate increase.
+\item \emph{Speed.} Within the stable range, the \emph{slowest} mode dominates the asymptotics: the contraction factor is $\max_j |1 - \eta\lambda_j|$, governed by the soft direction $\lmin$ once $\eta$ is pinned by $\lmax$. Exercise~\ref{ex:gdrate} turns \eqref{eq:modes} into the syllabus's convergence statement, $f(\bbeta_t) - f^\ast \le (1 - \eta\lmin)^t\big(f(\bbeta_0) - f^\ast\big)$ for $\eta \le 1/\lmax$ --- \emph{linear convergence} in the optimization sense: error decays geometrically, $\log(1/\varepsilon)$ iterations per decimal digit.
+\item \emph{The general convex rate, for contrast.} Without strong convexity ($\lmin = 0$ allowed: flat directions), the guarantee degrades from geometric to $f(\bbeta_t) - f^\ast = O(1/t)$ --- stated here without proof (Boyd \S9.3); the flat directions are never \emph{wrong}, just never finished. Plateaus in neural training are this regime locally.
+\end{itemize}
+
+\subsection{Conditioning: the number that runs the show}\label{sec:conditioning}
+
+Optimize the tradeoff in \eqref{eq:modes}: the best constant step balances the two extreme modes, $\eta^\ast = 2/(\lmax + \lmin)$, giving per-step contraction
+\begin{equation}
+\rho^\ast \;=\; \frac{\kappa - 1}{\kappa + 1},
+\qquad \kappa = \frac{\lmax}{\lmin},
+\qquad\text{hence}\qquad
+\#\text{iterations to } \varepsilon \;\sim\; O\big(\kappa \log(1/\varepsilon)\big)
+\label{eq:kappa}
+\end{equation}
+(Exercise~\ref{ex:gdrate} again). The condition number is the entire story: $\kappa = 1$ (spherical bowl) converges in one step; $\kappa = 10^4$ needs ten thousand times the iterations, with the trajectory zigzagging across the narrow valley --- each step overshoots the stiff direction while inching along the soft one. You have met $\kappa$ twice before, and both encounters now pay off: Foundations A computed $\kappa$ for ridge regression, $(\sigma_{\max}^2 + \lambda)/(\sigma_{\min}^2 + \lambda) \to 1$ as $\lambda$ grows --- \emph{regularization is preconditioning}, one more job weight decay quietly performs; and Module 4 \S4.1 showed correlated features make $\X^\T\X$ ill-conditioned --- which is why standardized, decorrelated-ish features are not cosmetic but a direct multiplier on training speed.
+
+For neural networks the Hessian is neither constant nor positive definite, but its empirical spectral signature is consistent (Goodfellow \S8.2 and a large literature since): a bulk of near-zero eigenvalues --- the flat, symmetry-induced directions of \S\ref{sec:landscape} --- plus a few large outliers, i.e.\ effective $\kappa$ enormous by construction. Saddle points exist and are escapable; the chronic tax is this conditioning. The two families of repair are the subjects of \S\ref{sec:momentum} (reshape the \emph{dynamics}: momentum) and \S\ref{sec:adaptive} (reshape the \emph{metric}: per-coordinate preconditioning), and the ideal both imitate is Newton's method --- multiply the gradient by $\bm{A}^{-1}$ and \eqref{eq:gditer} converges in one step --- which is unaffordable at scale and approximated from opposite ends by the two families.
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[Syllabus: convergence and conditioning; merges syllabus items 1--2]\label{ex:gdrate}
+\prioCore
+Work on the model problem \eqref{eq:quadprob} with the eigenmode decomposition \eqref{eq:modes}.
+(a) Show $f(\bbeta) - f^\ast = \tfrac12 \bm{e}^\T \bm{A}\, \bm{e} = \tfrac12 \sum_j \lambda_j \tilde e_j^2$, so suboptimality is a $\lambda$-weighted sum of squared mode errors.
+(b) Prove the syllabus statement: for constant step $\eta \le 1/\lmax$ (so every factor $1 - \eta\lambda_j \in [0, 1)$),
+$f(\bbeta_t) - f^\ast \le (1 - \eta \lmin)^{2t}\, \big(f(\bbeta_0) - f^\ast\big)$, and explain why the commonly quoted exponent $t$ (rather than $2t$) is the same statement with a coarser bound. Identify where stability fails as $\eta \to 2/\lmax$.
+(c) Optimize the worst-case contraction $\max_j |1 - \eta\lambda_j|$ over $\eta$: show the optimum equalizes the two extreme modes at $\eta^\ast = 2/(\lmax + \lmin)$ with contraction $(\kappa-1)/(\kappa+1)$.
+(d) Conclude the iteration-complexity claim: reaching $f(\bbeta_t) - f^\ast \le \varepsilon$ requires $t = O(\kappa \log(1/\varepsilon))$ iterations. \emph{(Hint: $\log\frac{\kappa-1}{\kappa+1} \approx -2/\kappa$ for large $\kappa$.)}
+\end{exercise}
+
+
+% =====================================================================
+\section{Stochastic gradients: optimization under measurement noise}\label{sec:sgd}
+% =====================================================================
+
+The full gradient of $f(\bbeta) = \tfrac1N\sum_i \mathcal{L}_i(\bbeta)$ costs a pass over all $N$ observations; a \emph{minibatch} of $B$ indices gives the Monte Carlo estimate $\tilde{\bm g} = \tfrac1B \sum_{i \in \text{batch}} \nabla \mathcal{L}_i(\bbeta)$, unbiased ($\E[\tilde{\bm g}] = \nabla f$, the LLN logic of Foundations B \S B.4.4) with covariance shrinking like $1/B$. SGD is gradient descent driven by this noisy measurement, and its behavior is the cleanest possible two-regime story, exhibited exactly on the model problem in Exercise~\ref{ex:sgdnoise}:
+
+\emph{Transient regime.} Far from the optimum the signal dominates the noise, and SGD contracts like its deterministic parent --- same $(1 - \eta\lambda_j)$ mode-by-mode decay in expectation.
+
+\emph{Noise-floor regime.} Near the optimum the deterministic pull vanishes ($\nabla f \to 0$) but the noise does not, and the iterate settles into a stationary jitter around $\bbeta^\ast$ --- a \emph{noise ball} whose expected squared radius scales as
+\begin{equation}
+\E\big\|\bbeta_\infty - \bbeta^\ast\big\|^2 \;\propto\; \frac{\eta\, \sigma^2_{\bm g}}{\lmin}
+\qquad (\sigma^2_{\bm g} = \text{per-step gradient noise variance}),
+\label{eq:noiseball}
+\end{equation}
+proportional to the step size: halve $\eta$ and the asymptotic error halves, but the transient slows in exact compensation. This is a bias--variance tradeoff in $\eta$ (Foundations B's favorite decomposition, now in time rather than in model space), and it dictates every learning-rate schedule ever used: \emph{large $\eta$ early} (fast transient, who cares about the floor), \emph{decay later} (lower the floor once you are near it). The classical conditions for exact convergence, $\sum_t \eta_t = \infty$, $\sum_t \eta_t^2 < \infty$ (Robbins--Monro), are the schedule version of the same arithmetic --- enough total motion to get anywhere, decaying fast enough that the noise sums finitely. The language a physicist will prefer: \eqref{eq:noiseball} is a fluctuation--dissipation statement --- $\eta$ plays temperature, and annealing the learning rate is annealing, literally. The same noise has a celebrated upside: it is what kicks iterates off saddle points and (more heuristically) biases trajectories toward flat minima; treat the second claim as folklore with supporting evidence, not theorem.
+
+\begin{finbox}
+Two financial corrections to deep-learning defaults. First, return panels are small by deep-learning standards (a few million rows, heavy noise), so the noise-ball term in \eqref{eq:noiseball} is genuinely binding --- batch sizes and schedules deserve real tuning, and ``train longer'' saturates early because the floor, not the transient, is the constraint. Second, the i.i.d.-sampling assumption behind $\E[\tilde{\bm g}] = \nabla f$ deserves a raised eyebrow: sampling minibatches uniformly across a decade of dates treats 2008 and 2017 as exchangeable --- exactly the assumption the thesis disputes. Date-blocked batches, recency weighting, or regime-stratified sampling all change what ``the'' objective is; choose deliberately and document, because Module 5's protocol will hold you to whatever you chose.
+\end{finbox}
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[Syllabus: the SGD noise ball]\label{ex:sgdnoise}
+\prioCore
+Same model problem, but the update uses a noisy gradient: $\bbeta_{t+1} = \bbeta_t - \eta\,(\nabla f(\bbeta_t) + \bm{\xi}_t)$ with $\E[\bm{\xi}_t] = \bm 0$, $\Cov(\bm{\xi}_t) = \sigma^2 \bm{I}$, independent across steps.
+(a) Show the error recursion is $\bm{e}_{t+1} = (\bm I - \eta\bm A)\bm{e}_t - \eta\,\bm{\xi}_t$, and take expectations: the \emph{mean} error contracts exactly as in the noiseless case \eqref{eq:modes}.
+(b) Derive the second-moment recursion per eigenmode: $\E[\tilde e_{j,t+1}^2] = (1 - \eta\lambda_j)^2\, \E[\tilde e_{j,t}^2] + \eta^2 \sigma^2$, and solve for the stationary point $\E[\tilde e_{j,\infty}^2] = \eta^2\sigma^2 / \big(1 - (1-\eta\lambda_j)^2\big) \approx \eta\sigma^2/(2\lambda_j)$ for small $\eta$.
+(c) Sum over modes to obtain the noise-ball statement \eqref{eq:noiseball}: $\E\|\bm e_\infty\|^2 \approx \tfrac{\eta\sigma^2}{2}\sum_j \lambda_j^{-1}$, dominated by the softest mode $\lmin$. State the bias--variance tradeoff in $\eta$ precisely: which term in the full finite-$t$ solution is ``bias'' (transient) and which ``variance'' (floor), and why decaying schedules get both.
+(d) One sentence each: what does \eqref{eq:noiseball} predict about doubling the batch size, and about why the loss curve of a real training run plateaus at a level that depends on the learning rate?
+\end{exercise}
+
+
+% =====================================================================
+\section{Momentum: optimization as a damped oscillator}\label{sec:momentum}
+% =====================================================================
+
+Heavy-ball momentum replaces the memoryless gradient step with an exponentially-weighted velocity:
+\begin{equation}
+\bm{v}_{t+1} = \mu\, \bm{v}_t - \eta\, \nabla f(\bbeta_t),
+\qquad
+\bbeta_{t+1} = \bbeta_t + \bm{v}_{t+1},
+\label{eq:heavyball}
+\end{equation}
+with momentum coefficient $\mu \in [0, 1)$ (the field's notation is $\beta$; we use $\mu$ to spare the regression coefficients). The right way to understand \eqref{eq:heavyball} is the continuous-time limit you can analyze in your sleep: it is the discretization of a \emph{damped second-order system},
+\begin{equation}
+\ddot{\bbeta} + \gamma\, \dot{\bbeta} + \nabla f(\bbeta) = 0
+\qquad\text{--- a unit mass rolling on the loss surface with friction } \gamma .
+\label{eq:ode}
+\end{equation}
+Exercise~\ref{ex:momentum} carries out the discretization both directions and identifies the dictionary: time step $h = \sqrt{\eta}$, friction $\gamma = (1 - \mu)/\sqrt{\eta}$ --- so $\mu \to 1$ is the low-friction limit, and plain gradient descent ($\mu = 0$) is the \emph{overdamped} limit in which inertia is negligible and velocity is always proportional to force. Why does inertia help? Decompose \eqref{eq:ode} on the quadratic's eigenmodes: each mode is an independent damped harmonic oscillator with natural frequency $\sqrt{\lambda_j}$. The overdamped (GD) mode crawls at rate $\propto \lambda_j/\gamma$ --- punishing for soft modes; an \emph{underdamped} mode rings at frequency $\sqrt{\lambda_j}$ regardless of how small $\lambda_j$'s force constant is, reaching the bottom in time $\propto 1/\sqrt{\lambda_j}$ rather than $1/\lambda_j$. Tuning $(\mu, \eta)$ to put the slowest mode near \emph{critical damping} while keeping the stiffest stable yields the classical result (Exercise~\ref{ex:momentum}(c) verifies it on a single mode): optimal heavy-ball contraction is
+\begin{equation}
+\rho^\ast_{\text{HB}} = \frac{\sqrt{\kappa} - 1}{\sqrt{\kappa} + 1}
+\qquad\text{--- the condition number enters as } \sqrt{\kappa},
+\label{eq:hbrate}
+\end{equation}
+versus $\kappa$ for plain GD \eqref{eq:kappa}: at $\kappa = 10^4$, a hundredfold reduction in iterations from one extra state vector. Nesterov's accelerated variant evaluates the gradient at the look-ahead point $\bbeta_t + \mu \bm{v}_t$ and achieves the same $\sqrt{\kappa}$ dependence with cleaner worst-case guarantees; per the preface, we state and use, not prove. One honest caveat: the $\sqrt\kappa$ magic is a \emph{deterministic} result; under heavy gradient noise momentum's averaging still helps (it is an EMA of gradients, variance-reducing), but the sharp acceleration story blurs --- which is part of why the stochastic world drifted toward the methods of the next section.
+
+% =====================================================================
+\section{Adaptive methods: AdaGrad, RMSProp, Adam}\label{sec:adaptive}
+% =====================================================================
+
+Momentum reshapes dynamics but still applies \emph{one} learning rate to all coordinates. The adaptive family instead approximates Newton's preconditioner $\bm{A}^{-1}$ by something affordable: a \emph{diagonal} matrix estimated from the gradients themselves. The lineage in three steps:
+
+\emph{AdaGrad}: accumulate $s_{j,t} = \sum_{\tau \le t} g_{j,\tau}^2$ per coordinate and step $\Delta\beta_j = -\eta\, g_{j,t} / (\sqrt{s_{j,t}} + \epsilon)$. Coordinates with persistently large gradients get their rates cut; rarely-updated coordinates keep large rates. The defect for non-convex training: the accumulator only grows, so the effective rate decays to zero whether or not you have arrived.
+
+\emph{RMSProp}: replace the sum with an exponential moving average, $v_{j,t} = \beta_2 v_{j,t-1} + (1-\beta_2) g_{j,t}^2$ --- a forgetting window of effective length $1/(1-\beta_2)$, so the preconditioner tracks the \emph{current} local curvature scale rather than the whole history.
+
+\emph{Adam}: RMSProp's second-moment EMA plus a first-moment EMA (momentum), plus a correction:
+\begin{equation}
+\bm{m}_t = \beta_1 \bm{m}_{t-1} + (1 - \beta_1)\, \bm{g}_t,
+\qquad
+\bm{v}_t = \beta_2 \bm{v}_{t-1} + (1 - \beta_2)\, \bm{g}_t^{\odot 2},
+\qquad
+\bbeta_{t+1} = \bbeta_t - \eta\, \frac{\hat{\bm m}_t}{\sqrt{\hat{\bm v}_t} + \epsilon},
+\label{eq:adam}
+\end{equation}
+with $\hat{\bm m}_t = \bm{m}_t / (1 - \beta_1^t)$ and $\hat{\bm v}_t = \bm{v}_t / (1 - \beta_2^t)$. The hats are the \emph{bias correction}, and it is a Foundations B-style calculation, not a hack: an EMA initialized at zero is a biased estimator early on --- unrolling gives $\bm{m}_t = (1-\beta_1)\sum_{\tau=1}^t \beta_1^{t-\tau}\bm{g}_\tau$, whose weights sum to $1 - \beta_1^t < 1$, so for stationary gradients $\E[\bm m_t] = (1 - \beta_1^t)\,\E[\bm g]$; dividing by $(1-\beta_1^t)$ restores unbiasedness (Exercise~\ref{ex:adam} does both moments and quantifies when it matters: with the default $\beta_2 = 0.999$, $\bm v$ is badly undersized for hundreds of steps, and uncorrected Adam's effective early learning rate is silently enormous). Read the update as a whole: the step per coordinate is $\approx \eta \cdot \E[g_j]/\sqrt{\E[g_j^2]}$ --- a \emph{signal-to-noise-normalized} step, bounded near $\pm\eta$ regardless of gradient scale. That bounded-step property is why Adam is forgiving of learning-rate choice and why it became the default for everything in this pipeline.
+
+Two practicalities with theory inside. \emph{AdamW}: adding an $L_2$ penalty to the loss and letting Adam adapt it is \emph{not} weight decay --- the penalty gradient $\lambda\bbeta$ gets divided by $\sqrt{\hat v}$ like everything else, so heavily-updated coordinates are barely regularized; AdamW instead applies decay directly to the parameters ($\bbeta \leftarrow (1 - \eta\lambda)\bbeta$, then the Adam step), restoring the clean MAP interpretation of Module 4 \S4.5. Use AdamW when you mean weight decay. \emph{Generalization debates}: a literature exists finding tuned SGD+momentum sometimes generalizes better than Adam; for the modest models of this pipeline the difference is second-order against data hygiene, and AdamW is the sensible default.
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[Supplementary; discharges Module 6's bias-correction exercise]\label{ex:adam}
+\prioCore
+(a) Unroll the first-moment EMA $\bm m_t = \beta_1 \bm m_{t-1} + (1-\beta_1)\bm g_t$ from $\bm m_0 = \bm 0$ to obtain $\bm m_t = (1-\beta_1)\sum_{\tau=1}^t \beta_1^{t-\tau} \bm g_\tau$, and show the weights sum to $1 - \beta_1^t$ (geometric series). Conclude that for stationary gradients ($\E[\bm g_\tau] = \bm g$ for all $\tau$), $\E[\bm m_t] = (1 - \beta_1^t)\,\bm g$, so $\hat{\bm m}_t = \bm m_t/(1 - \beta_1^t)$ is unbiased. Repeat for $\bm v_t$ with $\beta_2$.
+(b) Quantify the early-iteration damage of skipping the correction: with the defaults $\beta_1 = 0.9$, $\beta_2 = 0.999$, evaluate the shrinkage factors $1 - \beta_1^t$ and $1 - \beta_2^t$ at $t = 10$ and $t = 100$. Derive the factor by which the \emph{uncorrected} ratio $\bm m_t / \sqrt{\bm v_t}$ differs from the corrected one (express it in terms of the two shrinkage factors, then evaluate at $t = 10$), and state what an effective step of that size in the first dozen updates does to a freshly He-initialized network.
+(c) Show that bias correction becomes negligible for $t \gg 1/(1-\beta_2)$, and give the numerical threshold for the defaults.
+(d) One sentence: using the chapter's language, why is the corrected Adam step ``SNR-normalized,'' and what does that imply when gradient noise is heavy-tailed (Foundations B \S B.7)?
+\end{exercise}
+
+
+% =====================================================================
+\section{Matrix calculus: the differential method}\label{sec:matcalc}
+% =====================================================================
+
+Backpropagation (Module 6) is the chain rule executed on matrix expressions, and the Matrix Cookbook is its lookup table. This section teaches the \emph{one technique that generates every entry you will need}, so the Cookbook becomes a check rather than a crutch. The convention throughout: a gradient has the shape of its variable.
+
+\emph{The method.} For scalar $\mathcal{L}$, write the first-order perturbation (the \emph{differential}) and read off the gradient from the canonical form:
+\begin{equation}
+d\mathcal{L} = \tr\big( \bm{G}^\T\, d\bm{X} \big)
+\quad\Longleftrightarrow\quad
+\nabla_{\bm X}\, \mathcal{L} = \bm{G}.
+\label{eq:differential}
+\end{equation}
+Differentials obey the ordinary product and chain rules ($d(\bm{AB}) = (d\bm{A})\bm{B} + \bm{A}\,d\bm{B}$, $d\,\sigma(\bm u) = \sigma'(\bm u) \odot d\bm u$ elementwise), and the trace's cyclic property (Foundations A) is the lever that isolates $d\bm X$. One worked specimen replaces a page of index gymnastics:
+
+\begin{example}[The fundamental backprop identity]\label{ex:fundbp}
+Let $\mathcal{L} = g(\bm{W}\x)$ with $g: \R^m \to \R$, and write $\bm{y} = \bm{W}\x$, $\bm{\delta} = \nabla_{\bm y}\, g$. Then
+\[
+d\mathcal{L} = \bm{\delta}^\T\, d\bm{y} = \bm{\delta}^\T (d\bm{W})\, \x
+= \tr\big( \x\, \bm{\delta}^\T\, d\bm{W} \big)
+= \tr\big( (\bm{\delta}\x^\T)^\T\, d\bm{W} \big)
+\;\Longrightarrow\;
+\nabla_{\bm W}\, \mathcal{L} = \bm{\delta}\, \x^\T,
+\]
+a rank-one outer product: \emph{(upstream sensitivity)} $\times$ \emph{(local input)}$^\T$. Every weight gradient in every layer of every network in this syllabus has this shape; Exercise~\ref{ex:chainrule} (the syllabus's matrix-chain-rule exercise) re-derives it from first principles and extends it through deeper compositions, where the same move yields $\nabla_{\x} \mathcal{L} = \bm{W}^\T \bm{\delta}$ --- the signal that propagates backward.
+\end{example}
+
+\emph{Jacobians, JVPs, VJPs.} For vector-valued $\bm f: \R^n \to \R^m$, the Jacobian $\bm J$ is $m \times n$; the chain rule composes Jacobians, but \emph{materializing} them is almost never affordable or necessary. Automatic differentiation computes one of two matrix-free products: forward mode pushes a tangent through ($\bm J \bm v$, a JVP, one pass per \emph{input} direction), reverse mode pulls a sensitivity back ($\bm J^\T \bm u$, a VJP, one pass per \emph{output}). A training loss is a scalar --- one output, millions of inputs --- so reverse mode computes the entire gradient in a single backward pass, at the price of storing forward activations. That asymmetry \emph{is} backpropagation, and Exercise~\ref{ex:vjp} makes the cost accounting precise. (You met the pattern before the name: the softmax--cross-entropy cancellation of Module 4 \S4.10 is a VJP through the softmax Jacobian, simplified analytically.)
+
+\emph{Identities for the road} (derivable by \eqref{eq:differential} in a line or two; Cookbook \S2.4--2.7): $\nabla_{\x}(\bm a^\T \x) = \bm a$ and $\nabla_{\x}(\x^\T\bm A\x) = (\bm A + \bm A^\T)\x$ --- both already proven in Foundations A, now re-derivable in one breath; $\nabla_{\bm X} \tr(\bm{A}^\T\bm{X}) = \bm{A}$; and, stated for Module 8 where it powers the Gaussian-mixture M-step: $\nabla_{\bm A} \log|\bm A| = \bm A^{-\T}$.
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[Syllabus: the matrix chain rule for backprop]\label{ex:chainrule}
+\prioCore
+(a) From first principles (no differentials yet): for $\mathcal{L}(\bm W) = g(\bm W\x)$ with $g: \R^m \to \R$, compute $\partial \mathcal{L}/\partial W_{ij}$ by the scalar chain rule and assemble the result into $\nabla_{\bm W} \mathcal{L} = (\nabla_{\bm y} g)\,\x^\T$ where $\bm y = \bm W \x$.
+(b) Re-derive the same identity in two lines with the differential method \eqref{eq:differential}, and additionally extract $\nabla_{\x}\mathcal{L} = \bm W^\T (\nabla_{\bm y} g)$ from the same differential.
+(c) Generalize to a deeper composition $\mathcal{L} = g(\bm W_2\, \sigma(\bm W_1 \x))$ with elementwise $\sigma$: derive $\nabla_{\bm W_2}\mathcal{L}$, $\nabla_{\bm W_1}\mathcal{L}$, and observe the recursive structure --- each weight gradient is (backpropagated sensitivity at its output) $\times$ (its input)$^\T$, with sensitivities updated by $\bm\delta \leftarrow \bm W^\T \bm\delta$ and $\bm\delta \leftarrow \sigma'(\bm u) \odot \bm\delta$ alternately. (You have just derived backpropagation; Module 6 will only add bookkeeping and biases.)
+(d) Use the differential method to verify two Foundations A identities in one line each: $\nabla_{\x} (\x^\T \bm A \x) = (\bm A + \bm A^\T)\x$ and $\nabla_{\bm X} \tr(\bm A^\T \bm X) = \bm A$.
+\end{exercise}
+
+
+% =====================================================================
+\section{Initialization: variance propagation through depth}\label{sec:init}
+% =====================================================================
+
+Why does anyone care how random initial weights are scaled? Because depth turns small scale errors into exponential catastrophes, by an argument that is pure Foundations B variance algebra. Consider a linear layer $\bm h = \bm{W}\x$ with $n_{\mathrm{in}}$ inputs, weights i.i.d., zero-mean, variance $\sigma_W^2$, independent of the zero-mean inputs. Then each output coordinate is a sum of $n_{\mathrm{in}}$ independent products, and (Foundations B, eq.\ B.1.4-style algebra)
+\begin{equation}
+\Var(h_i) = n_{\mathrm{in}}\, \sigma_W^2\, \Var(x_j)
+\qquad\Longrightarrow\qquad
+\text{variance gain per layer} \;=\; n_{\mathrm{in}}\, \sigma_W^2 .
+\label{eq:vargain}
+\end{equation}
+Stack $L$ layers and the signal variance scales as $(n\,\sigma_W^2)^L$: the same geometric amplification logic as the GD modes \eqref{eq:modes}, and the same one that will reappear as the RNN vanishing/exploding-gradient theorem in Module 7 ($\rho^T$ on the recurrent Jacobian --- one mechanism, three costumes). A gain of $1.1$ per layer is a factor $117$ at depth $50$; a gain of $0.9$ is $0.005$. The \emph{only} survivable choice at depth is gain $= 1$, and the same argument run on the \emph{backward} pass (gradients flow through $\bm W^\T$, so $n_{\mathrm{out}}$ replaces $n_{\mathrm{in}}$) gives a second, generally incompatible condition. The classical resolutions, whose full derivations are Module 6 exercises by syllabus design (this section supplies the framework; Module 6 supplies the activations' bookkeeping): \emph{Xavier/Glorot}, the compromise $\sigma_W^2 = 2/(n_{\mathrm{in}} + n_{\mathrm{out}})$ for symmetric saturating activations; \emph{He}, $\sigma_W^2 = 2/n_{\mathrm{in}}$ for ReLU --- the factor 2 because ReLU zeroes half its inputs, halving the variance that \eqref{eq:vargain} must replenish. Exercise~\ref{ex:depthvar} runs the recursion numerically so the exponential is felt, not believed. Batch normalization (Module 6) attacks the same problem at runtime --- renormalize per layer and let the network learn the scales --- which is why init discipline and normalization layers are partial substitutes.
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[Supplementary: feeling the exponential]\label{ex:depthvar}
+\prioCore
+Take the variance recursion \eqref{eq:vargain} for a stack of $L$ linear layers of equal width $n = 512$, inputs standardized to unit variance.
+(a) Compute the output standard deviation at $L = 50$ for three choices of $\sigma_W^2$: the gain-one choice $1/n$, and the mis-scaled choices $1.1/n$ and $0.9/n$.
+(b) Run the same recursion on the backward pass and state the condition under which forward and backward gain-one conditions conflict; verify the Xavier compromise $\sigma_W^2 = 2/(n_{\mathrm{in}}+n_{\mathrm{out}})$ is the harmonic-mean resolution.
+(c) For ReLU, accept the stated fact that the activation halves the variance and show the He choice $\sigma_W^2 = 2/n_{\mathrm{in}}$ restores gain one. (The careful derivation of the factor $\tfrac12$ --- the half-Gaussian second moment --- is a Module 6 exercise by syllabus design; here you only use it.)
+(d) Connect in two sentences to the two other geometric amplifications met in this book: the GD mode decay \eqref{eq:modes} and the $\rho^T$ recurrent-Jacobian product previewed for Module 7. What single mathematical fact underlies all three?
+\end{exercise}
+
+
+% =====================================================================
+\section{Capstone: reading a training configuration like a physicist}\label{sec:capstone}
+% =====================================================================
+
+The corrected NEC will be trained by something like: \emph{AdamW, lr $10^{-3}$ with cosine decay, batch 256 (date-blocked), gradient-norm clip 1.0, weight decay $10^{-2}$ on everything except the gate (which gets more), He init, 50--200 epochs with early stopping on purged-validation rank-IC.} Every clause is now a theorem citation:
+
+\begin{itemize}[leftmargin=2em,itemsep=0.18em]
+\item \emph{AdamW, lr $10^{-3}$}: bounded SNR-normalized steps \eqref{eq:adam} against an ill-conditioned spectrum (\S\ref{sec:conditioning}); decay applied as true weight decay so Module 4's MAP reading survives the preconditioner (\S\ref{sec:adaptive}).
+\item \emph{Cosine decay}: the two-regime story of \S\ref{sec:sgd} --- big steps for the transient, small for the noise floor \eqref{eq:noiseball}; any decreasing schedule respecting Robbins--Monro spirit does the job, cosine is a smooth convention.
+\item \emph{Batch 256, date-blocked}: $1/B$ gradient-noise scaling, with blocks because uniform date sampling asserts the stationarity the thesis denies (\S\ref{sec:sgd} box).
+\item \emph{Clip 1.0}: insurance against the heavy-tailed gradient spikes that heavy-tailed \emph{data} (Foundations B \S B.7) inject through the loss, and against the recurrent amplification \eqref{eq:vargain}-style that Module 7 formalizes for the sequence encoder.
+\item \emph{Weight decay, extra on the gate}: conditioning repair (\S\ref{sec:conditioning}) and the separation cure of Module 4 \S4.8.3 --- the gate is the component that can run away.
+\item \emph{He init}: gain-one variance propagation \eqref{eq:vargain} for ReLU experts; the GRU/LSTM encoder uses its own gain conventions for the same reason.
+\item \emph{Early stopping on purged-validation rank-IC}: optimization halted by Module 5's judge, not by training loss --- the one knob that optimizes the thing actually being graded.
+\end{itemize}
+
+\medskip
+\noindent\textbf{Checkpoint (from the syllabus).} Closed book: analyze gradient descent's convergence on a strongly convex quadratic (eigenmodes, stability ceiling $2/\lmax$, rate \eqref{eq:kappa}); derive Adam from scratch --- both EMAs, both bias corrections, and why the corrected step is SNR-normalized; and explain why initialization matters in the language of variance propagation \eqref{eq:vargain}, including what goes wrong geometrically at depth. If those three are comfortable, you are equipped to derive backpropagation and analyze its failure modes in Module 6.
+
+% =====================================================================
+\section{Exercises}\label{sec:exercises}
+% =====================================================================
+
+\noindent\textbf{Importance labels.} Each exercise carries a priority badge for the NEC/MoE thesis track, reflecting how load-bearing it is for training and debugging the network --- \emph{not} how hard it is. \prioCore are the toolkit you cannot train the NEC without: gradient-descent dynamics (\ref{ex:gdrate}), the stochastic noise floor that sets batch size and schedule (\ref{ex:sgdnoise}), the Adam optimizer (\ref{ex:adam}), the backpropagation chain rule (\ref{ex:chainrule}), and variance-preserving initialization (\ref{ex:depthvar}). \prioWorth are high-value enrichment a notch below: momentum's damped-oscillator analysis (\ref{ex:momentum}), which Adam subsumes operationally but which a physicist will find the most natural exercise in the chapter, and the reverse-mode cost accounting (\ref{ex:vjp}). The one piece of background assumed throughout is the eigendecomposition of a symmetric matrix ($\bm A = \bm U\bm\Lambda\bm U^\T$); the chapter bridges to it through normal modes and damped oscillators rather than presuming fluency.
+
+Questions only, as established. The syllabus's five analytical exercises all appear (the first two merged into one multi-part problem, since the second is the natural continuation of the first); three supplementary exercises (marked) complete loops the chapter opened. Note on de-duplication: the momentum-ODE and SGD-quadratic derivations are listed by the syllabus under both this module and Module 6, and Adam's bias correction under Module 6 --- all three live \emph{here}, once; the Module 6 chapter will cross-reference. Solvability audit: each exercise names its in-text tools. \textbf{Core exercises (\prioCore) sit inline in the chapter body as checkpoint exercises, at the end of the section they test}; this section collects the supplementary exercises only.
+
+\subsection*{On momentum (Section~\ref{sec:momentum})}
+
+\begin{exercise}[Syllabus: momentum as a damped ODE]\label{ex:momentum}
+\prioWorth
+(a) Discretize \eqref{eq:ode} with time step $h$: central second difference $\ddot\bbeta \to (\bbeta_{t+1} - 2\bbeta_t + \bbeta_{t-1})/h^2$ and a \emph{backward} difference $\dot\bbeta \to (\bbeta_t - \bbeta_{t-1})/h$ for the friction term (the choice that makes the dictionary exact --- check that a forward difference gives the same dictionary only to first order in $h$), and rearrange into the heavy-ball form \eqref{eq:heavyball}. Derive the dictionary: $\mu = 1 - \gamma h$ and $\eta = h^2$, i.e.\ $h = \sqrt{\eta}$, $\gamma = (1 - \mu)/\sqrt{\eta}$.
+(b) Interpret the limits through the dictionary: what friction regime is $\mu = 0$ (plain GD)? What happens physically as $\mu \to 1$ at fixed $\eta$, and why does practice cap $\mu$ near $0.9$--$0.99$?
+(c) $\bigstar$ Single-mode analysis: on one eigenmode with curvature $\lambda$, heavy-ball is the linear two-step recursion $\tilde e_{t+1} = (1 + \mu - \eta\lambda)\tilde e_t - \mu\, \tilde e_{t-1}$. Write it as a $2 \times 2$ companion matrix, compute the eigenvalues, and show that choosing $\mu = \big(1 - \sqrt{\eta\lambda}\big)^2$ places the mode at critical damping (a double root) with contraction $1 - \sqrt{\eta\lambda}$. Conclude that tuning $(\eta, \mu)$ for the extreme modes simultaneously yields the $\sqrt{\kappa}$ rate \eqref{eq:hbrate}. \emph{(This is the underdamped-oscillator analysis of your mechanics courses wearing optimization clothes; the $\bigstar$ marks bookkeeping, not depth.)}
+\end{exercise}
+
+\subsection*{On matrix calculus (Section~\ref{sec:matcalc})}
+
+\begin{exercise}[Supplementary: why reverse mode]\label{ex:vjp}
+\prioWorth
+Consider a chain $\x \in \R^n \mapsto \bm h_1 \in \R^{m_1} \mapsto \dots \mapsto \bm h_L \in \R^{m_L} \mapsto \mathcal{L} \in \R$, with Jacobians $\bm J_\ell$ of the $\ell$-th map.
+(a) The gradient is $\nabla_{\x} \mathcal{L} = \bm J_1^\T \bm J_2^\T \cdots \bm J_L^\T\, \nabla_{\bm h_L} \mathcal{L}$. Count the cost of evaluating this product right-to-left (reverse mode: a sequence of VJPs) versus left-to-right (forward mode: JVPs seeded with each of the $n$ basis vectors), in terms of $n$, $L$, and the layer widths. Conclude that reverse mode computes the full gradient at $O(1)$ times the cost of one forward pass, while forward mode pays a factor $n$.
+(b) Identify reverse mode's price: which intermediate quantities must be stored between the forward and backward passes, and how does that memory scale with depth and width? (This is why sequence models truncate backpropagation through time --- Module 7's opening problem.)
+(c) When \emph{would} forward mode win? State the shape condition, and give one example from this pipeline's neighborhood (e.g.\ sensitivity of a scalar-input simulation).
+\end{exercise}
+
+% =====================================================================
+\section*{Source map and what comes next}
+\addcontentsline{toc}{section}{Source map and what comes next}
+% =====================================================================
+
+\begin{center}
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+Section & Primary source(s) & Feeds directly into \\
+\midrule
+\ref{sec:landscape} Convexity, non-convexity & Boyd Ch.\ 1, \S3.1--3.2; GF \S8.2 & expectations for NN training \\
+\ref{sec:gd} GD on quadratics, rates & Boyd \S9.1--9.3 & every training run; lr selection \\
+\ref{sec:conditioning} Conditioning & GF \S4.3, \S8.2 & feature standardization; why precondition \\
+\ref{sec:sgd} SGD, noise ball, schedules & GF \S8.1, \S8.3 & batch/schedule choices (Module 6) \\
+\ref{sec:momentum} Momentum as damped ODE & GF \S8.3 + classical & optimizer intuition; Nesterov \\
+\ref{sec:adaptive} AdaGrad/RMSProp/Adam(W) & GF \S8.5 context & the pipeline's default optimizer \\
+\ref{sec:matcalc} Differential method, VJPs & Matrix Cookbook \S2.4--2.7 & backprop (Module 6); GMM M-step (Module 8) \\
+\ref{sec:init} Variance propagation & GF \S8.4 context & Xavier/He derivations (Module 6); BPTT (Module 7) \\
+\ref{sec:capstone} Config capstone & synthesis & the NEC training loop \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\medskip
+Module 6 is next and inherits a running start: backpropagation is already nine-tenths derived in Exercise~\ref{ex:chainrule}(c), the SGD/momentum/Adam analyses live here and will be cited rather than repeated, and the initialization framework of \S\ref{sec:init} needs only the activation-specific bookkeeping (the ReLU half-variance, the batch-norm gradient) that the syllabus assigns there. What Module 6 adds that is genuinely new: loss-function choices for regression on heavy-tailed targets, the regularization toolkit (dropout, early stopping as implicit shrinkage), batch normalization's mechanics and its gradient, and the practical craft of training and debugging the MLP experts that the corrected NEC will route between.
+
+\end{document}

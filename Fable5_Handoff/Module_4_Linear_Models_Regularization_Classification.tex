@@ -1,0 +1,789 @@
+% =====================================================================
+%  Foundations for a Quant Research Pipeline
+%  Chapter: Module 4 — Linear Models, Regularization, and Classification
+%  Companion textbook to NEC_thesis_syllabus.md
+%  Sources synthesized: ESL §3.1–3.4, §3.8, §4.1–4.4; Bishop §3.1–3.3 (reinforcement)
+% =====================================================================
+\documentclass[11pt]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{mathpazo}
+\usepackage{microtype}
+\usepackage[margin=1.05in]{geometry}
+\usepackage{amsmath,amssymb,amsthm,mathtools,bm}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{tcolorbox}
+\tcbuselibrary{breakable}
+\usepackage{booktabs}
+\usepackage[colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,urlcolor=blue!50!black]{hyperref}
+
+\linespread{1.05}
+\setlength{\parskip}{0.35em}
+
+% ---------- colors ----------
+\definecolor{necblue}{RGB}{20,45,90}
+\definecolor{finmaroon}{RGB}{110,30,30}
+\definecolor{boxbg}{RGB}{245,247,250}
+\definecolor{finbg}{RGB}{250,246,243}
+
+% ---------- module-4 numbering ----------
+\renewcommand{\thesection}{4.\arabic{section}}
+\numberwithin{equation}{section}
+
+% ---------- theorem environments ----------
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{corollary}[theorem]{Corollary}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{example}[theorem]{Example}
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+
+\newcounter{exercise}
+\renewcommand{\theexercise}{4.\arabic{exercise}}
+\newenvironment{exercise}[1][]{\refstepcounter{exercise}\par\medskip
+  \noindent\textbf{Exercise \theexercise}\if\relax\detokenize{#1}\relax\else\ \textnormal{[#1]}\fi\textbf{.}\ \itshape}{\par\medskip}
+
+% ---------- exercise importance badges (priority for the NEC/MoE thesis track) ----------
+\definecolor{priogray}{RGB}{120,120,120}
+\newcommand{\prioCore}{{\normalfont\small\textbf{\textcolor{necblue}{[\,\ensuremath{\bigstar\bigstar\bigstar}\ Core\,]}}}\hspace{0.5em}}
+\newcommand{\prioWorth}{{\normalfont\small\textbf{\textcolor{finmaroon}{[\,\ensuremath{\bigstar\bigstar}\ Worth it\,]}}}\hspace{0.5em}}
+\newcommand{\prioLow}{{\normalfont\small\textcolor{priogray}{[\,\ensuremath{\bigstar}\ Low priority\,]}}\hspace{0.5em}}
+\newcommand{\prioOpt}{{\normalfont\small\textcolor{priogray}{[\,\ensuremath{\circ}\ Optional\,]}}\hspace{0.5em}}
+\newcommand{\corebadge}{}% superseded by the four \prio badges above
+
+% ---------- boxes ----------
+\newtcolorbox{necbox}{breakable,colback=boxbg,colframe=necblue,
+  boxrule=0.8pt,arc=1.5mm,left=2mm,right=2mm,top=1.5mm,bottom=1.5mm,
+  title={\sffamily\bfseries NEC connection},fonttitle=\small}
+\newtcolorbox{finbox}{breakable,colback=finbg,colframe=finmaroon,
+  boxrule=0.8pt,arc=1.5mm,left=2mm,right=2mm,top=1.5mm,bottom=1.5mm,
+  title={\sffamily\bfseries Finance reality check},fonttitle=\small}
+
+% ---------- operators ----------
+\DeclareMathOperator{\E}{\mathbb{E}}
+\DeclareMathOperator{\Var}{Var}
+\DeclareMathOperator{\Cov}{Cov}
+\DeclareMathOperator{\Corr}{Corr}
+\DeclareMathOperator{\tr}{tr}
+\DeclareMathOperator{\diag}{diag}
+\DeclareMathOperator{\sign}{sign}
+\DeclareMathOperator*{\argmin}{arg\,min}
+\DeclareMathOperator*{\argmax}{arg\,max}
+\newcommand{\KL}[2]{\mathrm{KL}\!\left(#1 \,\middle\|\, #2\right)}
+\newcommand{\Normal}{\mathcal{N}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\x}{\bm{x}}
+\newcommand{\X}{\bm{X}}
+\newcommand{\y}{\bm{y}}
+\newcommand{\bbeta}{\bm{\beta}}
+\newcommand{\bmu}{\bm{\mu}}
+\newcommand{\bSigma}{\bm{\Sigma}}
+\newcommand{\T}{\top}
+\newcommand{\RSS}{\mathrm{RSS}}
+
+\title{\vspace{-1.2em}{\large\sffamily Foundations for a Quant Research Pipeline}\\[0.4em]
+\textbf{Module 4:\\ Linear Models, Regularization, and Classification}\\[0.3em]
+{\large A single merged treatment of ESL \S3.1--3.4, \S3.8 and \S4.1--4.4,\\ with Bishop \S3.1--3.3 as reinforcement}}
+\author{Prepared for Tom Koreslesjak \;\textperiodcentered\; companion to \texttt{NEC\_thesis\_syllabus.md}}
+\date{June 2026}
+
+\begin{document}
+\maketitle
+\vspace{-1.5em}
+
+\begin{abstract}
+\noindent This chapter turns the probability of Foundations B and the linear algebra of Foundations A into working models: least squares as a statistical (not merely geometric) procedure, ridge and lasso as the two canonical ways to spend bias for variance, and linear classification through both the generative route (LDA) and the discriminative route (logistic and softmax regression). The destination is again fixed in advance: by the end you will be able to derive the softmax cross-entropy gradient $\hat{p} - y$ and Hessian $\diag(\hat{p}) - \hat{p}\hat{p}^\T$ from scratch, explain why that gradient form is numerically well-behaved, derive ridge and lasso both as constrained least squares (via KKT) and as MAP estimators (Gaussian and Laplace priors), and understand the NEC gate at the level needed to debug it. All syllabus exercises appear in Section~\ref{sec:exercises}, restated self-contained.
+\end{abstract}
+
+\tableofcontents
+
+\subsection*{How this chapter was assembled (and what was cut)}
+
+ESL Chapter 3 and Chapter 4 carry the load; Bishop Chapter 3 is assigned as optional reinforcement and contributes one exercise and one viewpoint. Beyond the usual de-duplication against earlier chapters (ridge's closed form, its SVD shrinkage picture, and its Gaussian-prior reading were Foundations A exercises; MAP-as-penalty and the Bayes classifier were Foundations B --- all are cross-referenced, not re-derived), the deliberate cuts:
+
+\begin{itemize}[leftmargin=2em,itemsep=0.15em]
+\item \emph{ESL \S3.3 (best-subset and stepwise selection).} Compressed to remarks. Discrete selection is unstable under resampling and computationally awkward; its conceptual content survives as the hard-thresholding column of the orthonormal-design comparison in Section~\ref{sec:lasso}.
+\item \emph{ESL \S3.4.4 and most of \S3.8 (least-angle regression, Dantzig selector, grouped lasso).} Only two facts survive: lasso coefficient paths are piecewise linear in $\lambda$, and LAR explains why. Path-algorithm mechanics are not load-bearing when a solver is a library call.
+\item \emph{ESL \S3.5--3.7 (PCR, PLS, multiple-outcome regression).} Principal-components regression appears only as a one-paragraph contrast to ridge (truncation vs.\ smooth shrinkage of the same SVD directions); PLS and multi-output machinery are cut.
+\item \emph{ESL \S4.3 extras (regularized discriminant analysis, reduced-rank LDA / Fisher coordinates).} The two-class Fisher direction is kept --- it is the formula your exercises need; the general eigen-machinery of canonical coordinates is cut with a pointer.
+\item \emph{Bishop \S3.3 onward (full Bayesian linear regression: posterior predictives, evidence approximation).} Only the posterior-mode slice is used (it \emph{is} ridge). Predictive distributions return if the thesis ever needs uncertainty-aware gates.
+\end{itemize}
+
+Two pieces of mathematics are \emph{added} that none of the assigned readings states cleanly, because this chapter's exercises are unsolvable without them: the $\chi^2$ facts behind confidence sets (Section~\ref{sec:ls}) and a minimal KKT-and-subgradient toolkit (Section~\ref{sec:kkt}). This is the same policy as Foundations B: the book must contain every tool its own exercises require.
+
+\subsection*{Notation}
+
+As in Foundations B: vectors bold lowercase, matrices bold uppercase, $\E, \Var, \Cov$ as before. The design matrix $\X$ is $N \times (p+1)$ with a leading column of ones when an intercept is present; $\RSS(\bbeta) = \|\y - \X\bbeta\|^2$. When a penalty is in play, features are standardized and the intercept is \emph{not} penalized. Equivalently, either separate the intercept by centering $\y$ and using the standardized feature matrix without the column of ones (the convention used in the compact ridge/lasso formulas), or keep the full design and replace $\lambda\bm I$ by a penalty matrix with a zero in the intercept position. For classification, $G \in \{1, \dots, K\}$ is the class label, one-hot encoded as $\y$ when convenient; $\sigma(z) = 1/(1+e^{-z})$ is the logistic sigmoid; $\mathrm{LSE}$ and $\mathrm{softmax}$ are as in Foundations B \S B.6. ``Foundations A/B'' cite the earlier chapters; equation references like (B.1.9) point into Foundations B.
+
+% =====================================================================
+\section{Least squares as a statistical model}\label{sec:ls}
+% =====================================================================
+
+\subsection{From geometry to inference}
+
+Foundations A treated least squares geometrically: $\hat\bbeta = (\X^\T\X)^{-1}\X^\T \y$ is the coefficient vector whose fit $\X\hat\bbeta$ is the orthogonal projection of $\y$ onto the column space of $\X$, with hat matrix $\bm{H} = \X(\X^\T\X)^{-1}\X^\T$ symmetric and idempotent. That picture is complete as numerics and silent as statistics: it says nothing about how wrong $\hat\bbeta$ is, because it has no model of where $\y$ came from. This section adds the model and harvests the consequences.
+
+Assume
+\begin{equation}
+\y = \X\bbeta + \bm{\varepsilon}, \qquad \E[\bm{\varepsilon}] = \bm{0}, \qquad \Cov(\bm{\varepsilon}) = \sigma^2 \bm{I},
+\label{eq:linmodel}
+\end{equation}
+with $\X$ treated as fixed (condition on it throughout --- Foundations B \S B.2 makes that move legitimate). Substituting \eqref{eq:linmodel} into the estimator,
+\begin{equation}
+\hat\bbeta = \bbeta + (\X^\T\X)^{-1}\X^\T \bm{\varepsilon},
+\label{eq:betahatdecomp}
+\end{equation}
+so $\hat\bbeta$ is the truth plus a linear map of noise. Linearity of expectation gives unbiasedness, $\E[\hat\bbeta] = \bbeta$, and the covariance transform rule (B.1.9) gives, in one line,
+\begin{equation}
+\Cov(\hat\bbeta) = (\X^\T\X)^{-1}\X^\T (\sigma^2 \bm{I}) \X (\X^\T\X)^{-1} = \sigma^2 (\X^\T\X)^{-1}.
+\label{eq:covbeta}
+\end{equation}
+The noise variance is estimated by
+\begin{equation}
+\hat\sigma^2 = \frac{1}{N - p - 1} \sum_{i=1}^N (y_i - \hat y_i)^2 ,
+\label{eq:sigmahat}
+\end{equation}
+unbiased for $\sigma^2$; the divisor is Bessel's correction grown up --- $p+1$ degrees of freedom were spent fitting, exactly the Foundations B \S B.4.2 lesson, now with $p+1$ fitted directions instead of one fitted mean.
+
+If we additionally assume Gaussian errors, $\bm{\varepsilon} \sim \Normal(\bm{0}, \sigma^2\bm{I})$, then \eqref{eq:betahatdecomp} says $\hat\bbeta$ is a linear map of a Gaussian, hence (Foundations B \S B.3.2 closure)
+\begin{equation}
+\hat\bbeta \sim \Normal\big(\bbeta,\; \sigma^2 (\X^\T\X)^{-1}\big).
+\label{eq:betadist}
+\end{equation}
+This is the sampling distribution that powers every inferential statement about a regression. The \emph{z-score} of coefficient $j$ is
+\begin{equation}
+z_j = \frac{\hat\beta_j}{\hat\sigma \sqrt{v_j}}, \qquad v_j = \big[(\X^\T\X)^{-1}\big]_{jj},
+\label{eq:zscore}
+\end{equation}
+approximately standard normal under the null $\beta_j = 0$ (exactly $t$-distributed in finite samples with Gaussian errors; the distinction evaporates at the sample sizes of a return panel), and $\hat\beta_j \pm 2\,\hat\sigma\sqrt{v_j}$ is the routine approximate 95\% confidence interval. These are the same $t$-statistic mechanics as Foundations B \S B.4.4, with \eqref{eq:covbeta} supplying the standard error.
+
+\subsection{The chi-squared distribution and confidence sets}\label{sec:chisq}
+
+One distribution must be added to the toolkit (it was foreshadowed but never defined in Foundations B, and Exercise~\ref{ex:esl32} and Module 5 both need it). If $Z_1, \dots, Z_m$ are i.i.d.\ standard Gaussians, the law of $\sum_{i=1}^m Z_i^2$ is the \emph{chi-squared distribution with $m$ degrees of freedom}, $\chi^2_m$, with mean $m$ and variance $2m$ (the mean is immediate from $\E[Z^2]=1$; the variance from $\E[Z^4] = 3$, the Gaussian fourth moment of Foundations B \S B.7.3). Two standard facts, stated for use: under Gaussian errors, $(N - p - 1)\,\hat\sigma^2/\sigma^2 \sim \chi^2_{N-p-1}$, independent of $\hat\bbeta$; and if $\bm{w} \sim \Normal(\bm{0}, \bm{A})$ with $\bm{A} \succ 0$ of size $m$, then the Mahalanobis quadratic $\bm{w}^\T \bm{A}^{-1} \bm{w} \sim \chi^2_m$ --- whiten (Foundations B \S B.3.2) and you are summing $m$ squared standard normals.
+
+Applying the second fact to $\hat\bbeta - \bbeta \sim \Normal(\bm{0}, \sigma^2(\X^\T\X)^{-1})$ yields a \emph{joint} confidence statement about the whole coefficient vector: with $\chi^{2\,(1-\alpha)}_{m}$ the $(1-\alpha)$-quantile,
+\begin{equation}
+C_\beta \;=\; \Big\{ \bbeta : (\hat\bbeta - \bbeta)^\T \X^\T\X\, (\hat\bbeta - \bbeta) \;\le\; \hat\sigma^2\, \chi^{2\,(1-\alpha)}_{p+1} \Big\}
+\label{eq:confset}
+\end{equation}
+is an approximate $(1-\alpha)$ confidence \emph{ellipsoid} for $\bbeta$ (ESL eq.\ 3.15). The geometry is Foundations B again: level sets of a Gaussian are ellipsoids, axes along the eigenvectors of $(\X^\T\X)^{-1}$. The distinction between per-coordinate intervals \eqref{eq:zscore} and the joint set \eqref{eq:confset} --- and what each implies about a fitted \emph{curve} --- is precisely Exercise~\ref{ex:esl32}, and it is a distinction quant work ignores at its peril: twenty individually-significant-looking coefficients and a jointly unremarkable coefficient vector are perfectly compatible (multiple testing, Module 5's obsession).
+
+\subsection{Gauss--Markov, and why it is weak comfort}
+
+\begin{theorem}[Gauss--Markov]\label{thm:gm}
+Under model \eqref{eq:linmodel}, among all estimators of $\bbeta$ that are linear in $\y$ and unbiased, the least squares estimator has the smallest covariance matrix in the PSD order: $\Cov(\tilde\bbeta) \succeq \Cov(\hat\bbeta)$ for every linear unbiased $\tilde\bbeta$, hence $\Var(\bm{a}^\T\tilde\bbeta) \ge \Var(\bm{a}^\T\hat\bbeta)$ for every linear functional $\bm{a}^\T\bbeta$.
+\end{theorem}
+\begin{proof}
+Write $\tilde\bbeta = \bm{C}\y$ with $\bm{C} = (\X^\T\X)^{-1}\X^\T + \bm{D}$. Unbiasedness for all $\bbeta$ forces $\bm{C}\X = \bm{I}$, i.e.\ $\bm{D}\X = \bm{0}$. Then by (B.1.9),
+$\Cov(\tilde\bbeta) = \sigma^2 \bm{C}\bm{C}^\T = \sigma^2\big[(\X^\T\X)^{-1} + \bm{D}\bm{D}^\T\big]$,
+the cross terms dying because $\bm{D}\X = \bm{0}$. Since $\bm{D}\bm{D}^\T$ is a Gram matrix, it is PSD (Foundations A), and the claim follows.
+\end{proof}
+
+Read the fine print: \emph{linear} and \emph{unbiased}. The theorem says nothing about biased estimators, and Foundations B's bias--variance decomposition (B.5.1) says mean-squared error trades bias against variance. When $\X^\T\X$ is ill-conditioned --- correlated features, the permanent condition of financial data --- $\Cov(\hat\bbeta) = \sigma^2(\X^\T\X)^{-1}$ has enormous entries along the small-eigenvalue directions, and a slightly biased, much-lower-variance estimator beats least squares in MSE. That estimator is ridge regression, and the rest of the regression half of this chapter is about doing this deliberately. Gauss--Markov is not a recommendation of OLS; it is a precise statement of the price of insisting on unbiasedness.
+
+\subsection{Orthogonalization: what a multiple-regression coefficient means}\label{sec:orthog}
+
+ESL \S3.2.3 contains the most useful interpretive result in applied regression. Consider the last predictor $\x_p$ (any predictor, by reordering). Run the following: regress $\x_p$ on all other predictors (with intercept) and keep the residual $\bm{z}_p$ --- the part of $\x_p$ orthogonal to everything else; then regress $\y$ on $\bm{z}_p$ alone.
+
+\begin{proposition}[Regression by orthogonalization; Frisch--Waugh]\label{prop:fwl}
+The simple-regression coefficient of $\y$ on $\bm{z}_p$ equals the multiple-regression coefficient of $\x_p$ in the full model:
+\begin{equation}
+\hat\beta_p = \frac{\langle \bm{z}_p, \y \rangle}{\langle \bm{z}_p, \bm{z}_p \rangle},
+\qquad\text{with}\qquad
+\Var(\hat\beta_p) = \frac{\sigma^2}{\|\bm{z}_p\|^2}.
+\label{eq:fwl}
+\end{equation}
+\end{proposition}
+
+\begin{proof}[Proof of Proposition~\ref{prop:fwl}]
+Write the full least-squares fit as $\y = \X_{-p}\hat\bbeta_{-p} + \x_p\hat\beta_p + \bm{r}$, where $\X_{-p}$ collects all predictors except $\x_p$ and $\bm{r} = \y - \X\hat\bbeta$ is the residual. The one fact the proof rests on is the geometric \emph{definition} of least squares: a least-squares residual is orthogonal to every predictor it was fit against, because the fit is the projection of the response onto the span of the predictors and what is left over is perpendicular to that span. This gives two orthogonalities. First, $\bm{z}_p$ is by construction the residual of regressing $\x_p$ on $\X_{-p}$ (say $\bm{z}_p = \x_p - \X_{-p}\hat{\bm\gamma}$), so $\bm{z}_p \perp \X_{-p}$, that is $\X_{-p}^\T \bm{z}_p = \bm{0}$. Second, the full residual $\bm{r}$ is orthogonal to \emph{all} columns of $\X$, and since $\bm{z}_p$ is a combination of those columns, $\bm{r} \perp \bm{z}_p$ too.
+
+Take the inner product of the fitted equation with $\bm{z}_p$:
+\[
+\langle \bm{z}_p, \y\rangle
+= \underbrace{\langle \bm{z}_p, \X_{-p}\hat\bbeta_{-p}\rangle}_{=\,0\ (\bm{z}_p \perp \X_{-p})}
+\;+\; \hat\beta_p\,\langle \bm{z}_p, \x_p\rangle
+\;+\; \underbrace{\langle \bm{z}_p, \bm{r}\rangle}_{=\,0\ (\bm{z}_p \perp \bm{r})} .
+\]
+The surviving inner product is $\langle \bm{z}_p, \x_p\rangle = \langle \bm{z}_p,\, \bm{z}_p + \X_{-p}\hat{\bm\gamma}\rangle = \|\bm{z}_p\|^2$, once more because $\bm{z}_p \perp \X_{-p}$. Hence $\langle \bm{z}_p, \y\rangle = \hat\beta_p\|\bm{z}_p\|^2$, which is the coefficient formula in \eqref{eq:fwl}. For the variance, substitute the model $\y = \X\bbeta + \bm\varepsilon$: the same two orthogonalities collapse $\bm{z}_p^\T\X\bbeta$ to $\beta_p\|\bm{z}_p\|^2$, so $\hat\beta_p = \beta_p + \bm{z}_p^\T\bm\varepsilon/\|\bm{z}_p\|^2$ --- unbiased --- and with $\Cov(\bm\varepsilon)=\sigma^2\bm{I}$ the covariance-transform rule (B.1.9) gives $\Var(\hat\beta_p) = \sigma^2\|\bm{z}_p\|^2/\|\bm{z}_p\|^4 = \sigma^2/\|\bm{z}_p\|^2$.
+\end{proof}
+
+Equivalently, in the language of Exercise~\ref{ex:esl34}: orthogonalizing the columns of $\X$ one at a time (Gram--Schmidt, which produces the QR decomposition) puts the regression in a basis where the coefficients decouple into independent one-dimensional projections, and the coefficient on the last, fully orthogonalized column is exactly \eqref{eq:fwl}. Two readings of the result now follow, both load-bearing.
+
+\emph{Interpretation.} A multiple-regression coefficient is the effect of a predictor \emph{after} the linear influence of every other predictor has been removed --- $\hat\beta_p$ measures only what $\x_p$ knows about $\y$ that its colleagues do not. ``Controlling for'' is not a metaphor; it is residualization, literally executed.
+
+\emph{Multicollinearity, made quantitative.} The variance formula in \eqref{eq:fwl} is exact and merciless: if $\x_p$ is nearly explained by the other predictors, $\|\bm{z}_p\|$ is small and $\Var(\hat\beta_p)$ explodes. Correlated predictors do not bias least squares; they make individual coefficients \emph{unidentifiable in practice} while leaving fitted values (the projection) perfectly stable. Any story you tell about ``the momentum coefficient'' in a model that also contains three momentum cousins is a story about noise.
+
+\begin{finbox}
+Residualization is endemic in quant research, usually under the name \emph{neutralization}. The syllabus's recommended target $r_i - \beta_i\, r_{\text{mkt}}$ is $\y$ residualized on the market; ``sector-neutral momentum'' is a feature residualized on sector dummies; Fama--MacBeth regressions (Module 5 reading, Bali--Engle--Murray Ch.\ 8) are cross-sectional multiple regressions whose coefficients are returns to characteristic exposures, orthogonalized against each other by Proposition~\ref{prop:fwl}. When the OP pipeline computes market-relative features, it is doing crude residualization (subtracting instead of regressing). And the variance formula explains a chronic quant pathology: factor models stuffed with correlated signals produce wildly unstable coefficient estimates fold-to-fold while predictions barely move --- the projection is stable, the coordinates are not. The cure for the coordinates is shrinkage, next.
+\end{finbox}
+
+
+% =====================================================================
+\section{Shrinkage I: ridge regression}\label{sec:ridge}
+% =====================================================================
+
+Ordinary least squares breaks down exactly when $\X^\T\X$ is ill-conditioned, which Section~\ref{sec:orthog} just argued is the normal state of correlated financial features: the coefficient variance $\sigma^2(\X^\T\X)^{-1}$ blows up along the directions the data barely constrain. In this shrinkage section, take $\X$ to be the centered, standardized feature matrix after the intercept has been separated out. \emph{Ridge regression} repairs ill-conditioning by refusing to let coefficients grow large unless the data strongly insist. It adds a penalty on the squared length of $\bbeta$ to the least-squares objective,
+\begin{align*}
+\hat\bbeta^{\mathrm{ridge}} &= \argmin_{\bbeta}\; J(\bbeta),\\
+J(\bbeta)
+&= \RSS(\bbeta) + \lambda\|\bbeta\|_2^2
+= \|\y - \X\bbeta\|^2 + \lambda\,\bbeta^\T\bbeta ,
+\end{align*}
+where $\lambda \ge 0$ is the \emph{regularization strength}: at $\lambda = 0$ this is plain least squares, and larger $\lambda$ pulls every coefficient harder toward zero.
+
+\emph{The closed form.} Since $J$ is a sum of two convex quadratics it has a single minimum, found by setting its gradient to zero. We need two matrix-calculus identities --- the vector versions of $\tfrac{d}{db}(y - xb)^2 = -2x(y-xb)$ and $\tfrac{d}{db}b^2 = 2b$, derived in Foundations A and restated here so nothing is assumed:
+\[
+\nabla_{\bbeta}\,\|\y - \X\bbeta\|^2 = -2\,\X^\T(\y - \X\bbeta),
+\qquad
+\nabla_{\bbeta}\,(\bbeta^\T\bbeta) = 2\,\bbeta .
+\]
+Setting $\nabla J = \bm 0$,
+\[
+-2\,\X^\T(\y - \X\bbeta) + 2\lambda\bbeta = \bm 0
+\quad\Longrightarrow\quad
+(\X^\T\X + \lambda\bm I)\,\bbeta = \X^\T\y ,
+\]
+and solving this linear system gives the ridge estimator,
+\begin{equation}
+\hat\bbeta^{\mathrm{ridge}}
+= \argmin_{\bbeta}\; \big\{ \RSS(\bbeta) + \lambda \|\bbeta\|_2^2 \big\}
+= (\X^\T\X + \lambda \bm{I})^{-1} \X^\T \y .
+\label{eq:ridge}
+\end{equation}
+Next to OLS, $\hat\bbeta^{\mathrm{OLS}} = (\X^\T\X)^{-1}\X^\T\y$, ridge does exactly one thing: it adds $\lambda$ to the diagonal of $\X^\T\X$ before inverting --- the ``ridge'' down the diagonal that names the method.
+
+\emph{Why it is always solvable.} That same diagonal bump cures the conditioning problem. The matrix $\X^\T\X$ is symmetric positive \emph{semi}definite, so its eigenvalues are all $\ge 0$ but some can be zero or nearly so --- which is precisely the ill-conditioning that makes OLS explode. Adding $\lambda\bm I$ raises every eigenvalue by $\lambda$: if $\X^\T\X$ has eigenvalues $\mu_j \ge 0$, then $\X^\T\X + \lambda\bm I$ has eigenvalues $\mu_j + \lambda \ge \lambda > 0$. So for any $\lambda > 0$ the matrix is strictly positive definite and therefore invertible \emph{no matter how collinear the features are}, and its condition number $(\mu_{\max} + \lambda)/(\mu_{\min} + \lambda)$ falls toward $1$ as $\lambda$ grows. Ridge buys numerical stability with a controlled dose of bias.
+
+\emph{What ridge does, seen through the SVD.} The sharpest picture of \emph{which} coefficients ridge shrinks, and by how much, comes from the singular value decomposition. Any $N \times p$ matrix factors as $\X = \bm U \bm D \bm V^\T$, where $\bm U$ ($N\times p$) and $\bm V$ ($p\times p$) have orthonormal columns and $\bm D = \diag(d_1, \dots, d_p)$ holds the \emph{singular values} $d_1 \ge \dots \ge d_p \ge 0$. Read it geometrically: the columns $\bm v_j$ of $\bm V$ are orthogonal directions in feature space, and $d_j$ measures how much the data spread along $\bm v_j$ --- a large $d_j$ marks a well-populated, well-determined direction, a small $d_j$ a direction the data barely sees and noise dominates. Substituting $\X = \bm U\bm D\bm V^\T$ into the fitted values $\hat\y = \X\hat\bbeta$ (and using $\X^\T\X = \bm V\bm D^2\bm V^\T$, so the $\bm V$'s cancel) turns OLS and ridge into
+\[
+\hat\y^{\mathrm{OLS}} = \sum_{j=1}^p \bm u_j\,(\bm u_j^\T \y),
+\qquad
+\hat\y^{\mathrm{ridge}} = \sum_{j=1}^p \bm u_j\,\frac{d_j^2}{d_j^2 + \lambda}\,(\bm u_j^\T \y).
+\]
+Term by term these are the same except for the \emph{shrinkage factor} $d_j^2/(d_j^2 + \lambda)$, which lies between $0$ and $1$: it is near $1$ when $d_j^2 \gg \lambda$, so well-determined directions pass through almost untouched, and near $0$ when $d_j^2 \ll \lambda$, so noise-dominated directions are squashed. This is the exact sense in which ridge ``shrinks'' --- not all coefficients equally, but selectively, hardest precisely where the data are weakest, which for correlated financial features is where the instability lives.
+
+The rest of this section adds the three things ESL \S3.4.1 builds on top of \eqref{eq:ridge}: a complexity measure, a practical reformulation, and the behavior under correlated features. (Conventions from the notation block apply: standardize features, never penalize the intercept; the centered reparameterization that makes this legitimate is ESL's Exercise 3.5, which we take as fact.)
+
+\emph{Effective degrees of freedom.} Ridge's fitted values are $\hat\y = \bm{S}_\lambda \y$ with smoother matrix $\bm{S}_\lambda = \X(\X^\T\X + \lambda\bm{I})^{-1}\X^\T$ --- ridge is a \emph{linear smoother}, the Foundations A checkpoint phrase. Substituting the SVD, two lines give
+\begin{equation}
+\mathrm{df}(\lambda) \;=\; \tr(\bm{S}_\lambda) \;=\; \sum_{j=1}^{p} \frac{d_j^2}{d_j^2 + \lambda},
+\label{eq:dfridge}
+\end{equation}
+a smooth dial running from $p$ (at $\lambda = 0$: full least squares) to $0$ (infinite shrinkage). This is the honest answer to ``how complex is my regularized model?'' --- not the number of parameters, but the trace of the smoother --- and it is the quantity Module 5's model-assessment machinery (AIC-style corrections, generalized cross-validation) consumes. A ridge fit with $p = 60$ features and $\mathrm{df}(\lambda) = 11$ is an eleven-parameter model wearing sixty coats.
+
+\emph{Ridge as augmented least squares.} Append to the data $p$ phantom rows: $\sqrt{\lambda}\, \bm{e}_j^\T$ with response $0$. Ordinary least squares on the augmented data reproduces \eqref{eq:ridge} exactly (write the augmented $\RSS$ and observe it \emph{is} the ridge objective). The reading: ridge is the assertion, with evidentiary weight $\lambda$, that each coefficient has been ``observed'' to be zero. This is the frequentist shadow of the Gaussian prior you placed on $\bbeta$ in Foundations A, and it is also a perfectly practical implementation trick.
+
+\emph{Correlated features.} Where OLS reacts to two correlated predictors by taking huge offsetting coefficients (the small-$\|\bm{z}_j\|$ pathology of \S\ref{sec:orthog}), ridge's $L_2$ penalty makes extreme offsetting expensive and pulls the pair toward \emph{sharing} the coefficient --- the grouping behavior that makes ridge the default for dense, correlated, weak signals. Principal-components regression, for contrast, keeps the top $M$ SVD directions whole and deletes the rest: hard truncation where ridge shrinks smoothly. With financial covariance structure unstable across time (the Foundations A random-matrix caution), smooth shrinkage is usually the safer bet than a sharp cut whose cutoff was tuned on yesterday's spectrum.
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[ESL Ex.\ 3.6, extended; extends the Foundations A capstone]\label{ex:esl36}
+\prioCore
+Assume $\y \mid \bbeta \sim \Normal(\X\bbeta, \sigma^2 \bm{I})$ and prior $\bbeta \sim \Normal(\bm{0}, \tau^2 \bm{I})$.
+(a) Write the log-posterior and complete the square in $\bbeta$ (the Foundations B \S B.3.3 technique, now applied to parameters): show the posterior is Gaussian with
+$\Cov(\bbeta \mid \y) = \sigma^2 (\X^\T\X + \lambda \bm{I})^{-1}$ and
+$\E[\bbeta \mid \y] = (\X^\T\X + \lambda \bm{I})^{-1}\X^\T\y$, where $\lambda = \sigma^2/\tau^2$.
+(b) Conclude that the ridge estimate is simultaneously the posterior \emph{mean and mode} --- what property of the Gaussian makes the two coincide, and why did Foundations A's MAP-only derivation not establish the mean?
+(c) Express the posterior covariance in the SVD basis of $\X$: variance $\sigma^2/(d_j^2 + \lambda)$ along right-singular direction $j$. Reconcile with the Foundations A shrinkage factors $d_j^2/(d_j^2+\lambda)$: the directions ridge shrinks hardest are exactly those the posterior remains most uncertain about. Why is that the only coherent combination?
+\end{exercise}
+
+\begin{exercise}[Supplementary: \S\ref{sec:ridge} coverage --- effective degrees of freedom]\label{ex:dfsupp}
+\prioCore
+Ridge is the linear smoother $\hat\y = \bm{S}_\lambda \y$ with $\bm{S}_\lambda = \X(\X^\T\X + \lambda\bm{I})^{-1}\X^\T$, and its effective degrees of freedom are $\mathrm{df}(\lambda) = \tr(\bm{S}_\lambda)$.
+(a) Using the SVD $\X = \bm{U}\bm{D}\bm{V}^\T$ (Foundations A) and the cyclic property of the trace, derive $\mathrm{df}(\lambda) = \sum_{j=1}^p d_j^2/(d_j^2 + \lambda)$, the formula \eqref{eq:dfridge}. Verify $\mathrm{df}(0) = \mathrm{rank}(\X)$ and that $\mathrm{df}(\lambda)$ decreases monotonically to $0$ as $\lambda \to \infty$.
+(b) Read the summand $d_j^2/(d_j^2+\lambda)$ as the \emph{fraction of a parameter} spent on singular direction $j$, and reconcile it with the Foundations A ridge shrinkage factor of the same name: a direction earns a full degree of freedom exactly when ridge leaves it unshrunk. For an orthonormal design ($d_j \equiv 1$) show $\mathrm{df}(\lambda) = p/(1+\lambda)$.
+(c) One sentence each: why is $\mathrm{df}(\lambda)$ --- not the raw parameter count $p$ --- the right complexity measure to feed the AIC/GCV-style corrections of Module 5; and why does a ridge fit with $p = 60$ features and $\mathrm{df}(\lambda) = 11$ generalize like an eleven-parameter model rather than a sixty-parameter one?
+\end{exercise}
+
+
+% =====================================================================
+\section{The constrained-optimization toolkit: KKT and subgradients}\label{sec:kkt}
+% =====================================================================
+
+The syllabus asks you to derive ridge and lasso as \emph{constrained} optimization and to handle the lasso's non-differentiable corner honestly. Neither ESL nor Bishop actually equips you with the required machinery --- ESL uses it offstage. This section supplies the minimum: KKT conditions for convex problems, and subdifferentials for convex non-smooth ones. Both will be reused verbatim for SVM-flavored material and for any constrained portfolio problem you ever meet, so the investment is not local.
+
+\subsection{Lagrange multipliers with inequality constraints}
+
+Consider, for convex differentiable $f$ and convex $g$,
+\begin{equation}
+\min_{\bbeta} f(\bbeta) \quad \text{subject to} \quad g(\bbeta) \le t .
+\label{eq:conprob}
+\end{equation}
+Form the Lagrangian $L(\bbeta, \lambda) = f(\bbeta) + \lambda\,(g(\bbeta) - t)$. A pair $(\bbeta^\ast, \lambda^\ast)$ satisfies the \emph{Karush--Kuhn--Tucker (KKT) conditions} if
+\begin{equation}
+\underbrace{\nabla f(\bbeta^\ast) + \lambda^\ast \nabla g(\bbeta^\ast) = \bm{0}}_{\text{stationarity}},
+\qquad
+\underbrace{g(\bbeta^\ast) \le t}_{\text{primal feasibility}},
+\qquad
+\underbrace{\lambda^\ast \ge 0}_{\text{dual feasibility}},
+\qquad
+\underbrace{\lambda^\ast\,\big(g(\bbeta^\ast) - t\big) = 0}_{\text{complementary slackness}}.
+\label{eq:kkt}
+\end{equation}
+
+\begin{theorem}[KKT sufficiency, convex case]\label{thm:kkt}
+If $f$ and $g$ are convex and $(\bbeta^\ast, \lambda^\ast)$ satisfies \eqref{eq:kkt}, then $\bbeta^\ast$ solves \eqref{eq:conprob}.
+\end{theorem}
+\begin{proof}
+The function $h = f + \lambda^\ast g$ is convex with $\nabla h(\bbeta^\ast) = 0$, so $\bbeta^\ast$ minimizes $h$ over all of $\R^{p}$. For any feasible $\bbeta$ (i.e.\ $g(\bbeta) \le t$),
+\begin{align*}
+f(\bbeta)
+&\ge f(\bbeta) + \lambda^\ast\big(g(\bbeta) - t\big)\\
+&= h(\bbeta) - \lambda^\ast t\\
+&\ge h(\bbeta^\ast) - \lambda^\ast t\\
+&= f(\bbeta^\ast) + \lambda^\ast\big(g(\bbeta^\ast) - t\big)\\
+&= f(\bbeta^\ast),
+\end{align*}
+using $\lambda^\ast \ge 0$ and $g(\bbeta)\le t$ in the first step and complementary slackness in the last.
+\end{proof}
+
+(Necessity also holds for convex problems under a mild condition --- Slater's: some strictly feasible point exists --- which every problem in this book satisfies; we use necessity freely and refer you to any convex-optimization text for the proof.)
+
+The physics reading makes \eqref{eq:kkt} unforgettable. An inequality constraint is a \emph{unilateral} constraint --- a floor, not a rail. The multiplier $\lambda^\ast$ is the normal force: it can only push ($\lambda^\ast \ge 0$, dual feasibility), and it is nonzero only while in contact with the surface (complementary slackness: either the constraint is active, $g = t$, or its force is zero). Stationarity is force balance between the objective's pull $-\nabla f$ and the constraint's push. Economists read the same multiplier as a shadow price: the rate at which the optimal $f$ would improve per unit of budget relaxation $dt$.
+
+\emph{Penalty $\leftrightarrow$ constraint.} The Lagrangian form is the penalized problem you have been solving all along: for fixed $\lambda$, minimizing $f(\bbeta) + \lambda g(\bbeta)$ is \eqref{eq:conprob} with the budget $t$ left implicit. The correspondence is a one-to-one, monotone re-indexing of the same solution path: solve the penalized problem at $\lambda$, set $t = g(\hat\bbeta_\lambda)$, and the KKT conditions for the constrained problem at that $t$ are satisfied by construction; conversely an active constraint at budget $t$ has a multiplier $\lambda(t)$, decreasing in $t$. Exercise~\ref{ex:kktridge} makes you walk both directions for ridge and lasso, including the boundary case where the budget exceeds $\|\hat\bbeta^{\mathrm{OLS}}\|$ and the constraint goes slack ($\lambda = 0$: regularization off).
+
+\subsection{Subgradients: differentiating the absolute value}\label{sec:subgrad}
+
+The lasso objective contains $|\beta_j|$, which has no derivative at the one point where all the action is. The fix is the right generalization of gradient for convex functions. A vector $\bm{s}$ is a \emph{subgradient} of convex $F$ at $\bm{x}$ if
+\begin{equation}
+F(\bm{y}) \;\ge\; F(\bm{x}) + \bm{s}^\T(\bm{y} - \bm{x}) \qquad \text{for all } \bm{y},
+\label{eq:subgrad}
+\end{equation}
+i.e.\ the linear function through $(\bm{x}, F(\bm{x}))$ with slope $\bm{s}$ supports $F$ from below --- the same supporting-line idea you used to prove Jensen's inequality (Foundations B, Exercise B.5). The set of all subgradients at $\bm{x}$ is the \emph{subdifferential} $\partial F(\bm{x})$; where $F$ is differentiable it collapses to $\{\nabla F(\bm{x})\}$. The two facts we need:
+
+\begin{enumerate}[leftmargin=2em,itemsep=0.15em]
+\item For the absolute value on $\R$: $\partial |x| = \{\sign(x)\}$ for $x \ne 0$, and $\partial|0| = [-1, 1]$ --- at the kink, every slope between the two one-sided slopes supports the V shape.
+\item \emph{Optimality:} $\bm{x}^\ast$ minimizes convex $F$ iff $\bm{0} \in \partial F(\bm{x}^\ast)$. (Immediate from \eqref{eq:subgrad}: the constant function supports $F$ at $\bm{x}^\ast$ exactly when $\bm{x}^\ast$ is a global minimum.)
+\end{enumerate}
+
+The interval $[-1,1]$ in fact 1 is the entire secret of sparsity. Watch it work on the scalar prototype:
+
+\begin{example}[The soft-thresholding prototype]\label{ex:softproto}
+Minimize $F(x) = \tfrac12 (x - a)^2 + \lambda |x|$ for $\lambda > 0$. Optimality demands $0 \in (x - a) + \lambda\, \partial|x|$. If $x > 0$: $x = a - \lambda$, consistent iff $a > \lambda$. If $x < 0$: $x = a + \lambda$, consistent iff $a < -\lambda$. If $x = 0$: need $0 \in -a + \lambda[-1,1]$, i.e.\ $|a| \le \lambda$ --- an entire \emph{interval} of inputs maps to exactly zero. Compactly,
+\begin{equation}
+x^\ast = S_\lambda(a) \coloneqq \sign(a)\,\max(|a| - \lambda,\, 0),
+\label{eq:softthresh}
+\end{equation}
+the \emph{soft-thresholding operator}: shift toward zero by $\lambda$, and snap to zero inside the band $|a| \le \lambda$. A smooth penalty can never do this --- the $L_2$ penalty's optimality condition $x = a/(1+\lambda)$ rescales but vanishes only at $a = 0$ exactly. Sparsity is produced by the kink, and only by the kink.
+\end{example}
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[Syllabus: penalty $\leftrightarrow$ constraint via KKT]\label{ex:kktridge}
+\prioCore
+Write ridge and lasso in budget form: minimize $\tfrac12\RSS(\bbeta)$ subject to $\tfrac12\|\bbeta\|_2^2 \le t$ (ridge) or $\|\bbeta\|_1 \le t$ (lasso).
+(a) For ridge, write the KKT conditions \eqref{eq:kkt}, solve the stationarity equation, and recover the closed form \eqref{eq:ridge} with $\lambda$ equal to the multiplier.
+(b) For the lasso, write stationarity in subgradient form ($\bm{0} \in -\X^\T(\y - \X\bbeta) + \lambda\, \partial\|\bbeta\|_1$) and extract the coordinatewise optimality conditions: $|\x_j^\T(\y - \X\hat\bbeta)| \le \lambda$ whenever $\hat\beta_j = 0$, with equality $\x_j^\T(\y - \X\hat\bbeta) = \lambda \sign(\hat\beta_j)$ whenever $\hat\beta_j \ne 0$. Interpret: a feature enters the model only when its correlation with the residual hits the threshold $\lambda$.
+(c) Prove the two-way correspondence of Section~\ref{sec:kkt}: from a penalized solution $\hat\bbeta_\lambda$, exhibit the budget $t$ for which it solves the constrained problem; from a constrained solution with active constraint, exhibit the multiplier. Show $t \mapsto \lambda(t)$ is non-increasing, and identify the regime where the constraint is slack and $\lambda = 0$ (complementary slackness with the budget exceeding the OLS budget: $\tfrac12\|\hat\bbeta^{\mathrm{OLS}}\|_2^2$ for ridge or $\|\hat\bbeta^{\mathrm{OLS}}\|_1$ for lasso).
+\end{exercise}
+
+
+% =====================================================================
+\section{Shrinkage II: the lasso}\label{sec:lasso}
+% =====================================================================
+
+\subsection{The estimator and its geometry}
+
+The lasso replaces ridge's squared norm with the $L_1$ norm:
+\begin{equation}
+\hat\bbeta^{\mathrm{lasso}}
+= \argmin_{\bbeta}\; \Big\{ \tfrac12 \RSS(\bbeta) + \lambda \|\bbeta\|_1 \Big\},
+\qquad \|\bbeta\|_1 = \sum_{j=1}^p |\beta_j| .
+\label{eq:lasso}
+\end{equation}
+No closed form exists in general --- the problem is convex but the penalty is non-smooth --- yet the solution structure is sharper than ridge's: some coefficients are \emph{exactly} zero. The constrained picture says why. In the budget form ($\RSS$ minimized subject to $\|\bbeta\|_1 \le t$), the constraint region is a cross-polytope --- a square rotated $45^\circ$ in $p = 2$, an octahedron in $p=3$ --- whose corners sit \emph{on the axes}. The elliptical $\RSS$ contours expanding from $\hat\bbeta^{\mathrm{OLS}}$ typically first touch the region at a corner or edge, where some coordinates vanish; ridge's spherical budget has no corners, so the touching point has, with probability one, no zeros at all. The algebraic engine under this picture is Example~\ref{ex:softproto}'s interval $[-1,1]$, and the orthonormal case makes the comparison exact:
+
+\begin{center}
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+Estimator & Orthonormal-design solution ($\X^\T\X = \bm{I}$) & Action on $\hat\beta_j^{\mathrm{OLS}}$ \\
+\midrule
+Best subset (size $M$) & $\hat\beta_j \cdot \mathbf{1}\big[\,|\hat\beta_j| \ge |\hat\beta|_{(M)}\big]$ & keep or kill: \emph{hard} threshold \\
+Ridge & $\hat\beta_j / (1 + \lambda)$ & shrink everything, kill nothing \\
+Lasso & $S_\lambda(\hat\beta_j) = \sign(\hat\beta_j)(|\hat\beta_j| - \lambda)_+$ & shrink \emph{and} kill: \emph{soft} threshold \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent ($|\hat\beta|_{(M)}$ is the $M$-th largest magnitude.) Deriving the ridge and lasso rows is Exercise~\ref{ex:softthresh}; the best-subset row is what survives of ESL \S3.3 in this book --- discrete selection is hard thresholding, with all the instability that a discontinuous rule implies under resampling.
+
+\subsection{Coordinate descent and the solution path}
+
+The modern lasso solver is almost embarrassingly simple. Cycle through coordinates; for coordinate $j$, freeze the others, and the problem in $\beta_j$ alone \emph{is} the scalar prototype: writing the partial residual $\bm{r}^{(j)} = \y - \sum_{\ell \ne j} \x_\ell \hat\beta_\ell$, the update is
+\begin{equation}
+\hat\beta_j \;\leftarrow\; \frac{S_\lambda\big( \x_j^\T \bm{r}^{(j)} \big)}{\x_j^\T \x_j},
+\label{eq:cd}
+\end{equation}
+a univariate regression followed by a soft-threshold (Exercise~\ref{ex:softthresh} derives this from the subgradient condition). Iterating to convergence works \emph{because} the non-smooth part of the objective is separable across coordinates --- a structural fact (Tseng's condition) we state without proof; it fails for non-separable penalties, which is why coordinate descent is a lasso algorithm and not a universal one. Warm-starting from a larger $\lambda$ and sweeping a grid downward gives the whole regularization path cheaply; along the way the active set changes only at finitely many breakpoints, and between breakpoints the KKT stationarity conditions are \emph{linear} in $\bbeta$ --- which is why lasso paths are piecewise linear in $\lambda$, the one fact retained from ESL \S3.8/LAR.
+
+\emph{Elastic net}, in one paragraph: the penalty $\lambda\big(\alpha \|\bbeta\|_1 + \tfrac{1-\alpha}{2}\|\bbeta\|_2^2\big)$ blends the two. With heavily correlated features the pure lasso picks one of a correlated group nearly arbitrarily and zeroes its cousins --- a selection event that flips fold to fold; the $L_2$ component restores ridge's grouping so correlated signals enter or leave \emph{together}. For financial features, which come in correlated families by construction (three momentum horizons, four vol windows), elastic net is usually the right default when sparsity is wanted at all.
+
+\begin{finbox}
+Choose the penalty by the prior you actually hold about return predictors. The empirical regularity is \emph{many, weak, correlated} signals --- dozens of features each carrying a sliver of IC, heavily overlapping --- which is the dense regime where ridge or elastic-net-near-ridge wins, and the lasso's clean ``the model selected these five factors'' story is mostly noise: under correlation, \emph{which} five is close to a coin flip (re-run on a different fold and watch the list change). Treat published sparse factor selections with the same multiple-testing suspicion Module 5 formalizes. Lasso earns its keep when interpretability or hard cost constraints (data fees per feature, execution complexity) genuinely demand few inputs --- a budget argument, which is, fittingly, the constrained form \eqref{eq:conprob}.
+\end{finbox}
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[Syllabus: soft thresholding and the orthonormal trio]\label{ex:softthresh}
+\prioCore
+(a) Reproduce the scalar prototype (Example~\ref{ex:softproto}) closed book: minimize $\tfrac12(x - a)^2 + \lambda|x|$ via the subdifferential and derive $S_\lambda(a)$.
+(b) Derive the coordinate-descent update \eqref{eq:cd}: freezing all coordinates but $j$, reduce the lasso objective to the prototype in $\beta_j$ with the partial residual $\bm{r}^{(j)}$, and solve.
+(c) For an orthonormal design ($\X^\T\X = \bm{I}$): show the full lasso solution is $\hat\beta_j = S_\lambda(\hat\beta_j^{\mathrm{OLS}})$ coordinatewise, and the ridge solution is $\hat\beta_j^{\mathrm{OLS}}/(1+\lambda)$ --- completing the table of Section~\ref{sec:lasso} against best subset's hard threshold.
+(d) Conclude in one paragraph, in subdifferential language, exactly why the lasso sets coefficients to zero on an interval of inputs while ridge never does: what does the set-valued $\partial|\cdot|(0) = [-1,1]$ absorb that the single-valued $L_2$ gradient cannot?
+\end{exercise}
+
+
+% =====================================================================
+\section{Regularization as a Bayesian prior}\label{sec:bayes}
+% =====================================================================
+
+Foundations B \S B.4.3 established the dictionary: MAP estimation maximizes $\ell(\bbeta) + \log p(\bbeta)$, so a log-prior \emph{is} a negative penalty. Both shrinkage estimators of this chapter are MAP estimators under the Gaussian likelihood \eqref{eq:linmodel}:
+
+\begin{center}
+\small
+\begin{tabular}{@{}llll@{}}
+\toprule
+Prior on each $\beta_j$ & $-\log p(\beta_j)$ + const & Penalty & Estimator \\
+\midrule
+Gaussian $\Normal(0, \tau^2)$ & $\beta_j^2 / 2\tau^2$ & $L_2$, $\lambda = \sigma^2/\tau^2$ & ridge \\
+Laplace, $p(\beta_j) = \tfrac{1}{2b} e^{-|\beta_j|/b}$ & $|\beta_j| / b$ & $L_1$, $\lambda = \sigma^2/b$ & lasso \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The Gaussian row you proved in Foundations A; Exercise~\ref{ex:esl36} upgrades it from ``MAP point estimate'' to the \emph{full posterior} --- which is Gaussian, by the completing-the-square technique of Foundations B \S B.3.3 applied to $\bbeta$ itself, so the ridge estimate is simultaneously the posterior mode \emph{and mean}. The Laplace row is Exercise~\ref{ex:laplacemap}. The shape story is the same one Section~\ref{sec:subgrad} told in optimization language: the Laplace density has a kink at zero --- finite slope $1/b$ on each side --- so the log-posterior can balance a nonzero likelihood gradient \emph{at} $\beta_j = 0$; the Gaussian's log-density is flat at the top, offers zero restoring force at the origin, and never pins a coefficient exactly there.
+
+\begin{remark}[Sparsity is a property of the mode, not the posterior]
+Under a Laplace prior the posterior \emph{mean} is almost surely nowhere zero --- only the \emph{mode} (the MAP point) sits at the kink. ``The lasso is Bayesian'' is therefore true only in the narrow MAP sense; a full Bayesian under the same prior would report dense (if heavily shrunk) coefficients. Knowing which summary of a posterior an estimator computes is exactly the loss-function discipline of Foundations B \S B.2.3: mode for 0--1-flavored loss, mean for squared loss. Sparsity, like the median, is a choice of functional.
+\end{remark}
+
+\emph{What we are not doing:} Bishop \S3.3--3.5 continues to posterior \emph{predictive} distributions and evidence-based selection of $\lambda$. Cut here --- Module 5 selects $\lambda$ by purged cross-validation instead, the honest method when data are temporally dependent --- but the door stays marked: a gate that knows its own uncertainty would start exactly there.
+
+% =====================================================================
+\section{From regression to classification}\label{sec:class}
+% =====================================================================
+
+The target object changes: for a class label $G \in \{1, \dots, K\}$, the regression function $\E[Y \mid \x]$ is replaced by the posterior probabilities $p(G = k \mid \x)$, and the optimal decision under 0--1 loss is the Bayes classifier $\hat G(\x) = \argmax_k p(G = k \mid \x)$ (Foundations B \S B.2.3). \emph{Linear methods for classification} are those whose decision boundaries $\{\x : \delta_k(\x) = \delta_\ell(\x)\}$ are hyperplanes; the three families of this chapter differ in how they manufacture the scores $\delta_k$.
+
+The most naive route: one-hot encode $G$ into an indicator matrix $\bm{Y}$ ($N \times K$), regress each column on $\x$ by least squares, classify to the largest fitted value. Foundations B's Exercise B.10 (ESL 2.1) already justified the last step --- with fitted values summing to one, largest component and closest one-hot target are the same rule. For $K = 2$ this works respectably, and Exercise~\ref{ex:esl42} proves something better than respectable: the two-class indicator-regression direction is \emph{identical up to scale} to the LDA direction. For $K \ge 3$, indicator regression has a famous failure mode: \emph{masking}. Picture three classes strung along a line in feature space. Each class gets one global linear score; the outer classes claim the two ends with steep planes, and the middle class's fitted plane --- forced by least squares to be low at both ends --- is dominated \emph{everywhere}, never largest, so the middle class is simply never predicted. The pathology is not linear boundaries per se (LDA and softmax have linear boundaries and no masking); it is the squared-error loss, which fits scores to $0/1$ targets instead of fitting a probability model, and pays for fitted values like $-0.3$ and $1.4$ in regions where the classification is not even contested. The repair is a likelihood: generative (next section) or conditional (the one after).
+
+% =====================================================================
+\section{Linear discriminant analysis: the generative route}\label{sec:lda}
+% =====================================================================
+
+\subsection{Gaussian class-conditionals with a shared covariance}
+
+Model each class's feature distribution as Gaussian with its own mean but a \emph{common} covariance:
+\begin{equation}
+\x \mid G = k \;\sim\; \Normal(\bmu_k, \bSigma), \qquad P(G = k) = \pi_k .
+\label{eq:ldamodel}
+\end{equation}
+Bayes' rule turns class densities into posteriors, and the log posterior odds between classes $k$ and $\ell$ collapse beautifully:
+\begin{equation}
+\log \frac{p(G = k \mid \x)}{p(G = \ell \mid \x)}
+= \log\frac{\pi_k}{\pi_\ell}
+- \tfrac12 (\bmu_k + \bmu_\ell)^\T \bSigma^{-1} (\bmu_k - \bmu_\ell)
++ \x^\T \bSigma^{-1} (\bmu_k - \bmu_\ell),
+\label{eq:ldaodds}
+\end{equation}
+\emph{linear} in $\x$: the quadratic terms $-\tfrac12 \x^\T \bSigma^{-1} \x$ from the two Gaussian exponents cancel because the covariance is shared. (Write out the two log-densities from (B.3.1)-style Gaussians and subtract --- the cancellation is one line.) Equivalently, classify by the largest \emph{linear discriminant function}
+\begin{equation}
+\delta_k(\x) = \x^\T \bSigma^{-1} \bmu_k - \tfrac12 \bmu_k^\T \bSigma^{-1} \bmu_k + \log \pi_k .
+\label{eq:ldadelta}
+\end{equation}
+Estimation is plug-in: $\hat\pi_k = N_k / N$; $\hat\bmu_k$ the class means; and the \emph{pooled within-class covariance}
+\begin{equation}
+\hat\bSigma \;=\; \frac{1}{N - K} \sum_{k=1}^{K} \sum_{i:\, g_i = k} (\x_i - \hat\bmu_k)(\x_i - \hat\bmu_k)^\T ,
+\label{eq:pooled}
+\end{equation}
+the Bessel-style divisor now spending $K$ fitted means. (Definitions \eqref{eq:ldadelta}--\eqref{eq:pooled} are exactly the objects Exercise~\ref{ex:esl42} manipulates.)
+
+The geometry is pure Foundations B: whiten by $\hat\bSigma^{-1/2}$ and \eqref{eq:ldadelta} becomes \emph{nearest centroid in Mahalanobis distance, handicapped by log-priors}. For two classes, the discriminating direction is
+\begin{equation}
+\hat\bSigma^{-1}(\hat\bmu_2 - \hat\bmu_1),
+\label{eq:ldadir}
+\end{equation}
+the line between centroids, pre-multiplied by the inverse covariance so that high-variance, high-correlation directions are discounted --- Fisher's direction. Relaxing the shared covariance to per-class $\bSigma_k$ keeps the derivation but kills the cancellation: log-odds become quadratic in $\x$ (\emph{QDA}), boundaries become conics, and the parameter bill jumps from one covariance to $K$ of them --- $K p(p+1)/2$ numbers, a variance disaster in modest samples unless regularized. The further reaches of ESL \S4.3 (shrunken covariances interpolating LDA$\to$QDA, reduced-rank Fisher coordinates) are cut per the preface; \eqref{eq:ldadir} is the piece this book actually uses.
+
+\subsection{Generative versus discriminative}\label{sec:genvdisc}
+
+Compare what LDA and (upcoming) logistic regression claim. \emph{Both} produce log-posterior-odds linear in $\x$ --- identical functional form. They differ in what is fitted: LDA maximizes the \emph{joint} likelihood $\prod_i p(\x_i, g_i)$, spending effort modeling the feature distribution itself; logistic regression maximizes only the \emph{conditional} likelihood $\prod_i p(g_i \mid \x_i)$, refusing to model $\x$ at all. The trade is classical: if the Gaussian model \eqref{eq:ldamodel} is \emph{true}, LDA uses strictly more information and is more efficient --- ESL \S4.4.5 quantifies the conditional-only efficiency loss at up to roughly 30\% asymptotically. If the model is \emph{false}, LDA's estimates are corrupted by every violation: and Foundations B \S B.7 establishes that financial features violate Gaussianity \emph{specifically in the tails}, where the quadratic log-density makes plug-in moments exquisitely outlier-sensitive. Logistic regression, modeling only the boundary, inherits none of that fragility. Hence the field rule of thumb: generative when you trust the density model or need it (missing data, simulation, regime semantics); discriminative when you only need the decision and your features are ugly. Financial features are ugly.
+
+\begin{necbox}
+This dichotomy \emph{is} the gating question of the thesis, stated in classical vocabulary. A Hamilton regime-switching model is \emph{generative} gating: it specifies $p(\x \mid \text{regime})$ (plus Markov dynamics) and obtains regime posteriors by Bayes --- LDA's logic with a transition matrix. The NEC gate is \emph{discriminative} gating: a softmax map from features straight to $p(z = k \mid \x)$, no model of $\x$, no transition matrix. The syllabus's framing sentence --- MoE ``replaces or augments Markov gating with feature-conditioned gating'' --- is precisely the LDA$\to$logistic move, executed on latent regimes instead of observed labels. And the efficiency-vs-robustness trade transfers intact: generative gates can squeeze more from data \emph{if} their regime-conditional densities are right; discriminative gates are the safer default under heavy tails. When your thesis compares the corrected NEC against a Markov-switching baseline, this subsection is the conceptual axis of the comparison.
+\end{necbox}
+
+% =====================================================================
+\section{Logistic and softmax regression: the discriminative route}\label{sec:logit}
+% =====================================================================
+
+\subsection{The binary model, its gradient, its Hessian}
+
+Model the log-odds as linear (intercept absorbed into $\x$):
+\begin{equation}
+\log \frac{p(G = 1 \mid \x)}{p(G = 0 \mid \x)} = \x^\T \bbeta
+\quad\Longleftrightarrow\quad
+p(G = 1 \mid \x) = \sigma(\x^\T\bbeta) = \frac{1}{1 + e^{-\x^\T\bbeta}} .
+\label{eq:logitmodel}
+\end{equation}
+The sigmoid's one essential identity, by direct differentiation: $\sigma'(z) = \sigma(z)\,(1 - \sigma(z))$. With labels $y_i \in \{0, 1\}$, the conditional log-likelihood is the negative cross-entropy (Foundations B \S B.6):
+\begin{equation}
+\ell(\bbeta) = \sum_{i=1}^N \Big[ y_i \log \hat p_i + (1 - y_i)\log(1 - \hat p_i) \Big],
+\qquad \hat p_i = \sigma(\x_i^\T \bbeta).
+\label{eq:logitll}
+\end{equation}
+Differentiate through the sigmoid: $\partial \hat p_i / \partial \bbeta = \hat p_i (1 - \hat p_i)\, \x_i$, and the chain rule telescopes,
+\begin{equation}
+\nabla_{\bbeta}\, \ell
+= \sum_{i=1}^N \Big( \frac{y_i}{\hat p_i} - \frac{1 - y_i}{1 - \hat p_i} \Big)\, \hat p_i (1 - \hat p_i)\, \x_i
+= \sum_{i=1}^N (y_i - \hat p_i)\, \x_i
+= \X^\T (\y - \hat{\bm{p}}) :
+\label{eq:logitgrad}
+\end{equation}
+the unbounded factors $1/\hat p$ and $1/(1-\hat p)$ cancel against the sigmoid's derivative, leaving the bounded \emph{residual} $y_i - \hat p_i$. Mark this cancellation; it is the binary preview of the chapter's capstone. One more derivative gives the Hessian
+\begin{equation}
+\nabla^2_{\bbeta}\, \ell = -\sum_{i=1}^N \hat p_i (1 - \hat p_i)\, \x_i \x_i^\T = -\X^\T \bm{W} \X,
+\qquad \bm{W} = \diag\big(\hat p_i (1 - \hat p_i)\big),
+\label{eq:logithess}
+\end{equation}
+negative semidefinite ($\bm{W} \succeq 0$ entrywise and $\X^\T\bm{W}\X$ is a weighted Gram matrix --- Foundations A), so the log-likelihood is \emph{concave}: no local-optimum traps, any hill-climb finds the top if a top exists.
+
+\subsection{Newton's method is iteratively reweighted least squares}\label{sec:irls}
+
+Newton's update $\bbeta^{+} = \bbeta - (\nabla^2 \ell)^{-1} \nabla \ell$ instantiates, using \eqref{eq:logitgrad}--\eqref{eq:logithess}, as
+\begin{equation}
+\bbeta^{+}
+= \bbeta + (\X^\T \bm{W} \X)^{-1} \X^\T (\y - \hat{\bm{p}})
+= (\X^\T \bm{W} \X)^{-1} \X^\T \bm{W} \bm{z},
+\qquad
+\bm{z} = \X\bbeta + \bm{W}^{-1}(\y - \hat{\bm{p}}).
+\label{eq:irls}
+\end{equation}
+The second equality is algebra worth doing once by hand. Its content: each Newton step solves a \emph{weighted least squares} problem --- regress the ``working response'' $\bm{z}$ (current fit plus rescaled residual) on $\X$ with observation weights $w_i = \hat p_i(1 - \hat p_i)$ --- hence the name \emph{iteratively reweighted least squares} (IRLS). The weighted-LS solution form $(\X^\T\bm{W}\X)^{-1}\X^\T\bm{W}\bm{z}$ that \eqref{eq:irls} quietly invokes is exactly what Exercise~\ref{ex:bishop33} (Bishop 3.3) has you derive, along with its two interpretations --- per-observation noise variances $\sigma^2/w_i$, or $w_i$-fold replicated data points. The weights concentrate effort where $\hat p_i \approx \tfrac12$: observations the model finds genuinely uncertain get weight near $\tfrac14$; confidently classified ones get weight near zero and barely influence the update. Statistical attention is allocated to the contested region --- and the same $w = \hat p(1-\hat p)$ is the per-observation Fisher information, so IRLS is also natural-gradient ascent avant la lettre.
+
+\subsection{Separation: when the MLE runs away}\label{sec:separation}
+
+Concavity promised that any hill-climb finds the top \emph{if a top exists}. It can fail to exist. Say the data are \emph{linearly separated} by $\bbeta_0$ if $y_i = 1 \Leftrightarrow \x_i^\T \bbeta_0 > 0$ for all $i$. Then along the ray $\bbeta = t\,\bbeta_0$, every fitted probability marches monotonically to its label as $t \to \infty$, the log-likelihood \eqref{eq:logitll} rises strictly toward its supremum $0$, and no finite maximizer exists: $\|\hat\bbeta\| \to \infty$, fitted probabilities saturate to $\{0,1\}$, and standard errors detonate. (Exercise~\ref{ex:separation} makes this precise in one dimension and shows the cure.) The cure is the chapter's running theme: add $\tfrac{\alpha}{2}\|\bbeta\|^2$ --- i.e.\ a Gaussian prior --- and the penalized likelihood becomes coercive, restoring a finite, unique optimum. Separation is not an exotic corner case: it becomes \emph{generic} when $p$ is large relative to $N$ (enough dimensions always find a separating hyperplane), which is one more reason regularized logistic regression is the production default.
+
+\subsection{Softmax regression: $K$ classes}\label{sec:softmaxreg}
+
+For $K$ classes, give each class a linear score $z_k = \x^\T \bbeta_k$ and pass the score vector through the softmax (Foundations B \S B.6.3): $\hat p_k = e^{z_k} / \sum_j e^{z_j}$. Two structural facts before the calculus. \emph{Gauge freedom}: adding any constant $c$ to every logit leaves $\hat{\bm p}$ unchanged ($e^c$ cancels), so the $K$ coefficient vectors are identified only up to a common shift --- ESL's formulation (its eq.\ 4.17) fixes the gauge by pinning class $K$'s logit to zero and parameterizing $K-1$ log-odds against that reference, which is why its $\bbeta$ has dimension $(p+1)(K-1)$; symmetric implementations instead keep all $K$ vectors and let weight decay select the representative (the penalty is minimized at the centered gauge). Exercise~\ref{ex:binarysoftmax} verifies that $K = 2$ in the reference gauge collapses to the sigmoid model \eqref{eq:logitmodel}. \emph{The per-sample loss}: for true class $c$, the negative log-likelihood is
+\begin{equation}
+\mathcal{L} = -\log \hat p_c = \mathrm{LSE}(\bm{z}) - z_c ,
+\label{eq:softmaxnll}
+\end{equation}
+log-sum-exp minus the true logit --- the same LSE object as the mixture NLL (B.8.3), here with the marginalization replaced by normalization. From (B.6.9), $\nabla_{\bm z}\,\mathrm{LSE} = \mathrm{softmax}(\bm z)$, so the gradient of \eqref{eq:softmaxnll} with respect to the logits is \emph{one line}; the syllabus nonetheless assigns the full derivation, Hessian and all, as Exercises~\ref{ex:cegrad} and \ref{ex:cehess}, because the checkpoint demands you own it from scratch --- including the second route through the softmax Jacobian you derived in Foundations A. The results, recorded here for reference and proved by you there:
+\begin{equation}
+\frac{\partial \mathcal{L}}{\partial z_k} = \hat p_k - y_k,
+\qquad\qquad
+\frac{\partial^2 \mathcal{L}}{\partial z_k\, \partial z_j} = \hat p_k(\delta_{kj} - \hat p_j)
+\;\;\Longleftrightarrow\;\;
+\bm{H} = \diag(\hat{\bm p}) - \hat{\bm p}\hat{\bm p}^\T \succeq 0 .
+\label{eq:cegradhess}
+\end{equation}
+PSD Hessian means \eqref{eq:softmaxnll} is convex in the logits; composing with the linear map $z_k = \x^\T\bbeta_k$ preserves convexity, so softmax regression, like its binary case, is a concave-likelihood problem with no spurious optima --- and with an L2 penalty, a strictly concave one, separation-proof. Newton's method generalizes with block-structured Hessian; carrying that out, vectorization and all, is ESL's Exercise 4.4 (our Exercise~\ref{ex:esl44}), though modern practice at scale is plain SGD on \eqref{eq:softmaxnll} --- same gradients, no matrix solve. The L1-penalized variant exists and inherits everything Section~\ref{sec:lasso} said about sparsity and paths; one sentence is all it needs here.
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[Syllabus: the cross-entropy gradient]\label{ex:cegrad}
+\prioCore
+(a) For the per-sample softmax loss $\mathcal{L} = \mathrm{LSE}(\bm z) - z_c$ \eqref{eq:softmaxnll} with one-hot target $\bm{y}$ (true class $c$), derive $\partial\mathcal{L}/\partial z_k = \hat p_k - y_k$ directly, using only $\nabla_{\bm z}\mathrm{LSE} = \mathrm{softmax}(\bm z)$ (B.6.9).
+(b) \emph{Soft targets.} For $\mathcal{L} = -\sum_k r_k \log \hat p_k$ with $\sum_k r_k = 1$ (responsibilities, label smoothing, distillation --- any soft label), show $\partial \mathcal{L}/\partial z_j = \hat p_j - r_j$. \emph{(Hint: write $\mathcal{L} = \mathrm{LSE}(\bm z) - \sum_k r_k z_k$.)} This is the gate's mixture-training gradient \eqref{eq:gatemoe}.
+(c) For the linear gate $z_k = \x^\T \bbeta_k$, assemble the batch gradient of the negative log-likelihood, $\nabla_{\bbeta_k} = \sum_i (\hat p_{ik} - y_{ik})\,\x_i$, and compare its form with the logistic log-likelihood gradient \eqref{eq:logitgrad}, noting the sign convention.
+\end{exercise}
+
+
+\begin{exercise}[Syllabus: the cross-entropy Hessian and convexity]\label{ex:cehess}
+\prioCore
+(a) Differentiating once more (or composing with the Foundations A softmax Jacobian), show the per-sample Hessian with respect to the logits is $\bm{H} = \diag(\hat{\bm p}) - \hat{\bm p}\hat{\bm p}^\T$, independent of the target.
+(b) Prove $\bm{H} \succeq 0$ by establishing the identity $\bm{v}^\T\bm{H}\bm{v} = \E_{k \sim \hat{\bm p}}[v_k^2] - \big(\E_{k \sim \hat{\bm p}}[v_k]\big)^2 = \Var_{k\sim\hat{\bm p}}(v_k)$.
+(c) Determine the null space of $\bm{H}$ for $\hat{\bm p}$ in the interior of the simplex, and connect it to the gauge freedom of Section~\ref{sec:softmaxreg}.
+(d) Conclude that $\mathcal{L}$ is convex in $\bm z$, and --- proving in two lines that pre-composition with a linear map preserves convexity --- convex in the weights of a linear gate. Why does the argument stop at the encoder?
+\end{exercise}
+
+
+% =====================================================================
+\section{Calibration: probabilities you can act on}\label{sec:calib}
+% =====================================================================
+
+A classifier can rank perfectly and still lie about probabilities. The model is \emph{calibrated} if its stated confidence is its realized frequency:
+\begin{equation}
+P\big(Y = 1 \,\big|\, \hat p(\bm{X}) = q\big) = q \qquad \text{for all } q \in [0,1],
+\label{eq:calibration}
+\end{equation}
+``of the days you said 70\%, it happened on 70\%.'' The empirical check is the \emph{reliability diagram}: bin predictions by $\hat p$, plot realized frequency per bin against bin center, compare to the diagonal (summed deviations give the expected calibration error). Why expect cross-entropy training to deliver calibration at all? Because log-loss is a \emph{proper scoring rule}: the expected loss $\E_{y \sim q}[-\log \hat p_y]$ is minimized, uniquely, at $\hat{\bm p} = \bm{q}$ --- this is Gibbs' inequality (B.6.4) wearing a different hat, and proving it (plus the impropriety of plain accuracy) is Exercise~\ref{ex:proper}. So the loss \emph{incentivizes} honest probabilities; miscalibration arises when the model class cannot represent them or the optimizer overfits its way to overconfidence --- the chronic state of flexible models, including boosted trees and neural networks. The repair is usually post-hoc and pleasingly recursive: \emph{Platt scaling} fits a one-dimensional logistic regression $\sigma(a s + b)$ on held-out scores $s$ --- logistic regression debugging another model's probabilities; \emph{temperature scaling} is its gauge-respecting multiclass cousin, dividing all logits by a single fitted $T$ --- exactly the softmax temperature of Foundations B \S B.6.3, fitted to data. The held-out set must respect time (walk-forward, Module 5), or the calibration is itself leaked.
+
+\begin{finbox}
+In a trading pipeline, probabilities are not classification garnish --- they are \emph{position sizes}. A regime probability feeds directly into how much risk the book carries; a $0.9$ that means $0.6$ is a 50\% overallocation delivered with confidence. Foundations B's base-rate example (B.2.1) already showed how a ``90\%-accurate'' crash signal yields a 24\% crash probability; calibration is the discipline that keeps such numbers honest \emph{after} a model starts producing them. And for the gate: $\bm{\pi}(\x)$ are mixture weights --- miscalibrated gates misallocate experts on every single forward pass, overcommitting to regimes the data do not support. Gate entropy diagnostics (B.6 box) catch collapse; reliability diagrams on walk-forward folds catch the subtler lie of systematic overconfidence.
+\end{finbox}
+
+% =====================================================================
+\section{Capstone: the NEC gate, assembled}\label{sec:gate}
+% =====================================================================
+
+The NEC gate is a softmax regression --- possibly reading an encoder state $\bm{h}(\x)$ rather than raw features, in which case everything below is exact in the final-layer weights with $\bm{h}$ frozen, and approximately true locally otherwise. This section assembles the chapter into the four facts the syllabus checkpoint demands.
+
+\emph{1. The gradient, from scratch, and the cancellation that makes it safe.} The careless route differentiates the loss with respect to probabilities first: $\partial \mathcal{L} / \partial \hat p_k = -y_k / \hat p_k$, which \emph{explodes} as the true class's probability approaches zero --- precisely the regime a confused early-training gate inhabits. But compose with the softmax Jacobian (Foundations A):
+\begin{equation}
+\frac{\partial \mathcal{L}}{\partial z_j}
+= \sum_k \frac{\partial \mathcal{L}}{\partial \hat p_k} \frac{\partial \hat p_k}{\partial z_j}
+= \sum_k \Big(\!-\frac{y_k}{\hat p_k}\Big)\, \hat p_k (\delta_{kj} - \hat p_j)
+= -\sum_k y_k (\delta_{kj} - \hat p_j)
+= \hat p_j - y_j ,
+\label{eq:cancellation}
+\end{equation}
+the $\hat p_k$'s cancelling \emph{algebraically} before any number is computed, leaving a gradient bounded in $[-1, 1]$ --- the multiclass twin of the sigmoid cancellation in \eqref{eq:logitgrad}. This is why every serious library fuses softmax with cross-entropy into one numerically-stable operation (computing $\log \hat p$ as $\bm{z} - \mathrm{LSE}(\bm z)$ with the max-subtraction trick (B.6.10)) rather than chaining the two unstable halves: the fused form computes \eqref{eq:cancellation}; the chained form computes $-y/\hat p$ and hopes. When you build the corrected NEC, the gate loss is one call to such a fused op --- now you know what it is protecting you from.
+
+\emph{2. The Hessian, and what its spectrum says.} $\bm H = \diag(\hat{\bm p}) - \hat{\bm p}\hat{\bm p}^\T$ is PSD with a clean probabilistic identity (Exercise~\ref{ex:cehess}): $\bm{v}^\T \bm{H}\, \bm{v} = \Var_{k \sim \hat{\bm p}}(v_k)$, the variance of the coordinates of $\bm v$ under the predicted distribution. Convexity in the logits is thus the non-negativity of a variance --- Foundations B closing the loop. The null direction is $\bm{1}$ (constants have zero variance): the gauge freedom of \S\ref{sec:softmaxreg}, visible in the spectrum. And near gate collapse ($\hat{\bm p}$ one-hot) the whole Hessian flattens to zero --- a saturated gate sits on a plateau, receiving vanishing curvature \emph{and} vanishing gradient signal, which is why collapse is sticky and why entropy monitoring beats waiting for the loss to move.
+
+\emph{3. One architecture, two label sources.} Set side by side:
+\begin{align}
+\text{supervised gate:}\qquad
+&\frac{\partial \mathcal{L}_i}{\partial z_k} = \hat\pi_k(\x_i) - y_{ik},
+&&y_{ik} \in \{0,1\};
+\label{eq:gatece}\\
+\text{mixture gate:}\qquad
+&\frac{\partial \mathcal{L}_i}{\partial z_k} = \pi_k(\x_i) - r_{ik},
+&&r_{ik} = \text{Bayes responsibilities.}
+\label{eq:gatemoe}
+\end{align}
+Identical operator, different teacher. Train the gate on VIX-bucket labels and you have supervised softmax regression \eqref{eq:gatece}; train the full mixture by maximum likelihood and the gate receives \eqref{eq:gatemoe} --- cross-entropy toward \emph{soft labels that the experts negotiate} each step, no human regime definitions required. Exercise~\ref{ex:cegrad}(b) proves the soft-target form. This pair of equations is the precise sense in which the corrected NEC ``trains its gate end-to-end'': not new machinery, but classification with learned targets --- and it is what the current code's \texttt{argmax} routing destroys, replacing $\pi - r$ with zero (Foundations B \S B.8.4).
+
+\emph{4. The debug table.} Symptoms to mathematics, for the experiments ahead: gate stuck uniform $\to$ entropy $\approx \log K$, logits tiny --- weight decay too strong, or features carry no regime signal (check \eqref{eq:gatece} magnitudes); gate saturated $\to$ separation dynamics of \S\ref{sec:separation}, $\|\bbeta\| \to \infty$ on pseudo-separable vol features --- raise the gate's L2 penalty, check entropy floor; one expert dead $\to$ utilization $\sum_i r_{ik} \approx 0$, its parameters frozen by (B.8.5) --- load-balancing auxiliary loss (B.6 box); probabilities untrustworthy $\to$ reliability diagram on walk-forward folds, temperature-scale if rank order is good but confidence inflated.
+
+\medskip
+\noindent\textbf{Checkpoint (from the syllabus).} Closed book: derive the softmax cross-entropy gradient and Hessian from scratch (both routes: direct differentiation of $\mathrm{LSE}(\bm z) - z_c$, and the Jacobian chain \eqref{eq:cancellation}); explain why $\hat p - y$ is what makes softmax regression numerically well-behaved (the cancellation, the boundedness, the fused implementation); derive ridge and lasso as Lagrangian solutions of constrained least squares (KKT, Section~\ref{sec:kkt}) \emph{and} as MAP under Gaussian and Laplace priors (Section~\ref{sec:bayes}); and state what the NEC gate's gradient is in both training modes \eqref{eq:gatece}--\eqref{eq:gatemoe}. If all four are comfortable, Module 4 has done its job: you understand the gate at the level needed to debug it.
+
+% =====================================================================
+\section{Exercises}\label{sec:exercises}
+% =====================================================================
+
+\noindent\textbf{Importance labels.} Each exercise carries a priority badge for the NEC/MoE thesis track, reflecting how load-bearing it is --- \emph{not} how hard it is. \prioCore mark the spine of the chapter (the softmax gradient and Hessian, ridge/lasso as KKT-constrained, ridge as MAP, and the effective-df complexity dial): do them closed-book before moving on. \prioWorth are high value, a notch below. \prioLow are foundational, peripheral, or superseded in practice (e.g.\ the multilogit Newton bookkeeping, where production code uses plain SGD) and can wait. Priority reflects thesis relevance, so two classical-but-heavy problems (the QR/Frisch--Waugh pass and the indicator-regression$\,=\,$LDA identity) are marked \emph{Worth it} rather than \emph{Core} despite their length.
+
+Questions only. \textbf{Core exercises (\prioCore) appear inline at the end of the section they test}, placed there as checkpoint exercises. This section collects the supplementary exercises only. Solvability audit: each exercise uses only tools from this chapter, Foundations A, or Foundations B, with the load-bearing cross-references named in the statements.
+
+\subsection*{On least squares and inference (Section~\ref{sec:ls})}
+
+\begin{exercise}[ESL Ex.\ 3.2]\label{ex:esl32}
+\prioLow
+You fit a cubic polynomial $f(x) = \sum_{j=0}^3 \beta_j x^j$ by least squares (design rows $\bm{a}(x)^\T = (1, x, x^2, x^3)$, Gaussian errors) and want a 95\% confidence band around the fitted curve. Two constructions:
+(a) \emph{Pointwise}: at each $x_0$, build a 95\% interval for $\bm{a}(x_0)^\T\bbeta$ from the sampling distribution \eqref{eq:betadist}; show the band is $\bm{a}(x_0)^\T\hat\bbeta \pm 1.96\, \hat\sigma \sqrt{\bm{a}(x_0)^\T (\X^\T\X)^{-1} \bm{a}(x_0)}$.
+(b) \emph{Simultaneous}: start from the joint confidence ellipsoid $C_\beta$ of \eqref{eq:confset} and define the band at $x_0$ as $\{\bm{a}(x_0)^\T \bbeta : \bbeta \in C_\beta\}$. Show this band is $\bm{a}(x_0)^\T\hat\bbeta \pm \big(\chi^{2\,(0.95)}_{4}\big)^{1/2} \hat\sigma \sqrt{\bm{a}(x_0)^\T (\X^\T\X)^{-1} \bm{a}(x_0)}$. \emph{(Hint: whiten the ellipsoid as in Foundations B \S B.3.2 and maximize the linear functional over the unit ball by Cauchy--Schwarz.)}
+(c) Compare: the two bands differ only by $1.96$ vs.\ $(\chi^{2\,(0.95)}_4)^{1/2} \approx 3.08$. State precisely what ``95\%'' means for each band --- coverage at one $x_0$ vs.\ coverage of the whole curve at once --- and explain which guarantee a claim like ``the fitted IC decay curve is positive over the first ten days'' actually needs.
+(d) \emph{(Optional, computational --- ESL's simulation request.)} Simulate and compare empirical coverage of both bands.
+\end{exercise}
+
+\begin{exercise}[ESL Ex.\ 3.4]\label{ex:esl34}
+\prioWorth
+Show that the least squares coefficient vector can be obtained from a \emph{single pass} of Gram--Schmidt orthogonalization over the columns of $\X$ (successively regressing each column on the preceding orthogonalized ones), and express the result through the QR decomposition $\X = \bm{Q}\bm{R}$ from Foundations A: show $\hat\bbeta = \bm{R}^{-1}\bm{Q}^\T \y$, computed by back-substitution, and verify that the last coefficient reproduces the Frisch--Waugh formula \eqref{eq:fwl}.
+\end{exercise}
+
+\begin{exercise}[Bishop Ex.\ 3.3, extended]\label{ex:bishop33}
+\prioWorth
+Each observation carries a weight $r_n > 0$, and the error function is $E(\bm{w}) = \tfrac12 \sum_{n=1}^N r_n \big(t_n - \bm{w}^\T \bm{\phi}(\x_n)\big)^2$.
+(a) Derive the minimizer $\bm{w}^\ast = (\bm{\Phi}^\T \bm{R} \bm{\Phi})^{-1} \bm{\Phi}^\T \bm{R}\, \bm{t}$, where $\bm{R} = \diag(r_n)$ (set the gradient to zero using the Foundations A matrix-calculus identities).
+(b) Give the two standard interpretations of the weights: (i) per-observation noise variance $\sigma^2 / r_n$ in the Gaussian likelihood, (ii) $r_n$-fold replication of data point $n$.
+(c) \emph{(Added part.)} Identify both places this chapter and Foundations B already used this result: the IRLS step \eqref{eq:irls} (what are $\bm{R}$ and $\bm{t}$ there?) and the responsibility-weighted expert gradient (B.8.5) (what are they there?). One sentence each: training a logistic gate and training a mixture's experts are both \emph{iterated} versions of this exercise.
+\end{exercise}
+
+\subsection*{On constrained optimization and MAP priors (Sections~\ref{sec:kkt}, \ref{sec:lasso}, \ref{sec:bayes})}
+
+\begin{exercise}[Syllabus: lasso as MAP under a Laplace prior]\label{ex:laplacemap}
+\prioWorth
+Place i.i.d.\ Laplace priors $p(\beta_j) = \tfrac{1}{2b} e^{-|\beta_j|/b}$ on the coefficients of the Gaussian regression model.
+(a) Show the negative log-posterior is, up to constants, $\tfrac{1}{2\sigma^2}\RSS(\bbeta) + \tfrac1b \|\bbeta\|_1$, so the MAP estimate is the lasso \eqref{eq:lasso} with $\lambda = \sigma^2 / b$.
+(b) Explain, using the subdifferential balance of Section~\ref{sec:subgrad}, why the Laplace prior's kink at zero lets the MAP estimate sit exactly at $\beta_j = 0$ against a nonzero likelihood pull, while the Gaussian prior of Exercise~\ref{ex:esl36} --- whose log-density has zero slope at the origin --- cannot.
+(c) Is the posterior \emph{mean} under the Laplace prior sparse? Argue (no computation needed) that it almost surely is not, and state in one sentence which Foundations B \S B.2.3 lesson this instantiates.
+\end{exercise}
+
+\subsection*{On classification (Sections~\ref{sec:class}--\ref{sec:logit})}
+
+\begin{exercise}[ESL Ex.\ 4.2]\label{ex:esl42}
+\prioWorth
+Two classes, sizes $N_1, N_2$, $N = N_1 + N_2$, with targets coded $y_i = -N/N_1$ for class 1 and $y_i = +N/N_2$ for class 2. Use the class means $\hat\bmu_1, \hat\bmu_2$, the pooled covariance $\hat\bSigma$ of \eqref{eq:pooled}, and the between-class matrix $\hat\bSigma_B = \tfrac{N_1 N_2}{N^2} (\hat\bmu_2 - \hat\bmu_1)(\hat\bmu_2 - \hat\bmu_1)^\T$.
+(a) From the discriminant functions \eqref{eq:ldadelta}, show the LDA rule classifies to class 2 iff
+$\x^\T \hat\bSigma^{-1}(\hat\bmu_2 - \hat\bmu_1) > \tfrac12 (\hat\bmu_2 + \hat\bmu_1)^\T \hat\bSigma^{-1} (\hat\bmu_2 - \hat\bmu_1) - \log(N_2/N_1)$.
+(b) Minimize $\sum_i (y_i - \beta_0 - \x_i^\T\bbeta)^2$. Show the normal equations reduce, after eliminating $\beta_0$, to
+$\big[(N-2)\hat\bSigma + N \hat\bSigma_B\big]\bbeta = N(\hat\bmu_2 - \hat\bmu_1)$.
+\emph{(Hints: verify the coding gives $\sum_i y_i = 0$ and $\sum_i y_i \x_i = N(\hat\bmu_2 - \hat\bmu_1)$; decompose the centered scatter matrix into within-class and between-class parts, $\sum_i (\x_i - \bar\x)(\x_i - \bar\x)^\T = (N-2)\hat\bSigma + \tfrac{N_1 N_2}{N}(\hat\bmu_2-\hat\bmu_1)(\hat\bmu_2-\hat\bmu_1)^\T$.)}
+(c) Show $\hat\bSigma_B \bbeta$ is always parallel to $(\hat\bmu_2 - \hat\bmu_1)$, and conclude $\hat\bbeta \propto \hat\bSigma^{-1}(\hat\bmu_2 - \hat\bmu_1)$: least squares on coded targets finds the LDA direction \eqref{eq:ldadir} up to scale.
+(d) Show the proportionality in (c) holds for \emph{any} distinct two-class coding, not just this one.
+(e) Find $\hat\beta_0$, form $\hat f(\x) = \hat\beta_0 + \x^\T\hat\bbeta$, and show the rule ``classify to 2 iff $\hat f(\x) > 0$'' coincides with the LDA rule of (a) only when $N_1 = N_2$. Where does the imbalance enter?
+\end{exercise}
+
+\begin{exercise}[Syllabus: binary logistic is two-class softmax]\label{ex:binarysoftmax}
+\prioLow
+(a) Verify the gauge claim of Section~\ref{sec:softmaxreg}: $\mathrm{softmax}(\bm z + c\bm{1}) = \mathrm{softmax}(\bm z)$ for any scalar $c$.
+(b) For $K = 2$, first show $\hat p_1 = \sigma(z_1 - z_2)$. Then fix the reference gauge $z_2 = 0$ and recover $\hat p_1 = \sigma(z_1)$; with linear logits, the single identifiable coefficient vector is $\bbeta_1 - \bbeta_2$ (or just $\bbeta_1$ in the reference gauge).
+(c) Specialize Exercise~\ref{ex:cegrad} to recover the binary gradient \eqref{eq:logitgrad}, confirming the two chapters' formulas are one formula.
+\end{exercise}
+
+\begin{exercise}[ESL Ex.\ 4.4: the multilogit Newton algorithm]\label{ex:esl44}
+\prioLow
+Take the reference-gauge multilogit model: $\log\big[p(G = k \mid \x)/p(G = K \mid \x)\big] = \x^\T\bbeta_k$ for $k = 1, \dots, K-1$, and stack $\bbeta = (\bbeta_1; \dots; \bbeta_{K-1}) \in \R^{(p+1)(K-1)}$.
+(a) Define the enlarged input that makes the stacked model linear: for class slot $k$, the vector placing $\x$ in block $k$ and zeros elsewhere. Write the multinomial log-likelihood in the stacked notation.
+(b) Using Exercises~\ref{ex:cegrad}--\ref{ex:cehess}, derive the gradient blocks $\X^\T(\y_k - \hat{\bm p}_k)$ and Hessian blocks $-\X^\T \bm{W}_{k\ell} \X$ with $\bm{W}_{k\ell} = \diag\big(\hat p_{ik}(\delta_{k\ell} - \hat p_{i\ell})\big)$, and assemble the Newton--Raphson update for the full stacked system.
+(c) Describe an implementation: block structure of the linear solve, per-iteration cost in $N$, $p$, $K$, and why the one-dimensional IRLS picture of Section~\ref{sec:irls} no longer literally applies (the weight matrix couples classes). Note where you would instead use SGD on \eqref{eq:softmaxnll} and what is gained and lost.
+\end{exercise}
+
+\subsection*{On calibration and separation (Sections~\ref{sec:calib}, \ref{sec:logit})}
+
+\begin{exercise}[Supplementary: log-loss and Brier are proper; accuracy is not]\label{ex:proper}
+\prioWorth
+Let the true conditional distribution of a label be $\bm{q}$ on $K$ classes, and let a forecaster announce $\hat{\bm p}$.
+(a) Show $\E_{y \sim \bm q}[-\log \hat p_y] = H(\bm q) + \KL{\bm q}{\hat{\bm p}}$ and conclude from Gibbs' inequality (Foundations B, Theorem B.6.1) that the expected log-loss is minimized \emph{uniquely} at $\hat{\bm p} = \bm q$: log-loss is a strictly proper scoring rule.
+(b) Show the Brier score $\E_{y\sim\bm q}\|\bm{y}^{\mathrm{onehot}} - \hat{\bm p}\|^2$ is also minimized at $\hat{\bm p} = \bm q$ (expand and use $\E[y_k^{\mathrm{onehot}}] = q_k$).
+(c) Show classification accuracy is \emph{not} proper: any $\hat{\bm p}$ with the same argmax as $\bm q$ achieves the optimal expected accuracy, so accuracy cannot distinguish honest probabilities from overconfident ones.
+(d) One sentence: why does (c) make accuracy the wrong model-selection metric for a gate whose outputs will be used as mixture weights or position sizes?
+\end{exercise}
+
+\begin{exercise}[Supplementary: separation, cf.\ ESL Ex.\ 4.5]\label{ex:separation}
+\prioWorth
+One-dimensional logistic regression, logit $= \beta_0 + \beta_1 x$, with all class-0 samples at $x < x_0$ and all class-1 samples at $x > x_0$.
+(a) Along the ray $(\beta_0, \beta_1) = t\,(-x_0, 1)$, show every fitted probability converges monotonically to its label as $t \to \infty$ and the log-likelihood \eqref{eq:logitll} increases strictly to $0$. Conclude the supremum is not attained and the MLE diverges, with fitted probabilities saturating to a step function at $x_0$.
+(b) Add the penalty $-\tfrac{\alpha}{2}(\beta_0^2 + \beta_1^2)$, $\alpha > 0$. Show the penalized objective is coercive (tends to $-\infty$ as $\|\bbeta\| \to \infty$) and strictly concave, hence possesses a unique finite maximizer.
+(c) Connect to the gate: explain why near-separating volatility features make an unpenalized gate saturate (entropy $\to 0$), what the capstone's debug table says the symptoms are, and why gate weight decay is therefore structural --- it changes \emph{whether} a sensible optimum exists, not merely where it sits.
+\end{exercise}
+
+% =====================================================================
+\section*{Source map and what comes next}
+\addcontentsline{toc}{section}{Source map and what comes next}
+% =====================================================================
+
+\begin{center}
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+Section & Primary source(s) & Feeds directly into \\
+\midrule
+\ref{sec:ls} Least squares as statistics & ESL \S3.1--3.2 & Fama--MacBeth (Module 5); inference on IC \\
+\ref{sec:ridge} Ridge: df, augmentation & ESL \S3.4.1 + Fnd.\ A & Effective complexity (Module 5) \\
+\ref{sec:kkt} KKT and subgradients & added (convex-opt.\ standard) & Lasso theory; any constrained portfolio problem \\
+\ref{sec:lasso} Lasso, coordinate descent & ESL \S3.4.2--3.4.3, \S3.8 & Sparse gates/signals; selection caution (Module 5) \\
+\ref{sec:bayes} Priors as penalties & ESL \S3.4 + Bishop \S3.1 & Weight decay on NEC networks \\
+\ref{sec:class} Indicator regression, masking & ESL \S4.1--4.2 & Why gates are not regressions \\
+\ref{sec:lda} LDA, generative route & ESL \S4.3 & Regime models; Hamilton baseline (Modules 8--9) \\
+\ref{sec:logit} Logistic, softmax, IRLS & ESL \S4.4; Bishop \S3.1 & The gate; EM's M-step (Module 8) \\
+\ref{sec:calib} Calibration & ESL \S4.4 context + standard & Gate diagnostics; position sizing \\
+\ref{sec:gate} Gate capstone & synthesis & NEC correction (Modules 8--9) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\medskip
+Three threads leave open on purpose. Model assessment --- how to choose $\lambda$, $\mathrm{df}(\lambda)$'s role in AIC-style corrections, and why every cross-validation split in finance must be purged --- is Module 5, next. The IRLS/weighted-least-squares pattern returns as the M-step of EM in Module 8, where Exercise~\ref{ex:bishop33}(c)'s observation becomes the algorithm. And the generative--discriminative axis of Section~\ref{sec:genvdisc} becomes the thesis's model-comparison axis when the corrected NEC meets its Markov-switching baseline. Nothing in those modules requires regression or classification machinery beyond what is now on these pages.
+
+\end{document}

@@ -1,0 +1,11 @@
+\contentsline {section}{\numberline {9.1}Markov chains: the arithmetic of persistence}{3}{section.1}%
+\contentsline {section}{\numberline {9.2}The hidden Markov model}{5}{section.2}%
+\contentsline {section}{\numberline {9.3}Filtering: the forward recursion}{7}{section.3}%
+\contentsline {section}{\numberline {9.4}Smoothing: the backward recursion, $\gamma $, and $\xi $}{8}{section.4}%
+\contentsline {section}{\numberline {9.5}Decoding: Viterbi}{10}{section.5}%
+\contentsline {section}{\numberline {9.6}Baum--Welch: EM with dynamic programming inside}{11}{section.6}%
+\contentsline {section}{\numberline {9.7}Hamilton's Markov-switching models: the classical baseline}{12}{section.7}%
+\contentsline {section}{\numberline {9.8}Markov gating versus feature gating: the thesis's axis}{14}{section.8}%
+\contentsline {section}{\numberline {9.9}Capstone: the classical baseline, assembled}{17}{section.9}%
+\contentsline {section}{\numberline {9.10}Exercises}{17}{section.10}%
+\contentsline {section}{Source map and what comes next}{19}{section*.14}%

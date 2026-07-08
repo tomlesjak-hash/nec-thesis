@@ -1,0 +1,20 @@
+\contentsline {section}{\numberline {5.1}What error are you estimating?}{3}{section.1}%
+\contentsline {section}{\numberline {5.2}Optimism, effective degrees of freedom, and in-sample corrections}{4}{section.2}%
+\contentsline {section}{\numberline {5.3}Cross-validation in an i.i.d.\ world}{5}{section.3}%
+\contentsline {subsection}{\numberline {5.3.1}Mechanics, and the choice of $k$}{5}{subsection.3.1}%
+\contentsline {subsection}{\numberline {5.3.2}The wrong way to cross-validate}{5}{subsection.3.2}%
+\contentsline {section}{\numberline {5.4}Why financial data break $k$-fold}{6}{section.4}%
+\contentsline {section}{\numberline {5.5}Purging, embargoing, and walk-forward validation}{7}{section.5}%
+\contentsline {subsection}{\numberline {5.5.1}Purged $k$-fold}{7}{subsection.5.1}%
+\contentsline {subsection}{\numberline {5.5.2}Embargo}{7}{subsection.5.2}%
+\contentsline {subsection}{\numberline {5.5.3}Walk-forward, and which scheme the thesis should lead with}{8}{subsection.5.3}%
+\contentsline {section}{\numberline {5.6}The cross-sectional evaluation stack: IC, ICIR, deciles, costs}{9}{section.6}%
+\contentsline {subsection}{\numberline {5.6.1}Rank-IC and its null distribution}{9}{subsection.6.1}%
+\contentsline {subsection}{\numberline {5.6.2}Decile long--short backtests, turnover, and costs}{10}{subsection.6.2}%
+\contentsline {section}{\numberline {5.7}Multiple testing: the factor zoo}{11}{section.7}%
+\contentsline {subsection}{\numberline {5.7.1}The problem, and the size of the bias}{11}{subsection.7.1}%
+\contentsline {subsection}{\numberline {5.7.2}FWER and Bonferroni; FDR and Benjamini--Hochberg}{12}{subsection.7.2}%
+\contentsline {section}{\numberline {5.8}The Sharpe ratio under scrutiny: PSR and DSR}{13}{section.8}%
+\contentsline {section}{\numberline {5.9}Capstone: the thesis evaluation protocol}{14}{section.9}%
+\contentsline {section}{\numberline {5.10}Exercises}{15}{section.10}%
+\contentsline {section}{Source map and what comes next}{17}{section*.15}%

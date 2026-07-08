@@ -1,0 +1,10 @@
+\contentsline {section}{\numberline {D.1}Information measures, completed}{3}{section.1}%
+\contentsline {section}{\numberline {D.2}Entropy as compression: the source coding theorem}{4}{section.2}%
+\contentsline {section}{\numberline {D.3}The geometry of KL: Bregman structure and asymmetry}{4}{section.3}%
+\contentsline {section}{\numberline {D.4}Forward and reverse KL: two ways to be wrong}{5}{section.4}%
+\contentsline {section}{\numberline {D.5}The evidence lower bound, three ways}{6}{section.5}%
+\contentsline {section}{\numberline {D.6}Mean-field, and why exponential families make it tractable}{7}{section.6}%
+\contentsline {section}{\numberline {D.7}Differentiating through randomness: score function vs.\ reparameterization}{8}{section.7}%
+\contentsline {section}{\numberline {D.8}Capstone: the mixture's free energy, and the road into Module 8}{9}{section.8}%
+\contentsline {section}{\numberline {D.9}Exercises}{9}{section.9}%
+\contentsline {section}{Source map and what comes next}{11}{section*.11}%

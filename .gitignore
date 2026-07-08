@@ -1,0 +1,22 @@
+# Huge data/model workspaces — separate efforts, not part of the thesis repo
+QIP/
+Youtube Model/
+.venv/
+
+# Copyrighted / re-downloadable reading material
+Books/
+MoE papers/
+
+# Downloaded data caches (re-fetchable; the code is the interface, not the cache)
+data_cache/
+
+# Model artifacts and pickles (OP model/lgbm outputs etc.)
+**/artifacts/
+*.pkl
+
+# Python / OS noise
+__pycache__/
+*.pyc
+.pytest_cache/
+.ipynb_checkpoints/
+.DS_Store

@@ -1,0 +1,336 @@
+"""Trainer: AdamW on the mixture NLL, understood as generalized EM (§4.3).
+
+Two execution paths, selected by ``model.prior.stateful``:
+
+- **Memoryless (one-shot)** — Variation 2's soft routing: each batch is
+  processed in a single forward; auxiliary losses (load balancing with
+  buffered scope, expert decorrelation) compose additively when enabled.
+- **Stateful (time-threaded)** — Variation 3's HMM prior: the trainer owns the
+  recursion, iterating per-date batches chronologically and threading each
+  step's **attached** filtered posterior into the next step's context
+  (backprop through the forward algorithm — Decision C). Long sequences are
+  trained in chunks with the carried state **detached** at chunk boundaries
+  (truncated BPTT over the regime posterior).
+
+Optimizer hygiene:
+
+- Parameter groups: the gate's linear weight gets its own weight decay —
+  structural, not cosmetic (separation-proofing, Module 4); biases, LayerNorm,
+  ``log_sigma`` and prior parameters (transition logits, pi0) get **no** decay
+  (decaying transition logits would pull transitions toward uniform);
+  everything else gets the default decay.
+- ``log_sigma`` is frozen for the first ``sigma_freeze_steps`` steps
+  (warm-start: letting sigma move first lets the model explain everything as
+  noise).
+"""
+
+from __future__ import annotations
+
+import itertools
+from dataclasses import dataclass
+from typing import Iterable, Sequence
+
+import torch
+from torch import Tensor
+
+from .config import NECConfig
+from .data import Batch, Panel
+from .diagnostics import (
+    expert_output_correlation,
+    gate_entropy,
+    sharpness,
+    utilization,
+)
+from .likelihood import expert_log_likelihood
+from .losses import (
+    LoadBalanceBuffer,
+    MixtureNLLOutput,
+    expert_decorrelation_aux,
+    load_balance_aux,
+    mixture_nll,
+)
+from .model import NECModel, NECOutput
+from .priors import PriorContext
+
+__all__ = ["Trainer", "SequenceEval"]
+
+
+@dataclass
+class SequenceEval:
+    """Result of a no-grad filtering pass over a chronological sequence."""
+
+    nll: float  # mean per-sample NLL over all timesteps
+    log_filtered: Tensor  # (L, B, K) log-domain filtered posteriors
+    log_prior: Tensor  # (L, B, K) log-domain priors (the predict step)
+    y_hat: Tensor  # (L, B) causal point predictions
+
+
+class Trainer:
+    """Owns the optimizer, the aux-loss composition, and the time threading."""
+
+    def __init__(self, model: NECModel, cfg: NECConfig | None = None) -> None:
+        self.model = model
+        self.cfg = cfg if cfg is not None else model.cfg
+        t = self.cfg.train
+        if model.prior.stateful and (t.aux_load_balance or t.aux_expert_decorrelation):
+            raise ValueError(
+                "auxiliary losses are supported on the memoryless path only "
+                "(they are Variation-2 ablation levers); disable them for the "
+                "HMM prior"
+            )
+        self.opt = torch.optim.AdamW(self._param_groups(), lr=t.lr)
+        self.lb_buffer = LoadBalanceBuffer(
+            self.cfg.experts.n_experts, t.load_balance_buffer_batches
+        )
+        self.step_count = 0
+        self.history: list[dict[str, float]] = []
+
+    # ------------------------------------------------------------ internals
+    def _param_groups(self) -> list[dict]:
+        t = self.cfg.train
+        gate_decay, no_decay, default = [], [], []
+        for name, p in self.model.named_parameters():
+            if not p.requires_grad:
+                continue
+            if name == "gate.linear.weight":
+                gate_decay.append(p)
+            elif p.ndim <= 1 or name.startswith("prior."):
+                # 1-D parameters are statistical/normalization quantities, not
+                # weight matrices: biases, LayerNorm scales, log_sigma, the
+                # classical emission's mu, pi0. Prior parameters (incl. the 2-D
+                # transition logits) are also undecayed — decay would pull
+                # transitions toward uniform.
+                no_decay.append(p)
+            else:
+                default.append(p)
+        return [
+            {"params": gate_decay, "weight_decay": t.gate_weight_decay},
+            {"params": no_decay, "weight_decay": 0.0},
+            {"params": default, "weight_decay": t.weight_decay},
+        ]
+
+    def _apply_sigma_schedule(self) -> None:
+        frozen = self.step_count < self.cfg.train.sigma_freeze_steps
+        self.model.experts.log_sigma.requires_grad_(not frozen)
+
+    # ------------------------------------------------- expert warm-start
+    def warmstart_experts(
+        self,
+        batch: Batch,
+        sort_key: Tensor,
+        *,
+        steps: int = 150,
+        lr: float = 1e-2,
+    ) -> None:
+        """Break expert symmetry on regime/vol-sorted slices (design doc §4.3).
+
+        Seed diversity alone cannot escape the symmetric-mixture local optimum
+        (both experts collapse to the pooled regression) on a genuinely
+        symmetric task. This is the doc's prescribed stronger device: sort
+        samples by an observable regime proxy (``sort_key`` — realized/window
+        volatility or VIX on real data; here whatever the caller supplies),
+        partition into K quantile slices, and fit emission component k to
+        slice k (each emission breaks symmetry its own way — MSE pre-training
+        for neural experts, closed-form moments for classical Gaussians; see
+        :meth:`nec_moe.experts.Emission.warmstart_slices`). Only the emission
+        is touched — the gate stays unsupervised (Decision B intact); it still
+        has to learn to route via ``pi - r`` afterwards. Deliberate and
+        interpretable symmetry breaking, not a supervised gate.
+        """
+        if sort_key.shape[0] != len(batch):
+            raise ValueError(
+                f"sort_key length {sort_key.shape[0]} != batch size {len(batch)}"
+            )
+        self.model.train()
+        with torch.no_grad():
+            h_t = self.model.encoder(batch.x_seq)
+            x_exp = self.model.expert_input(batch.x_snap, h_t)
+        order = torch.argsort(sort_key)
+        slices = torch.chunk(order, self.cfg.experts.n_experts)
+        self.model.experts.warmstart_slices(
+            x_exp, batch.y, slices, steps=steps, lr=lr
+        )
+
+    def _forward_nll(
+        self,
+        batch: Batch,
+        ctx: PriorContext | None = None,
+        *,
+        train_objective: bool = True,
+    ) -> tuple[NECOutput, MixtureNLLOutput]:
+        """Forward + fused loss.
+
+        ``train_objective=True`` uses ``prior.log_train_weights`` when the
+        prior provides them (hard routing's hard-EM surrogate, which is what
+        trains its gate); evaluation uses ``log_prior`` — the prior's honest
+        *predictive* weights (for hard routing: the selected expert's density).
+        Priors that don't distinguish the two are unaffected.
+        """
+        out = self.model(batch.x_seq, batch.x_snap, ctx)
+        log_lik = expert_log_likelihood(out.mu, out.log_sigma, batch.y)
+        log_w = out.prior.log_prior
+        if train_objective and out.prior.log_train_weights is not None:
+            log_w = out.prior.log_train_weights
+        return out, mixture_nll(log_w, log_lik)
+
+    def _optimize(self, loss: Tensor) -> None:
+        self.opt.zero_grad(set_to_none=True)
+        loss.backward()
+        clip = self.cfg.train.grad_clip
+        if clip is not None:
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), clip)
+        self.opt.step()
+        self.step_count += 1
+
+    def _metrics(
+        self, loss: Tensor, nll_out: MixtureNLLOutput, out: NECOutput
+    ) -> dict[str, float]:
+        with torch.no_grad():
+            probs = out.prior.log_prior.exp()
+            r = nll_out.responsibilities
+            corr = expert_output_correlation(out.mu.detach())
+            off = corr - torch.eye(corr.shape[0])
+            m = {
+                "step": float(self.step_count),
+                "loss": float(loss),
+                "nll": float(nll_out.nll),
+                "gate_entropy": float(gate_entropy(probs)),
+                "sharpness": float(sharpness(r)),
+                "min_batch_utilization": float(utilization(r).min()),
+                "min_running_utilization": float(self.lb_buffer.fractions().min()),
+                "max_offdiag_expert_corr": float(off.abs().max()),
+            }
+        self.history.append(m)
+        return m
+
+    # ------------------------------------------------- memoryless (one-shot)
+    def train_step(self, batch: Batch) -> dict[str, float]:
+        """One optimizer step on one cross-sectional batch (memoryless prior)."""
+        if self.model.prior.stateful:
+            raise ValueError(
+                "the model's prior is stateful (HMM): shuffled one-shot batches "
+                "would silently skip the forward recursion — use "
+                "train_step_sequence/fit_sequence with chronological batches"
+            )
+        t = self.cfg.train
+        self.model.train()
+        self._apply_sigma_schedule()
+        # step is threaded even on the memoryless path: annealed priors
+        # (Gumbel temperature) schedule off it
+        ctx = PriorContext(step=self.step_count)
+        out, nll_out = self._forward_nll(batch, ctx)
+        loss = nll_out.nll
+
+        # buffer always updated: it feeds the running-utilization dashboard
+        # even when the aux loss is off
+        self.lb_buffer.update(nll_out.responsibilities)
+        if t.aux_load_balance:
+            loss = loss + t.aux_load_balance_weight * load_balance_aux(
+                out.prior.log_prior.exp(), self.lb_buffer.fractions()
+            )
+        if t.aux_expert_decorrelation:
+            loss = loss + t.aux_decorrelation_weight * expert_decorrelation_aux(out.mu)
+        if out.prior.aux_loss is not None:
+            loss = loss + out.prior.aux_loss
+
+        self._optimize(loss)
+        return self._metrics(loss, nll_out, out)
+
+    def fit(self, data: Panel, steps: int | None = None) -> list[dict[str, float]]:
+        """Minibatch training loop over a panel (memoryless prior)."""
+        t = self.cfg.train
+        steps = t.steps if steps is None else steps
+        g = torch.Generator().manual_seed(t.seed)
+        batches: Iterable[Batch] = itertools.chain.from_iterable(
+            data.minibatches(t.batch_size, generator=g) for _ in itertools.count()
+        )
+        return [self.train_step(b) for b in itertools.islice(batches, steps)]
+
+    # ---------------------------------------------- stateful (time-threaded)
+    def train_step_sequence(
+        self, chunk: Sequence[Batch], init_state: Tensor | None = None
+    ) -> tuple[dict[str, float], Tensor]:
+        """One optimizer step on a chronological chunk of per-date batches.
+
+        Threads the **attached** filtered posterior across timesteps within the
+        chunk (backprop through the forward recursion) and returns the final
+        state for the caller to detach and carry into the next chunk
+        (truncated BPTT over the regime posterior).
+        """
+        self.model.train()
+        self._apply_sigma_schedule()
+        state = init_state
+        per_sample: list[Tensor] = []
+        last: tuple[NECOutput, MixtureNLLOutput] | None = None
+        for batch in chunk:
+            ctx = PriorContext(prev_filtered=state, step=self.step_count)
+            out, nll_out = self._forward_nll(batch, ctx)
+            per_sample.append(nll_out.per_sample_nll)
+            state = nll_out.log_filtered  # attached: the recursion's state
+            last = (out, nll_out)
+        assert last is not None and state is not None
+        loss = torch.cat(per_sample).mean()
+        self._optimize(loss)
+        self.lb_buffer.update(last[1].responsibilities)
+        return self._metrics(loss, last[1], last[0]), state.detach()
+
+    def fit_sequence(
+        self,
+        sequence: Sequence[Batch],
+        steps: int | None = None,
+        chunk_len: int = 50,
+    ) -> list[dict[str, float]]:
+        """Chunked training over one chronological sequence (stateful prior).
+
+        The filter state is detached at chunk boundaries and reset at each
+        pass over the sequence start.
+        """
+        steps = self.cfg.train.steps if steps is None else steps
+        chunks = [
+            sequence[i : i + chunk_len] for i in range(0, len(sequence), chunk_len)
+        ]
+        metrics: list[dict[str, float]] = []
+        state: Tensor | None = None
+        ci = 0
+        for _ in range(steps):
+            if ci == 0:
+                state = None  # sequence start: back to pi_0
+            m, state = self.train_step_sequence(chunks[ci], init_state=state)
+            metrics.append(m)
+            ci = (ci + 1) % len(chunks)
+        return metrics
+
+    # -------------------------------------------------------------- eval
+    @torch.no_grad()
+    def evaluate(self, batch: Batch) -> float:
+        """Held-out mean NLL under the prior's *predictive* weights, memoryless."""
+        self.model.eval()
+        _, nll_out = self._forward_nll(batch, train_objective=False)
+        return float(nll_out.nll)
+
+    @torch.no_grad()
+    def evaluate_sequence(
+        self, sequence: Sequence[Batch], init_state: Tensor | None = None
+    ) -> SequenceEval:
+        """No-grad filtering pass over a chronological sequence.
+
+        Strictly causal: the prior (and ``y_hat``) at step t are computed
+        before the loss sees ``y_t``; only the *update* uses ``y_t``.
+        """
+        self.model.eval()
+        state = init_state
+        nlls, filt, priors, preds = [], [], [], []
+        for batch in sequence:
+            ctx = PriorContext(prev_filtered=state)
+            out, nll_out = self._forward_nll(batch, ctx, train_objective=False)
+            nlls.append(nll_out.per_sample_nll)
+            filt.append(nll_out.log_filtered)
+            priors.append(out.prior.log_prior)
+            preds.append(out.y_hat)
+            state = nll_out.log_filtered
+        return SequenceEval(
+            nll=float(torch.cat(nlls).mean()),
+            log_filtered=torch.stack(filt),
+            log_prior=torch.stack(priors),
+            y_hat=torch.stack(preds),
+        )

@@ -1,0 +1,561 @@
+% =====================================================================
+%  Foundations for a Quant Research Pipeline
+%  Chapter: Module 5 — Model Assessment and Financial Validation
+%  Companion textbook to NEC_thesis_syllabus.md
+%  Sources synthesized: ESL §7.1–7.12; AFML Ch 7 (§7.1–7.6);
+%  Bailey & López de Prado (2014), §1–4 (via AFML Ch 14)
+% =====================================================================
+\documentclass[11pt]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{mathpazo}
+\usepackage{microtype}
+\usepackage[margin=1.05in]{geometry}
+\usepackage{amsmath,amssymb,amsthm,mathtools,bm}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{tcolorbox}
+\tcbuselibrary{breakable}
+\usepackage{booktabs}
+\usepackage[colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,urlcolor=blue!50!black]{hyperref}
+
+\linespread{1.05}
+\setlength{\parskip}{0.35em}
+
+% ---------- colors ----------
+\definecolor{necblue}{RGB}{20,45,90}
+\definecolor{finmaroon}{RGB}{110,30,30}
+\definecolor{boxbg}{RGB}{245,247,250}
+\definecolor{finbg}{RGB}{250,246,243}
+
+% ---------- module-5 numbering ----------
+\renewcommand{\thesection}{5.\arabic{section}}
+\numberwithin{equation}{section}
+
+% ---------- theorem environments ----------
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{corollary}[theorem]{Corollary}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{example}[theorem]{Example}
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+
+\newcounter{exercise}
+\renewcommand{\theexercise}{5.\arabic{exercise}}
+\newenvironment{exercise}[1][]{\refstepcounter{exercise}\par\medskip
+  \noindent\textbf{Exercise \theexercise}\if\relax\detokenize{#1}\relax\else\ \textnormal{[#1]}\fi\textbf{.}\ \itshape}{\par\medskip}
+
+% ---------- exercise importance badges (priority for the NEC/MoE thesis track) ----------
+\definecolor{priogray}{RGB}{120,120,120}
+\newcommand{\prioCore}{{\normalfont\small\textbf{\textcolor{necblue}{[\,\ensuremath{\bigstar\bigstar\bigstar}\ Core\,]}}}\hspace{0.5em}}
+\newcommand{\prioWorth}{{\normalfont\small\textbf{\textcolor{finmaroon}{[\,\ensuremath{\bigstar\bigstar}\ Worth it\,]}}}\hspace{0.5em}}
+\newcommand{\prioLow}{{\normalfont\small\textcolor{priogray}{[\,\ensuremath{\bigstar}\ Low priority\,]}}\hspace{0.5em}}
+\newcommand{\prioOpt}{{\normalfont\small\textcolor{priogray}{[\,\ensuremath{\circ}\ Optional\,]}}\hspace{0.5em}}
+\newcommand{\corebadge}{}% superseded by the four \prio badges above
+
+% ---------- boxes ----------
+\newtcolorbox{necbox}{breakable,colback=boxbg,colframe=necblue,
+  boxrule=0.8pt,arc=1.5mm,left=2mm,right=2mm,top=1.5mm,bottom=1.5mm,
+  title={\sffamily\bfseries NEC connection},fonttitle=\small}
+\newtcolorbox{finbox}{breakable,colback=finbg,colframe=finmaroon,
+  boxrule=0.8pt,arc=1.5mm,left=2mm,right=2mm,top=1.5mm,bottom=1.5mm,
+  title={\sffamily\bfseries Finance reality check},fonttitle=\small}
+
+% ---------- operators ----------
+\DeclareMathOperator{\E}{\mathbb{E}}
+\DeclareMathOperator{\Var}{Var}
+\DeclareMathOperator{\Cov}{Cov}
+\DeclareMathOperator{\Corr}{Corr}
+\DeclareMathOperator{\tr}{tr}
+\DeclareMathOperator{\diag}{diag}
+\DeclareMathOperator{\sign}{sign}
+\DeclareMathOperator*{\argmin}{arg\,min}
+\DeclareMathOperator*{\argmax}{arg\,max}
+\newcommand{\Normal}{\mathcal{N}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\x}{\bm{x}}
+\newcommand{\X}{\bm{X}}
+\newcommand{\y}{\bm{y}}
+\newcommand{\T}{\top}
+\newcommand{\Errr}{\mathrm{Err}}
+\newcommand{\errbar}{\overline{\mathrm{err}}}
+\newcommand{\IC}{\mathrm{IC}}
+\newcommand{\ICIR}{\mathrm{ICIR}}
+\newcommand{\SR}{\mathrm{SR}}
+
+\title{\vspace{-1.2em}{\large\sffamily Foundations for a Quant Research Pipeline}\\[0.4em]
+\textbf{Module 5:\\ Model Assessment and Financial Validation}\\[0.3em]
+{\large A single merged treatment of ESL \S7.1--7.12, AFML Ch.\ 7,\\ and Bailey--L\'opez de Prado (2014)}}
+\author{Prepared for Tom Koreslesjak \;\textperiodcentered\; companion to \texttt{NEC\_thesis\_syllabus.md}}
+\date{June 2026}
+
+\begin{document}
+\maketitle
+\vspace{-1.5em}
+
+\begin{abstract}
+\noindent Every previous chapter built machinery for making predictions; this one builds the machinery for deciding whether the predictions are real. The first half is general statistics: what generalization error actually is, why training error flatters you by a computable amount, and how cross-validation estimates the truth in an i.i.d.\ world. The second half is the financial correction: why i.i.d.\ resampling is structurally wrong for return panels, how purging, embargoing, and walk-forward validation repair it, how the field's evaluation stack (rank-IC, ICIR, decile long--short spreads net of costs) actually works, and why any claimed discovery must survive multiple-testing deflation --- Bonferroni, Benjamini--Hochberg, and the deflated Sharpe ratio. The destination: by the end you can write down the complete evaluation protocol for the NEC thesis, defend every line of it against a leakage accusation, and state exactly which family of tests your significance claim is corrected over.
+\end{abstract}
+
+\tableofcontents
+
+\subsection*{How this chapter was assembled (and what was cut)}
+
+ESL Chapter 7 supplies the general theory; AFML Chapter 7 supplies the financial repairs; the Bailey--L\'opez de Prado deflated-Sharpe material is taken in the form presented in AFML Chapter 14 (the assigned paper's \S1--4 content). Cuts, with reasons:
+
+\begin{itemize}[leftmargin=2em,itemsep=0.15em]
+\item \emph{ESL \S7.8 (MDL).} The coding-theoretic view of model selection is the MLE-as-KL story Foundations B \S B.6 already told; nothing new is load-bearing.
+\item \emph{ESL \S7.9 (VC dimension and structural risk minimization).} Distribution-free bounds are far too loose to guide any decision in this pipeline; generalization for deep networks gets its own modern treatment in the deep-learning modules.
+\item \emph{ESL \S7.11 (bootstrap error estimates, .632 rules).} Foundations B \S B.4.5 already established that i.i.d.\ resampling destroys the temporal structure of returns; the .632 machinery inherits the same defect, so we keep only the block-bootstrap caveat already on record.
+\item \emph{AFML \S7.1--7.3 (motivation).} Compressed into Section~\ref{sec:break}; the operative content of AFML Ch.\ 7 is the purge/embargo construction, kept in full.
+\item \emph{Combinatorial purged CV (AFML Ch.\ 12).} One sentence; it is an extension, not a requirement, and walk-forward plus purged $k$-fold cover the thesis.
+\end{itemize}
+
+Three tools are \emph{added} because the exercises are unsolvable without them (the standing policy): the moments of random ranks (for the rank-IC null distribution), a sharp upper envelope for the maximum of $m$ Gaussians (for multiple testing and the DSR), and the Mills-ratio tail bound (for threshold arithmetic).
+
+\subsection*{Notation}
+
+As before. New objects: $\mathcal{T}$ is a training set; $L(y, \hat f(\x))$ a loss; $T$ counts dates (time length), $N$ counts assets in a cross-section, $m$ counts hypotheses, and --- following AFML --- a label $Y_i$ is determined by information in a closed time interval $[t_{i,0},\, t_{i,1}]$ (for an $h$-day forward return starting at date $t$: $t_{i,0} = t$, $t_{i,1} = t + h$). $\Phi$ and $\varphi$ are the standard Gaussian CDF and density; $\Phi^{-1}$ its quantile function. $\hat\gamma_3$ and $\hat\gamma_4$ are sample skewness and kurtosis (Gaussian: $\gamma_3 = 0$, $\gamma_4 = 3$ --- Foundations B \S B.7).
+
+% =====================================================================
+\section{What error are you estimating?}\label{sec:err}
+% =====================================================================
+
+Three quantities wear the name ``error,'' and most evaluation sins begin by confusing them. Fix a loss $L$ and a model $\hat f$ trained on $\mathcal{T}$:
+\begin{align}
+\errbar &= \frac1N \sum_{i=1}^N L\big(y_i, \hat f(\x_i)\big)
+&&\text{\emph{training error}: the data grading their own homework;}\\
+\Errr_{\mathcal{T}} &= \E_{(\bm{X}^0, Y^0)}\Big[ L\big(Y^0, \hat f(\bm{X}^0)\big) \,\Big|\, \mathcal{T} \Big]
+&&\text{\emph{generalization error of this fit}: new data, this $\hat f$;}\\
+\Errr &= \E_{\mathcal{T}}\big[\Errr_{\mathcal{T}}\big]
+&&\text{\emph{expected error}: averaged over training sets too.}
+\end{align}
+What you care about operationally is $\Errr_{\mathcal{T}}$ --- the model you actually deployed. What is estimable in practice is, perhaps surprisingly, $\Errr$: ESL \S7.12 reports the empirical finding that cross-validation tracks the \emph{expected} error well and the \emph{conditional} error $\Errr_{\mathcal{T}}$ poorly --- there simply is not enough information in one sample to pin down how lucky your particular training draw was. Live with it consciously: every number this chapter produces estimates the quality of a \emph{procedure}, not of one fitted artifact.
+
+Two facts from earlier chapters frame everything. First, the bias--variance budget (Foundations B, eq.\ B.5.1) applies to $\Errr$ pointwise, and in finance the irreducible term dwarfs the rest --- so the differences between candidate models are small numbers riding on a large noise floor, and the estimator of $\Errr$ needs to be correspondingly honest about its own variance. (For 0--1 loss the decomposition changes character --- bias and variance interact \emph{multiplicatively} near the decision boundary, which is the content of ESL's Exercise 7.2, our Exercise~\ref{ex:esl72}.) Second, $\errbar$ is systematically below $\Errr$, and the chain of reasons is one you have now met three times: Bessel's correction (Foundations B \S B.4.2), the $N - p - 1$ divisor (Module 4 \S4.1), and now its general form --- a model evaluated on the data that tuned it is optimistic by a computable covariance, next section.
+
+Finally, vocabulary that prevents a classic blunder. \emph{Model selection} (choosing $\lambda$, choosing $K$ experts) and \emph{model assessment} (reporting how good the final choice is) are different acts, and the data that performed the first are spent --- using the same validation set for both inflates the reported number by exactly the selection bias this chapter's second half quantifies. Hence the canonical three-way split (train / validation / test), or its nested-validation equivalents, with the test set touched \emph{once}.
+
+% =====================================================================
+\section{Optimism, effective degrees of freedom, and in-sample corrections}\label{sec:optimism}
+% =====================================================================
+
+How much does training error flatter? Define the \emph{in-sample error} $\Errr_{\mathrm{in}}$ as the expected loss when the \emph{responses} are redrawn at the same input points $\x_i$ (same designs, fresh noise), and the \emph{optimism} as $\omega = \E_{\y}\big[\Errr_{\mathrm{in}} - \errbar\big]$. For squared loss (and, with minor modification, for 0--1 and other losses), a short computation --- assigned as Exercise~\ref{ex:esl71} because the syllabus wants it in your hands --- gives the central identity
+\begin{equation}
+\omega \;=\; \frac{2}{N} \sum_{i=1}^N \Cov\big(\hat y_i,\, y_i\big).
+\label{eq:optimism}
+\end{equation}
+Optimism is the degree to which the fitted values track their own noise. A method that barely listens to $y_i$ (a rigid model) has small covariance and honest training error; a method flexible enough to chase each $y_i$ individually is rewarded in $\errbar$ for memorization, and \eqref{eq:optimism} bills the flattery exactly.
+
+For any linear smoother $\hat\y = \bm{S}\y$ with additive noise of variance $\sigma^2_\varepsilon$, the covariance sum collapses to $\tr(\bm{S})\,\sigma_\varepsilon^2$ (part of Exercise~\ref{ex:esl71}), which motivates the \emph{general} definition of effective degrees of freedom,
+\begin{equation}
+\mathrm{df}(\hat f) \;=\; \frac{1}{\sigma_\varepsilon^2}\sum_{i=1}^N \Cov(\hat y_i, y_i),
+\qquad\text{so that}\qquad
+\E[\Errr_{\mathrm{in}}] = \E[\errbar] + \frac{2\,\mathrm{df}}{N}\,\sigma_\varepsilon^2 .
+\label{eq:df}
+\end{equation}
+For OLS, $\mathrm{df} = \tr(\bm{H}) = p + 1$; for ridge, $\mathrm{df} = \tr(\bm{S}_\lambda) = \sum_j d_j^2/(d_j^2 + \lambda)$ --- Module 4's formula (4.2.2), no longer an analogy but a theorem: the two definitions of $\mathrm{df}$ are the same quantity (Exercise~\ref{ex:esl71}(c) reconciles them). Plugging estimates into \eqref{eq:df} yields the classical in-sample selection criteria, $C_p = \errbar + 2\,\widehat{\mathrm{df}}\,\hat\sigma^2_\varepsilon / N$ and, in likelihood form, $\mathrm{AIC} \propto -\tfrac{2}{N}\ell + \tfrac{2\,\mathrm{df}}{N}$; the Bayesian-flavored $\mathrm{BIC}$ replaces the $2$ with $\log N$, penalizing harder, and the textbook contrast is one sentence: as $N \to \infty$ BIC selects the true model if it is in the menu (consistency) while AIC selects the best predictor (efficiency), and with finite noisy data the distinction matters less than the leakage hygiene occupying the rest of this chapter. In this pipeline these criteria are not the workhorse --- cross-validation is --- but \eqref{eq:df} earns its place twice over: $\mathrm{df}$ is the honest complexity axis for any comparison of models with different parameter counts (an NEC with $K$ experts against a linear baseline), and AIC is asymptotically equivalent to leave-one-out CV, which is why the two tend to agree when both are computable.
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[ESL Ex.\ 7.1, extended]\label{ex:esl71}
+\prioCore
+Work under the additive-error model $y_i = f(\x_i) + \varepsilon_i$, $\E[\varepsilon] = 0$, $\Var(\varepsilon) = \sigma^2_\varepsilon$, with squared loss, and the definitions of $\errbar$, in-sample error, and optimism from Section~\ref{sec:optimism}.
+(a) Derive the optimism identity \eqref{eq:optimism}: $\omega = \tfrac{2}{N}\sum_i \Cov(\hat y_i, y_i)$, and hence $\E_{\y}[\Errr_{\mathrm{in}}] = \E_{\y}[\errbar] + \tfrac{2}{N}\sum_i \Cov(\hat y_i, y_i)$. \emph{(Route: expand both errors around $f(\x_i)$; every term matches except one cross term.)}
+(b) For a linear smoother $\hat\y = \bm{S}\y$, show $\sum_i \Cov(\hat y_i, y_i) = \tr(\bm{S})\,\sigma_\varepsilon^2$, so $\omega = 2\,\tr(\bm{S})\,\sigma^2_\varepsilon/N$ and the in-sample correction is $C_p$.
+(c) Reconcile the two definitions of effective degrees of freedom now in your possession: show that for ridge regression, the covariance definition \eqref{eq:df} evaluates to Module 4's $\mathrm{df}(\lambda) = \sum_j d_j^2/(d_j^2 + \lambda)$, and verify the OLS and $\lambda \to \infty$ endpoints.
+\end{exercise}
+
+
+% =====================================================================
+\section{Cross-validation in an i.i.d.\ world}\label{sec:cv}
+% =====================================================================
+
+\subsection{Mechanics, and the choice of $k$}
+
+Split the data into $k$ folds; for each fold, train on the other $k-1$ and evaluate on it; average. The result estimates $\Errr$ for a model trained on $N(1 - 1/k)$ observations --- so small $k$ is pessimistically biased (you are grading a model trained on less data than the final one), while $k = N$ (leave-one-out) is nearly unbiased but high-variance: the $N$ training sets are nearly identical, so the $N$ error estimates are strongly positively correlated and averaging buys little. The conventional compromise is $k = 5$ or $10$. Two practical rules complete the i.i.d.\ toolkit. The \emph{one-standard-error rule}: compute the standard error of the CV curve across folds and choose the most parsimonious model within one SE of the minimum --- a cheap hedge against selecting noise wiggles in a flat region. And \emph{nested} validation: if CV chooses hyperparameters, that choice is part of training and must sit \emph{inside} an outer assessment loop; the inner winning score is a selection-biased number and must never be reported as performance.
+
+\subsection{The wrong way to cross-validate}\label{sec:wrongway}
+
+ESL \S7.10.2 contains the most instructive cautionary tale in the book. Scenario: $5{,}000$ candidate features, $50$ samples, labels generated \emph{independently} of all features --- true predictive power exactly zero. Procedure: (1) screen on the full dataset for the $100$ features most correlated with the label; (2) cross-validate a classifier using those $100$ features. Reported CV error: far below chance. Nothing exotic happened --- step (1) saw every label, including those in each future ``held-out'' fold, and selected features that happen to correlate with them; step (2) then ``validated'' on labels the features had already been chosen to fit. The principle, which generalizes to every pipeline you will ever build:
+\begin{quote}
+\emph{Every data-dependent step --- feature screening, standardization constants, hyperparameter choices, early-stopping decisions, target clipping thresholds --- must be refit inside each training fold, as if the held-out data did not exist.}
+\end{quote}
+Multi-step quant pipelines fail this constantly and invisibly: a z-score normalization fit on the full history, a feature shortlist chosen on the full panel, a clipping quantile computed through the test years. Each is a small valve through which the future leaks backward. ESL's Exercise 7.10 (our Exercise~\ref{ex:esl710}) probes the edge of the principle with a perfect-separation variant: a useful test of whether you can articulate \emph{exactly} what CV does and does not estimate.
+
+\begin{necbox}
+The OP pipeline's cross-sectional rank-normalization of features is computed \emph{per date}, which makes it automatically leak-free: each date's transform uses only that date's cross-section. But any \emph{time-series} normalization (rolling z-scores, volatility scaling) must use trailing windows only, and the NEC's sequence encoder consumes windows of history --- one off-by-one in window alignment hands the model the label. Section~\ref{sec:purge}'s interval formalism is how you check this mechanically rather than by hope.
+\end{necbox}
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[ESL Ex.\ 7.10]\label{ex:esl710}
+\prioCore
+Recall the \S\ref{sec:wrongway} scenario, modified: all $p$ predictors are \emph{binary}, labels are independent of all predictors, and $p$ is so large that some predictor splits the training data perfectly --- and therefore (with high probability) splits each validation fold perfectly too, achieving zero cross-validation error.
+Does this mean cross-validation fails here? Resolve the apparent paradox precisely: what is the full data-dependent ``training procedure'' whose error CV must estimate, what does correctly-executed CV (the predictor re-selected \emph{inside} each fold) report in this scenario, and what was the version that reported zero doing wrong? Connect your answer to the boxed principle of \S\ref{sec:wrongway}.
+\end{exercise}
+
+
+% =====================================================================
+\section{Why financial data break $k$-fold}\label{sec:break}
+% =====================================================================
+
+Random-fold CV is justified by exchangeability: any subset of the data is statistically like any other, so a random hold-out simulates genuinely new data. A return panel violates this in four escalating ways.
+
+\emph{1. Serial dependence.} Returns are uncorrelated but not independent --- volatility clusters (Foundations B \S B.1.3, \S B.7) --- so temporally adjacent observations share information that random folding scatters across the train/test boundary.
+
+\emph{2. Overlapping labels: the dominant channel.} An $h$-day forward-return label at date $t$ is a function of prices over $[t, t+h]$: in AFML's notation, $Y_i = f[[t_{i,0}, t_{i,1}]]$. Labels at dates $t$ and $t+1$ share $h - 1$ days of the same realized path --- they are mechanically, not subtly, correlated. Random $k$-fold then places observation $t$ in the training set and $t+1$ in the test set: the model is trained on most of the test label's realization. Formally, train label $Y_i$ and test label $Y_j$ overlap when their intervals intersect, i.e.\ when any of
+\begin{equation}
+t_{j,0} \le t_{i,0} \le t_{j,1},
+\qquad
+t_{j,0} \le t_{i,1} \le t_{j,1},
+\qquad
+t_{i,0} \le t_{j,0} \le t_{j,1} \le t_{i,1}
+\label{eq:overlap}
+\end{equation}
+holds (start inside, end inside, or containment --- AFML \S7.4.1). Exercise~\ref{ex:purge} has you prove these are exactly the interval-intersection conditions and build the counterexample where naive $k$-fold manufactures skill from a signal-free model.
+
+\emph{3. Cross-sectional dependence.} All assets on date $t$ share the market's move (the dominant eigenvalue of Foundations A); a cross-section of $N = 1{,}000$ stocks is nowhere near $1{,}000$ independent observations. Consequence: resample and split by \emph{date}, never by (date, asset) cell, and compute test statistics from the time series of date-level metrics (Section~\ref{sec:ic}) so the cross-sectional dependence is absorbed into the daily IC rather than fraudulently multiplying your sample size.
+
+\emph{4. Lookahead in the data themselves.} Leakage needs no modeling error if the dataset is already contaminated: features stamped at $t$ but computed from information published later (fundamentals must be aligned by \emph{filing acceptance date}, not fiscal period --- the syllabus's data plan, Stage D); index constituents chosen with today's membership (which conditions on having survived to be included); prices adjusted with knowledge of later corporate actions. The nastiest is \emph{survivorship bias}: building the universe from currently listed names deletes precisely the firms that died, and the deletion is correlated with returns. Exercise~\ref{ex:survivor} builds the two-period model in which the apparent mean return of the survivor sample exceeds the true mean by an amount monotone in the survival--return dependence --- making quantitative the rule \emph{build universes point-in-time, include delisted names, include delisting returns}.
+
+\begin{finbox}
+Why such paranoia? Foundations B's budget: the predictable fraction of return variance is of order $1\%$. A leak contributing $1\%$ of label variance to the feature set therefore does not perturb the result --- it \emph{doubles the apparent skill} (Exercise~\ref{ex:leakarith} does this arithmetic; the answer is more alarming than the claim). In image classification a leak this size is invisible; in return prediction it is the difference between publishable and zero. AFML's operational detector is worth memorizing: under leakage, measured performance keeps improving as $k \to T$, because more splits manufacture more train/test adjacencies; a leak-free pipeline's performance plateaus in $k$.
+\end{finbox}
+
+% =====================================================================
+\section{Purging, embargoing, and walk-forward validation}\label{sec:purge}
+% =====================================================================
+
+\subsection{Purged $k$-fold}
+
+The repair is conceptually one sentence: \emph{delete from the training set every observation whose label interval intersects any test-fold label interval} --- condition \eqref{eq:overlap}. AFML calls this \emph{purging}. With contiguous test folds (the sensible choice in time), purging removes a band of $\approx h$ observations on each side of the test block; the cost is a sliver of training data, the benefit is that the mechanical-overlap channel is closed exactly. Exercise~\ref{ex:purge} formalizes the algorithm in pseudocode and proves the leakage claim: after purging, no training label shares a realized price path with any test label.
+
+\subsection{Embargo}
+
+Purging closes label overlap; one channel remains. Features at training dates \emph{shortly after} the test block can encode test-period information through serial dependence (a realized-volatility feature at $t_{j,1}+2$ is largely test-period volatility), even though their \emph{label} intervals are disjoint from the test's. AFML's repair: an \emph{embargo} --- additionally drop training observations whose label interval \emph{begins} within $h_{\mathrm{emb}}$ after the test block ends, $t_{j,1} \le t_{i,0} \le t_{j,1} + h_{\mathrm{emb}}$. No symmetric pre-test embargo is needed: a training label ending before the test begins contains only information legitimately available at test time --- the arrow of time does the work. AFML's rule of thumb $h_{\mathrm{emb}} \approx 0.01\,T$ is a heuristic, not a theorem; the principled check is the plateau diagnostic above (performance flat in $k$).
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[Syllabus: purging and embargo, formalized]\label{ex:purge}
+\prioCore
+Labels are intervals: $Y_i = f[[t_{i,0}, t_{i,1}]]$, with a test fold $J$ and training candidates $i$.
+(a) Write precise pseudocode for \emph{purged $k$-fold}: input (label intervals, fold boundaries, embargo $h_{\mathrm{emb}}$), the purge test \eqref{eq:overlap}, the embargo test $t_{j,1} \le t_{i,0} \le t_{j,1} + h_{\mathrm{emb}}$, output (training indices per fold).
+(b) Prove that the three conditions \eqref{eq:overlap} are jointly equivalent to $[t_{i,0}, t_{i,1}] \cap [t_{j,0}, t_{j,1}] \ne \emptyset$, and conclude that after purging, no retained training label shares any time point with any test label.
+(c) Construct the counterexample the syllabus requests: a two-fold split of $T$ consecutive dates with $h$-day forward-return labels and a feature with \emph{zero} true predictive power that naive (unpurged) $k$-fold scores as skillful. \emph{(Hint: let the feature at date $t$ be the realized return over $[t-h, t]$; adjacent dates' labels and features then share path segments across the fold boundary. Exhibit the overlap explicitly and explain the direction of the bias.)}
+(d) Explain in two sentences why the embargo is needed \emph{after} but not \emph{before} the test block.
+\end{exercise}
+
+
+\subsection{Walk-forward, and which scheme the thesis should lead with}
+
+\emph{Walk-forward} validation dispenses with folds entirely: train on $[0, t)$, test on $[t, t+\Delta)$, roll forward (expanding window) or slide (rolling window), concatenate the out-of-sample segments. Purging still applies at each boundary (the last $h$ training labels overlap the first test labels). The comparison worth internalizing: walk-forward respects causality in every split and produces the most committee-legible number --- ``this is what you would have earned trading the model'' --- but uses each datum once for testing and yields a single path whose early test segments come from painfully small training sets. Purged $k$-fold uses data more efficiently and averages over more test blocks, at the price of some folds training on data \emph{after} the test period --- statistically defensible once purged (the question it answers is about the \emph{procedure}, \S\ref{sec:err}), but rhetorically weaker for a finance audience. (AFML's combinatorial purged CV generalizes to many train/test partitions; noted, not needed.) Recommendation, and the protocol Section~\ref{sec:protocol} adopts: \emph{walk-forward as the primary, headline evaluation; purged $k$-fold as a robustness appendix; all hyperparameter tuning nested inside the training window of each split} --- including, per Module 4 \S4.9, any calibration of gate probabilities, which needs its own held-out slice of the training window.
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[Supplementary: \S\ref{sec:purge} coverage --- walk-forward, formalized]\label{ex:walkforward}
+\prioCore
+Dates $1, \dots, T$ carry $h$-day forward-return labels $Y_t = f[[t, t+h]]$. An expanding-window walk-forward scheme trains split $k$ on dates $[1, s_k)$ and tests on $[s_k, s_k + \Delta)$, with $s_1$ the initial training length and $s_{k+1} = s_k + \Delta$.
+(a) Apply the overlap conditions \eqref{eq:overlap} at the split boundary: show that purging removes exactly the training dates $t \in [s_k - h,\, s_k)$, and prove that in walk-forward the embargo set is always empty --- every retained training label ends before the test block begins, so the post-test serial-dependence channel of \S\ref{sec:purge} cannot arise. (Contrast: which purged-$k$-fold folds \emph{do} need the embargo, and why.)
+(b) Efficiency accounting: over the full scheme, how many dates are ever used as test dates, how many training observations are lost to purging in total (in terms of the number of splits and $h$), and how large is the first split's training set relative to the last's? State in one sentence the resulting tradeoff against purged $k$-fold (every test causally clean and committee-legible vs.\ small early training sets and a single evaluation path).
+(c) Expanding vs.\ rolling windows: a rolling window of fixed length $W$ discards old data to adapt to slow regime drift, while the expanding window assumes stationarity to maximize sample size. Argue in two or three sentences which choice is more coherent for the thesis, given that the NEC's own premise is that returns are regime-conditional and its gate is the component designed to adapt to regimes --- what division of labor between the split scheme and the model does that premise imply?
+(d) Nesting: split $k$ must tune hyperparameters (and, per Module 4 \S4.9, gate calibration). Specify exactly which data may be touched --- an inner train/validation split of $[1, s_k)$, itself purged at its inner boundary --- and explain in two sentences why the concatenated outer test metric remains a valid assessment (\S\ref{sec:err}'s selection-vs.-assessment distinction) while the best inner validation score would not be (\S\ref{sec:wrongway}).
+\end{exercise}
+
+
+% =====================================================================
+\section{The cross-sectional evaluation stack: IC, ICIR, deciles, costs}\label{sec:ic}
+% =====================================================================
+
+\subsection{Rank-IC and its null distribution}
+
+The field's atomic metric: for each date $t$, the \emph{information coefficient} $\IC_t$ is the cross-sectional correlation between predictions and subsequently realized returns over the $N_t$ assets; the \emph{rank-IC} uses Spearman correlation --- Pearson on ranks --- for the heavy-tail immunity argued in Foundations B \S B.1.4 and \S B.7. The output of an entire backtest is, before anything else, the \emph{time series} $\{\IC_t\}_{t=1}^T$.
+
+To test it, you need its behavior under the null of zero skill, and for that, one small tool the source books assume silently:
+
+\begin{lemma}[Moments of random ranks]\label{lem:ranks}
+Let $(R_1, \dots, R_N)$ be a uniformly random permutation of $(1, \dots, N)$. Then
+\[
+\E[R_i] = \frac{N+1}{2},
+\qquad
+\Var(R_i) = \frac{N^2 - 1}{12},
+\qquad
+\Cov(R_i, R_j) = -\frac{N+1}{12} \;\; (i \ne j).
+\]
+\end{lemma}
+\begin{proof}
+$R_i$ is uniform on $\{1,\dots,N\}$, giving the mean and (via $\E[R_i^2] = \tfrac{(N+1)(2N+1)}{6}$) the variance. For the covariance: $\sum_i R_i = \tfrac{N(N+1)}{2}$ is constant, so $0 = \Var\big(\sum_i R_i\big) = N\Var(R_1) + N(N-1)\Cov(R_1, R_2)$; solve.
+\end{proof}
+
+(The negative covariance is the fingerprint of sampling without replacement: if one rank is high, the others must make room.) With Lemma~\ref{lem:ranks}, Exercise~\ref{ex:icnull} derives the facts the whole stack rests on: under the null that predictions are pure noise (a random ranking, independent of realized returns),
+\begin{equation}
+\E[\IC_t] = 0,
+\qquad
+\Var(\IC_t) = \frac{1}{N_t - 1},
+\qquad
+\text{so}\quad \mathrm{SE}(\IC_t) = \frac{1}{\sqrt{N_t - 1}} .
+\label{eq:icnull}
+\end{equation}
+Calibration of expectations: with $N = 1{,}000$ stocks, a single day's rank-IC has null standard deviation $\approx 0.032$ --- \emph{the same size as a good model's true daily IC}. One day of IC means nothing; skill is established only by the time-series average, which is where the $t$-statistic logic of Foundations B \S B.4.4 takes over:
+\begin{equation}
+\ICIR \;=\; \frac{\overline{\IC}}{\hat\sigma_{\IC} / \sqrt{T}} ,
+\qquad
+\overline{\IC} = \frac1T \sum_t \IC_t,
+\quad \hat\sigma_{\IC}^2 = \frac{1}{T-1}\sum_t (\IC_t - \overline{\IC})^2 ,
+\label{eq:icir}
+\end{equation}
+a $t$-statistic on the mean daily IC. (Some authors call $\overline{\IC}/\hat\sigma_{\IC}$ --- without $\sqrt{T}$ --- the ICIR and annualize it; fix one convention and state it. We use \eqref{eq:icir}: the test statistic.) Exercise~\ref{ex:icir} derives it, connects it to the Sharpe ratio of the strategy that holds cross-sectionally standardized predictions as positions --- under clean conventions, that strategy's per-date return \emph{is} (proportional to) $\IC_t$, so its Sharpe is the ICIR rescaled --- and through it to Grinold's ``fundamental law'' heuristic $\mathrm{IR} \approx \IC \cdot \sqrt{\text{breadth}}$: skill per bet times the square root of the number of independent bets, with the emphasis on \emph{independent} (channel 3 of \S\ref{sec:break} is why breadth is far less than $N \times T$).
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[Syllabus: the rank-IC null distribution]\label{ex:icnull}
+\prioCore
+Under the null, the model's cross-sectional ranking at date $t$ is a uniformly random permutation, independent of the realized returns' ranks. Writing the rank-IC as the Pearson correlation of the two rank vectors and using Lemma~\ref{lem:ranks}:
+(a) show $\E[\IC_t] = 0$;
+(b) derive $\Var(\IC_t) = \tfrac{1}{N-1}$ exactly \emph{(route: with both rank vectors standardized, $\IC_t = \tfrac{1}{N-1}\sum_i \tilde R_i \tilde S_i$ for standardized ranks; compute the variance of the sum over the random permutation using the variance and covariance entries of Lemma~\ref{lem:ranks})};
+(c) conclude $\mathrm{SE}(\IC_t) = 1/\sqrt{N-1}$, argue from the CLT (sum of weakly dependent bounded terms; a statement of intent, not a proof) that $\IC_t\sqrt{N-1}$ is approximately standard normal for large $N$, and compute how many \emph{days} of independent observations are needed before a true daily IC of $0.03$ is distinguishable from zero at $t = 2$ with $N = 500$ stocks.
+\end{exercise}
+
+\begin{exercise}[Syllabus: ICIR as a $t$-statistic, and the Sharpe connection]\label{ex:icir}
+\prioCore
+(a) Justify \eqref{eq:icir} as the one-sample $t$-statistic of Foundations B \S B.4.4 applied to the daily IC series, listing the assumptions inherited (which of i.i.d., finite variance, and stationarity are plausible for $\{\IC_t\}$, and what volatility clustering does to the standard error).
+(b) Consider the strategy that, each date, holds positions equal to the cross-sectionally standardized \emph{ranks} of its predictions (zero mean, unit variance across assets) and assume realized returns are likewise rank-standardized for the purpose of this part. Show the portfolio's per-date return equals $\IC_t$ up to a constant factor, and conclude that the strategy's Sharpe ratio is a rescaling of $\overline{\IC}/\hat\sigma_{\IC}$ --- the ICIR stripped of its $\sqrt{T}$.
+(c) Derive the Grinold-style reading: if the strategy makes $B$ \emph{independent} bets per period each with information coefficient $\IC$, show the information ratio scales as $\IC\sqrt{B}$, and explain (via channel 3 of \S\ref{sec:break}) why $B$ is much smaller than the nominal $N \times T$ count for an equity panel.
+\end{exercise}
+
+
+\subsection{Decile long--short backtests, turnover, and costs}\label{sec:decile}
+
+The IC's portfolio-shaped sibling. Each date, sort assets into deciles $D_1(t), \dots, D_{10}(t)$ by predicted return; hold the top decile equal-weighted long and the bottom equal-weighted short:
+\begin{equation}
+w_{i,t} = \frac{\mathbf{1}[i \in D_{10}(t)]}{|D_{10}(t)|} - \frac{\mathbf{1}[i \in D_{1}(t)]}{|D_{1}(t)|},
+\qquad
+r^{LS}_t = \sum_i w_{i,t}\, r_{i,t+1} .
+\label{eq:decile}
+\end{equation}
+Gross of costs, the mean of $r^{LS}_t$ (the ``decile spread'') and the monotonicity of mean returns across all ten deciles are the standard exhibits --- monotonicity matters because a spread driven only by the extremes is fragile to exactly the tail events Foundations B warned about. Net of costs is where backtests die. Define one-way \emph{turnover} as the L1 norm of the trade,
+\begin{equation}
+\tau_t = \tfrac12 \sum_i \big| w_{i,t} - w^{\mathrm{drift}}_{i,t} \big|,
+\qquad\text{cost drag} \;=\; c \cdot 2\tau_t ,
+\label{eq:turnover}
+\end{equation}
+where $w^{\mathrm{drift}}_{i,t}$ are yesterday's weights drifted by realized returns (you must trade back even a position you ``kept''), and $c$ is the one-way cost rate in return units (commissions plus spread plus impact; for liquid US large-caps a few basis points, for anything less liquid much more). Exercise~\ref{ex:decile} assembles \eqref{eq:decile}--\eqref{eq:turnover} formally and shows why turnover enters as an L1 norm --- costs are paid on \emph{gross} trading, signed flows do not net. The strategic consequence: fast signals (short-horizon reversal) have high IC and brutal turnover; slow signals (long momentum) the reverse; after costs the ranking of signals can invert outright, which is why the syllabus insists on ``Sharpe only after costs and with skepticism.''
+
+\begin{necbox}
+For the thesis, the stack is: primary metric, mean daily rank-IC and \eqref{eq:icir} on walk-forward out-of-sample dates; portfolio-shaped confirmation, decile long--short \eqref{eq:decile} net of a stated cost assumption with turnover reported; and \emph{per-regime} versions of both --- the NEC's claim is precisely that conditional performance differs across gate states, so the evaluation must be able to see that. Gate diagnostics (entropy, utilization, VIX/recession alignment via the mutual information of Foundations B \S B.6) remain descriptive exhibits, not significance claims: only the pre-registered primary metric gets a $p$-value, for reasons the next section makes unavoidable.
+\end{necbox}
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[Syllabus: decile long--short, turnover, costs]\label{ex:decile}
+\prioCore
+Using the definitions \eqref{eq:decile}--\eqref{eq:turnover}:
+(a) Write the net long--short return at date $t$ explicitly as a function of the rank assignment (which assets occupy $D_1$ and $D_{10}$), the realized returns, the leg weights, and the cost rate $c$ --- the syllabus's four ingredients --- including the drifted-weight correction in the turnover term.
+(b) Prove the cost term must be an L1 norm of the weight change: show that any cost functional that is (i) proportional to gross value traded per asset and (ii) additive across assets is $c\sum_i |\Delta w_i|$, and explain why signed netting across assets (an L1 of the \emph{sum} rather than the sum of absolute values) would correspond to a market structure that does not exist.
+(c) Two portfolios have identical gross decile spreads; one rebalances daily ($\tau \approx 0.4$), one monthly ($\tau \approx 0.4$ per month). At $c = 5$ bps one-way, compute both cost drags annually and state the general turnover-horizon tradeoff in one sentence.
+\end{exercise}
+
+
+% =====================================================================
+\section{Multiple testing: the factor zoo}\label{sec:multiple}
+% =====================================================================
+
+\subsection{The problem, and the size of the bias}
+
+You tried $m$ things --- features, architectures, hyperparameters, horizons --- and report the best. Under the global null (nothing works), each trial's $t$-statistic is roughly standard normal; the \emph{maximum} of $m$ of them is not. The tool that quantifies the inflation (and later prices the DSR's haircut):
+
+\begin{lemma}[Gaussian maximum upper envelope]\label{lem:maxgauss}
+If $Z_1, \dots, Z_m$ are standard Gaussian (any dependence), $\E\big[\max_n Z_n\big] \le \sqrt{2 \log m}$.
+\end{lemma}
+\begin{proof}
+For $t > 0$, Jensen (Foundations B, Exercise B.5) gives
+\[
+\exp\big(t\,\E[\max_n Z_n]\big)
+\le \E\big[e^{t \max_n Z_n}\big]
+\le \sum_n \E\big[e^{t Z_n}\big]
+= m\, e^{t^2/2},
+\]
+using $e^{t\max} \le \sum e^{tZ_n}$ and the Gaussian MGF. Hence $\E[\max_n Z_n] \le \tfrac{\log m}{t} + \tfrac{t}{2}$; optimize at $t = \sqrt{2\log m}$.
+\end{proof}
+
+For independent trials the exact expectation sits below this bound but on the same scale: among $m = 100$ dead strategies it is about $2.5$, while the envelope $\sqrt{2\log 100}$ is about $3.0$. Read that twice: \emph{two-and-a-half-to-three-sigma-looking discoveries are routine when you try one hundred sincere failures.} The factor-zoo literature (Harvey, Liu \& Zhu 2016) counts hundreds of published return predictors and concludes, by exactly this logic plus publication bias, that newly proposed factors should clear $t \gtrsim 3.0$ rather than $2.0$; Exercise~\ref{ex:hlz} reproduces the back-of-envelope. For threshold arithmetic, one more standard tool, stated for use (one-line proof by differentiating the ratio): the \emph{Mills ratio bound}, $1 - \Phi(t) \le \varphi(t)/t$ for $t > 0$, tight for large $t$.
+
+\subsection{FWER and Bonferroni; FDR and Benjamini--Hochberg}
+
+Two formal standards exist for ``corrected'' significance over a family of $m$ tests with $p$-values $p_1, \dots, p_m$.
+
+\emph{Family-wise error rate}: $\mathrm{FWER} = P(\text{any true null rejected})$. \emph{Bonferroni} --- test each at level $\alpha/m$ --- controls it by the union bound, $P\big(\bigcup_{i \in \text{nulls}} \{p_i \le \alpha/m\}\big) \le m_0 \cdot \alpha/m \le \alpha$ (Exercise~\ref{ex:bonferroni}, with its conservatism: under strong positive dependence --- $m$ correlated variants of one signal --- the effective number of independent tests is far below $m$ and Bonferroni overpays in power; quantifying ``effective $m$'' is part of the exercise).
+
+\emph{False discovery rate}: $\mathrm{FDR} = \E\big[ V / \max(R, 1) \big]$, the expected fraction of rejections that are false ($V$ false rejections among $R$ total). \emph{Benjamini--Hochberg}: sort $p_{(1)} \le \dots \le p_{(m)}$, find $k^\ast = \max\{k : p_{(k)} \le \alpha k / m\}$, reject the $k^\ast$ smallest. Under independence (and positive regression dependence), $\mathrm{FDR} \le \alpha\, m_0/m \le \alpha$ (Exercise~\ref{ex:bh}, with a guided proof). The philosophical difference is the operational one: FWER protects against \emph{ever} being fooled --- the right standard for a thesis's single headline claim; FDR tolerates a controlled fraction of false alarms in exchange for power --- the right standard for \emph{screening} a large signal library, where the output is a shortlist for further testing, not a publication claim. A quant research desk runs both, in that order.
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[Syllabus: Bonferroni]\label{ex:bonferroni}
+\prioCore
+(a) Prove FWER control: with $m_0 \le m$ true nulls, testing each hypothesis at level $\alpha/m$ gives $\mathrm{FWER} \le \alpha$, by the union bound --- note that \emph{no} independence assumption is used.
+(b) Quantify the conservatism under dependence: if all $m$ test statistics are perfectly correlated (one signal under $m$ names), show the true FWER of the Bonferroni procedure is $\alpha/m$, so it overpays in power by a factor of $m$. Define the \emph{effective number of independent tests} $m_{\mathrm{eff}}$ informally and explain how you would estimate it for a family of correlated strategy variants (correlation matrix of their return streams; eigenvalue-based counts).
+(c) One sentence: why is Bonferroni nevertheless the right standard for the thesis's small pre-registered headline family.
+\end{exercise}
+
+
+% =====================================================================
+\section{The Sharpe ratio under scrutiny: PSR and DSR}\label{sec:dsr}
+% =====================================================================
+
+The Sharpe ratio $\SR = \mu/\sigma$ (excess-return mean over volatility; annualized by $\sqrt{252}$ only when returns are serially uncorrelated --- autocorrelation breaks the scaling) is estimated, never observed, and its estimation error is governed by the very non-Gaussianity Foundations B documented. The sampling variance of $\widehat{\SR}$, by the delta method applied to $(\hat\mu, \hat\sigma^2)$ --- the Gaussian case of which you derive in Exercise~\ref{ex:dsr}(a) with tools you already own (the $\chi^2$ variance from Module 4 \S4.1.2) --- is, in the general form due to Mertens,
+\begin{equation}
+\Var\big(\widehat{\SR}\big) \;\approx\; \frac{1 \;-\; \hat\gamma_3\,\widehat{\SR} \;+\; \frac{\hat\gamma_4 - 1}{4}\,\widehat{\SR}^2}{T - 1} ,
+\label{eq:srvar}
+\end{equation}
+inflated by negative skew and excess kurtosis --- fat tails make Sharpe ratios \emph{noisier}, exactly when they are computed on the strategies most prone to them (short-vol-flavored payoffs: steady gains, rare disasters, negative $\gamma_3$). Bailey--L\'opez de Prado's \emph{probabilistic Sharpe ratio} turns \eqref{eq:srvar} into a significance statement:
+\begin{equation}
+\mathrm{PSR}(\SR^\ast) \;=\; \Phi\!\left( \frac{\big(\widehat{\SR} - \SR^\ast\big)\sqrt{T-1}}{\sqrt{1 - \hat\gamma_3 \widehat{\SR} + \tfrac{\hat\gamma_4 - 1}{4}\widehat{\SR}^2}} \right),
+\label{eq:psr}
+\end{equation}
+the probability the true Sharpe exceeds a benchmark $\SR^\ast$, with the heavy-tail penalty built into the denominator.
+
+The \emph{deflated} Sharpe ratio is PSR with the benchmark set by multiple testing: if the reported strategy is the best of $N_{\mathrm{tr}}>1$ trials, the right null is not $\SR = 0$ but ``$\widehat{\SR}$ equals what the \emph{maximum} of $N_{\mathrm{tr}}$ skill-free trials would deliver.'' From extreme-value refinement of Lemma~\ref{lem:maxgauss}'s logic, the expected best Sharpe among $N_{\mathrm{tr}}$ zero-skill trials with cross-trial dispersion $V[\{\widehat{\SR}_n\}]$ is
+\begin{equation}
+\SR^\ast \;=\; \sqrt{V\big[\{\widehat{\SR}_n\}\big]}\;\left[ (1 - \gamma)\, \Phi^{-1}\!\Big(1 - \tfrac{1}{N_{\mathrm{tr}}}\Big) \;+\; \gamma\, \Phi^{-1}\!\Big(1 - \tfrac{1}{N_{\mathrm{tr}}\, e}\Big) \right],
+\label{eq:srstar}
+\end{equation}
+with $\gamma \approx 0.5772$ the Euler--Mascheroni constant, and $\mathrm{DSR} = \mathrm{PSR}(\SR^\ast)$. If there is no selection problem ($N_{\mathrm{tr}}=1$), bypass \eqref{eq:srstar} and use the ordinary PSR benchmark, usually $\SR^\ast=0$. Anatomy, which Exercise~\ref{ex:dsr} dissects: \eqref{eq:srstar} is the \emph{selection-bias} correction --- it grows on the $\sqrt{2 \log N_{\mathrm{tr}}}$ scale (Lemma~\ref{lem:maxgauss}) and like the dispersion of trial results; the denominator of \eqref{eq:psr} is the \emph{non-normality} correction --- skew and kurtosis from Foundations B \S B.7. The two corrections are independent and compounding: many trials \emph{and} fat tails is the generic condition of quant research, and DSR bills for both.
+
+\begin{finbox}
+The honest part is the bookkeeping: $N_{\mathrm{tr}}$ must count \emph{everything you tried}, including configurations abandoned early, horizons peeked at, and baselines tuned and discarded --- not just the variants in the final table. Nobody audits this for you; the deflation is only as truthful as your trial log. Keep the log from day one of the thesis experiments (a one-line registry per configuration run), and the DSR becomes a calculation instead of a confession.
+\end{finbox}
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[Syllabus: PSR and the deflated Sharpe ratio]\label{ex:dsr}
+\prioCore
+(a) \emph{Gaussian warm-up, fully solvable with your tools.} For i.i.d.\ Gaussian returns, $\widehat{\SR} = \hat\mu/\hat\sigma$ with $\hat\mu, \hat\sigma^2$ independent (\S4.1.2), $\Var(\hat\mu) \approx \sigma^2/(T-1)$, $\Var(\hat\sigma^2) \approx 2\sigma^4/(T-1)$ (the $\chi^2$ variance). Apply the first-order delta method (the Foundations B Exercise B.13 expansion) to the function $(\hat\mu, \hat\sigma^2) \mapsto \hat\mu/\sqrt{\hat\sigma^2}$ and derive
+$\Var(\widehat{\SR}) \approx \tfrac{1}{T-1}\big(1 + \tfrac12 \SR^2\big)$.
+(b) Verify this is the $\gamma_3 = 0, \gamma_4 = 3$ special case of Mertens' formula \eqref{eq:srvar}, up to the usual $T$ versus $T-1$ finite-sample convention, and interpret the two general corrections: which moments inflate $\Var(\widehat{\SR})$ and for what kind of strategy P\&L is the inflation largest (recall Foundations B \S B.7 on short-vol payoffs)?
+(c) Assemble the PSR \eqref{eq:psr} as the one-sided test of $H_0: \SR = \SR^\ast$ based on (a)--(b), stating where the CLT enters.
+(d) Dissect the DSR: in \eqref{eq:psr} with benchmark \eqref{eq:srstar}, identify precisely which symbols implement the \emph{selection} correction (max over $N_{\mathrm{tr}}$ trials --- connect the $\Phi^{-1}(1 - 1/N_{\mathrm{tr}})$ terms to Lemma~\ref{lem:maxgauss}'s $\sqrt{2\log m}$ scale) and which implement the \emph{non-normality} correction. Verify the limits: with no selection problem, bypass \eqref{eq:srstar} and recover the plain PSR/$t$-test of (c) by setting $\SR^\ast=0$; large kurtosis with no selection recovers pure Mertens; $N_{\mathrm{tr}}$ large with Gaussian returns recovers pure selection deflation.
+\end{exercise}
+
+
+% =====================================================================
+\section{Capstone: the thesis evaluation protocol}\label{sec:protocol}
+% =====================================================================
+
+Everything assembles into a protocol you can state in one page and defend line by line --- this section \emph{is} the syllabus checkpoint.
+
+\emph{Data and universe.} Point-in-time universe of liquid U.S. equities including delisted names and delisting returns (\S\ref{sec:break}, channel 4); features lagged so that everything stamped $t$ is computable from information available before the prediction is made; fundamentals (if Stage D is reached) aligned by filing acceptance date.
+
+\emph{Splits.} Walk-forward as primary: expanding training window, fixed-length test blocks, purged at each boundary per \eqref{eq:overlap} with an embargo of $h_{\mathrm{emb}}$ after each test block (\S\ref{sec:purge}); purged $k$-fold as a robustness appendix; \emph{all} data-dependent choices --- hyperparameters, feature transforms, early stopping, gate calibration --- nested inside each training window (\S\ref{sec:wrongway}). Leak check: performance plateau in $k$.
+
+\emph{Metrics.} Primary, pre-registered: mean daily rank-IC and its $t$-statistic \eqref{eq:icir} on concatenated out-of-sample dates. Secondary: decile long--short \eqref{eq:decile} net of stated costs with turnover \eqref{eq:turnover} reported; per-regime conditional versions; gate diagnostics (entropy, utilization, MI with VIX/recessions) as descriptive exhibits only.
+
+\emph{Inference.} The headline comparison --- corrected NEC vs.\ each baseline --- is a \emph{small, pre-registered family}: state it explicitly (e.g.\ NEC-soft vs.\ \{linear ridge, GBM, Hamilton-MS, NEC-hard\} on one horizon and one universe: $m = 4$ comparisons, Bonferroni at $\alpha/4$ --- FWER, because this is the claim of record). Everything else explored along the way enters $N_{\mathrm{tr}}$, and the headline Sharpe-flavored result is reported as a DSR \eqref{eq:psr}--\eqref{eq:srstar} against the full trial log. Signal screening experiments, if any, use BH/FDR and are labeled as screening (\S\ref{sec:multiple}).
+
+\medskip
+\noindent\textbf{Checkpoint (from the syllabus).} Closed book: (i) \emph{Defend the protocol against leakage}: enumerate the channels --- label overlap \eqref{eq:overlap}, post-test serial dependence (embargo), pipeline refitting (\S\ref{sec:wrongway}), survivorship and PIT alignment --- and say which design element closes each. (ii) \emph{Why do multiple-testing corrections matter for the thesis claim?} Because ``corrected NEC beats baselines'' is the best result selected from every configuration tried, and Lemma~\ref{lem:maxgauss} prices what selection alone delivers ($\sqrt{2\log m}$ sigmas for free); the claim survives only if it clears the deflated bar. (iii) \emph{State the corrected family}: the pre-registered headline comparisons (FWER/Bonferroni), the full trial registry behind the DSR's $N_{\mathrm{tr}}$, and the screening family (FDR) --- three families, three standards, stated before the experiments run. If all three answers are comfortable, Module 5 has done its job.
+
+% =====================================================================
+\section{Exercises}\label{sec:exercises}
+% =====================================================================
+
+\noindent\textbf{Importance labels.} Each exercise carries a priority badge for the NEC/MoE thesis track, reflecting how load-bearing it is --- \emph{not} how hard it is. The \prioCore set is the thesis evaluation protocol made flesh, to own closed-book: honest error accounting (\ref{ex:esl71}), what CV does and does not estimate (\ref{ex:esl710}), don't leak --- in folds or in walk-forward (\ref{ex:purge}, \ref{ex:walkforward}), know your metric's null distribution (\ref{ex:icnull}), your test statistic (\ref{ex:icir}), your after-cost confirmation (\ref{ex:decile}), your headline multiple-testing correction (\ref{ex:bonferroni}), and your headline deflation (\ref{ex:dsr}). \prioWorth are high value, a notch below. \prioLow is contextual. Two notes on judgement calls: survivorship (\ref{ex:survivor}) and the small-leak arithmetic (\ref{ex:leakarith}) teach \emph{why} the discipline matters but are not repeated analysis tools, so they are Worth it rather than Core; and the single hardest item is the starred FDR proof \ref{ex:bh}(c), optional even within its own exercise.
+
+Questions only, as established; every syllabus exercise appears, restated self-contained, plus two supplementary ones: the small-leak arithmetic (\ref{ex:leakarith}) and the walk-forward formalization (\ref{ex:walkforward}, inline). \textbf{Core exercises (\prioCore) sit inline in the chapter body as checkpoint exercises, at the end of the section or subsection they test}; this section collects the supplementary exercises only. Solvability audit: each exercise names the in-text tools it runs on.
+
+\subsection*{On classification error and the 0--1 loss (Sections~\ref{sec:err}--\ref{sec:optimism})}
+
+\begin{exercise}[ESL Ex.\ 7.2]\label{ex:esl72}
+\prioWorth
+Binary classification, $Y \in \{0,1\}$, $\Pr(Y = 1 \mid \x_0) = f(\x_0)$, classifier $\hat G(\x_0) = \mathbf{1}[\hat f(\x_0) > \tfrac12]$, Bayes classifier $G(\x_0) = \mathbf{1}[f(\x_0) > \tfrac12]$, Bayes error $\Errr_B(\x_0) = \Pr(Y \ne G(\x_0) \mid \x_0)$.
+(a) Show the 0--1 generalization error decomposes as
+$\Errr(\x_0) = \Errr_B(\x_0) + \big|2 f(\x_0) - 1\big| \cdot \Pr\big(\hat G(\x_0) \ne G(\x_0) \mid \x_0\big)$:
+irreducible error plus (distance from the boundary) $\times$ (probability of landing on the wrong side).
+(b) Using the approximation $\hat f(\x_0) \sim \Normal\big(\E\hat f(\x_0), \Var(\hat f(\x_0))\big)$, show
+\[
+\Pr\big(\hat G(\x_0) \ne G(\x_0) \mid \x_0\big) \;\approx\;
+\Phi\!\left( \frac{\sign\big(\tfrac12 - f(\x_0)\big)\,\big(\E \hat f(\x_0) - \tfrac12\big)}{\sqrt{\Var\big(\hat f(\x_0)\big)}} \right).
+\]
+(c) Discuss what (b) says that the squared-loss decomposition (B.5.1) cannot: bias and variance interact \emph{multiplicatively} through $\Phi$, and when $\E\hat f(\x_0)$ sits on the \emph{wrong} side of $\tfrac12$, increasing variance \emph{reduces} classification error. One sentence on what this means for evaluating a regime \emph{classifier} (the gate) by a regression metric.
+\end{exercise}
+
+\subsection*{On survivorship and the arithmetic of leaks (Section~\ref{sec:break})}
+
+\begin{exercise}[Syllabus: survivorship bias, quantified]\label{ex:survivor}
+\prioWorth
+Two periods. Each asset has type $\theta$ (drawn from any distribution), period-1 return $r_1(\theta)$ and period-2 return $r_2(\theta)$, and survives period 1 with probability $s(\theta)$ (the survival ``hazard'' is $1 - s$). The analyst, working at the end of period 2, builds the universe from \emph{survivors only} and computes mean period-1 returns.
+(a) Show the observed quantity is $\E[r_1(\theta) \mid \text{survive}] = \E[s(\theta)\, r_1(\theta)] / \E[s(\theta)]$ and derive the bias
+\[
+\E[r_1 \mid \text{survive}] - \E[r_1] \;=\; \frac{\Cov\big(s(\theta),\, r_1(\theta)\big)}{\E[s(\theta)]} ,
+\]
+positive whenever survival and return are positively associated (losers die).
+(b) Show the bias is monotone in the survival--return dependence: parameterize $s_\alpha(\theta)$ so that increasing $\alpha$ increases $\Cov(s_\alpha, r_1)$ holding $\E[s_\alpha]$ fixed, and verify the bias increases in $\alpha$. Interpret the two endpoints (survival independent of returns; survival deterministic in returns).
+(c) One paragraph: which quant-research practices this model indicts (current-membership universes, backfilled fundamentals, ignoring delisting returns), and what the point-in-time discipline of \S\ref{sec:break} changes in the formula.
+\end{exercise}
+
+\begin{exercise}[Supplementary: the arithmetic of a small leak]\label{ex:leakarith}
+\prioWorth
+Let the true label have variance $1$ and let the model's legitimate signal explain a fraction $\rho^2$ of it (true $\IC = \rho$, with $\rho \approx 0.03$ as a realistic scale). Suppose a pipeline defect adds to the feature set a leaked variable $\ell = \sqrt{f}\, y + \sqrt{1-f}\, \eta$ ($\eta$ independent noise): a fraction $f$ of label variance, visible at training \emph{and} evaluation time.
+(a) Show $\Corr(\ell, y) = \sqrt{f}$, so a regression given $\ell$ attains measured $\IC \approx \sqrt{\rho^2 + f}$ (assume the legitimate signal and the leak are independent).
+(b) Evaluate the damage: how large a measured IC does a leak of $f = 0.1\%$ of label variance produce on its own? Compare to the legitimate $\rho = 0.03$, and state the general lesson as an inequality between $f$ and $\rho^2$.
+(c) One sentence: why is the same $f$ utterly harmless in a domain where models reach $R^2 = 0.9$?
+\end{exercise}
+
+\subsection*{On multiple testing (Section~\ref{sec:multiple})}
+
+\begin{exercise}[Syllabus: Benjamini--Hochberg and FDR]\label{ex:bh}
+\prioWorth
+(a) Define FWER and FDR precisely and prove $\mathrm{FDR} \le \mathrm{FWER}$, so FDR control is the weaker (more powerful) guarantee.
+(b) Run the BH procedure by hand on $p$-values $(0.001,\, 0.008,\, 0.039,\, 0.041,\, 0.042,\, 0.060,\, 0.074,\, 0.205)$ at $\alpha = 0.05$, and contrast with Bonferroni at the same $\alpha$.
+(c) $\bigstar$ Prove FDR $\le \alpha\, m_0/m$ for BH under independent null $p$-values (uniform on $[0,1]$). \emph{(Guided route: for each true null $i$, write the contribution $\E[\mathbf{1}\{i \text{ rejected}\}/R]$; condition on the other $m-1$ $p$-values; use the fact that on the event $\{R = r,\ i \text{ rejected}\}$ the threshold is $\alpha r / m$ and $P(p_i \le \alpha r/m) = \alpha r/m$; the careful bookkeeping that $R$ itself depends on $p_i$ is the hard part --- handle it with the ``leave-one-out'' rejection count.)}
+(d) Explain why FDR is the right criterion for screening a library of candidate trading signals, and FWER for the final claim --- one sentence each, in terms of the cost of a false positive in each setting.
+\end{exercise}
+
+\begin{exercise}[Syllabus: the Harvey--Liu--Zhu threshold]\label{ex:hlz}
+\prioLow
+The factor literature has published hundreds of return predictors; take $m = 300$ tested factors as the visible family.
+(a) Using Bonferroni at $\alpha = 0.05$ (two-sided) and the Mills ratio bound of \S\ref{sec:multiple}, derive the implied per-test $t$-statistic threshold; show it lands near $t \approx 3.8$, and locate HLZ's headline recommendation ($t \gtrsim 3.0$) relative to your number (they use less conservative corrections --- which direction does that move the threshold, and why).
+(b) Compute Lemma~\ref{lem:maxgauss}'s upper envelope for the maximum null $t$-statistic when $m = 300$ and compare it with the Bonferroni threshold: how much of the threshold is ``explained'' by pure selection?
+(c) The visible family undercounts: unpublished failures are trials too. If only a fraction $q$ of trials are published, how does the honest $m$ scale, and what does that do to the threshold? One sentence on what this implies for trusting your \emph{own} thesis's exploratory phase.
+\end{exercise}
+
+% =====================================================================
+\section*{Source map and what comes next}
+\addcontentsline{toc}{section}{Source map and what comes next}
+% =====================================================================
+
+\begin{center}
+\small
+\begin{tabular}{@{}p{0.29\linewidth}p{0.28\linewidth}p{0.34\linewidth}@{}}
+\toprule
+Section & Primary source(s) & Feeds directly into \\
+\midrule
+\ref{sec:err} Err vs.\ $\errbar$, selection vs.\ assessment & ESL \S7.1--7.4, \S7.12 & every experiment you ever report \\
+\ref{sec:optimism} Optimism, df, $C_p$/AIC/BIC & ESL \S7.4--7.7 & complexity accounting for NEC vs.\ baselines \\
+\ref{sec:cv} CV and the wrong way & ESL \S7.10 & pipeline hygiene, nested tuning \\
+\ref{sec:break} Financial leakage channels & AFML \S7.1--7.3 + syllabus \S3 & data plan (Stages A--D) \\
+\ref{sec:purge} Purge, embargo, walk-forward & AFML \S7.4--7.5 & the thesis splits \\
+\ref{sec:ic} IC / ICIR / deciles / costs & syllabus + Bali--Engle--Murray context & the thesis metrics \\
+\ref{sec:multiple} Bonferroni, BH, factor zoo & standard + Harvey--Liu--Zhu (2016) & the thesis inference \\
+\ref{sec:dsr} PSR and DSR & Bailey--LdP (2014) via AFML Ch.\ 14 & the thesis headline number \\
+\ref{sec:protocol} Protocol capstone & synthesis & the proposal's evaluation section \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\medskip
+This module closes Part II of the syllabus: you now have the math (Foundations A--B), the models (Module 4), and the judge (Module 5). What comes next changes register --- Part III builds the deep-learning machinery (optimization, backpropagation, the architectures behind the NEC's encoder and experts), and its Math Foundations C will lean on the matrix calculus deferred since Foundations A. The evaluation protocol of Section~\ref{sec:protocol}, however, is frozen now, before any deep model is trained: deciding how you will keep score \emph{after} seeing the contestants is the one mistake this chapter exists to make impossible.
+
+\end{document}

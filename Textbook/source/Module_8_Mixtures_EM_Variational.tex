@@ -1,0 +1,403 @@
+% =====================================================================
+%  Foundations for a Quant Research Pipeline
+%  Chapter: Module 8 — Mixture Models, EM, and Variational Inference
+%  Companion textbook to NEC_thesis_syllabus.md
+%  Sources synthesized: Bishop Ch 9.1–9.4, 10.1–10.3; ESL §8.5
+% =====================================================================
+\documentclass[11pt]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{mathpazo}
+\usepackage{microtype}
+\usepackage[margin=1.05in]{geometry}
+\usepackage{amsmath,amssymb,amsthm,mathtools,bm}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{tcolorbox}
+\tcbuselibrary{breakable}
+\usepackage{booktabs}
+\usepackage[colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,urlcolor=blue!50!black]{hyperref}
+
+\linespread{1.05}
+\setlength{\parskip}{0.35em}
+
+% ---------- colors ----------
+\definecolor{necblue}{RGB}{20,45,90}
+\definecolor{finmaroon}{RGB}{110,30,30}
+\definecolor{boxbg}{RGB}{245,247,250}
+\definecolor{finbg}{RGB}{250,246,243}
+
+% ---------- module-8 numbering ----------
+\renewcommand{\thesection}{8.\arabic{section}}
+\numberwithin{equation}{section}
+
+% ---------- theorem environments ----------
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{corollary}[theorem]{Corollary}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{example}[theorem]{Example}
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+
+\newcounter{exercise}
+\renewcommand{\theexercise}{8.\arabic{exercise}}
+\newenvironment{exercise}[1][]{\refstepcounter{exercise}\par\medskip
+  \noindent\textbf{Exercise \theexercise}\if\relax\detokenize{#1}\relax\else\ \textnormal{[#1]}\fi\textbf{.}\ \itshape}{\par\medskip}
+% ---------- exercise importance badges (priority for the NEC/MoE thesis track) ----------
+\definecolor{priogray}{RGB}{120,120,120}
+\newcommand{\prioCore}{{\normalfont\small\textbf{\textcolor{necblue}{[\,\ensuremath{\bigstar\bigstar\bigstar}\ Core\,]}}}\hspace{0.5em}}
+\newcommand{\prioWorth}{{\normalfont\small\textbf{\textcolor{finmaroon}{[\,\ensuremath{\bigstar\bigstar}\ Worth it\,]}}}\hspace{0.5em}}
+\newcommand{\prioLow}{{\normalfont\small\textcolor{priogray}{[\,\ensuremath{\bigstar}\ Low priority\,]}}\hspace{0.5em}}
+\newcommand{\prioOpt}{{\normalfont\small\textcolor{priogray}{[\,\ensuremath{\circ}\ Optional\,]}}\hspace{0.5em}}
+\newcommand{\corebadge}{}% superseded by the four \prio badges above
+
+% ---------- boxes ----------
+\newtcolorbox{necbox}{breakable,colback=boxbg,colframe=necblue,
+  boxrule=0.8pt,arc=1.5mm,left=2mm,right=2mm,top=1.5mm,bottom=1.5mm,
+  title={\sffamily\bfseries NEC connection},fonttitle=\small}
+\newtcolorbox{finbox}{breakable,colback=finbg,colframe=finmaroon,
+  boxrule=0.8pt,arc=1.5mm,left=2mm,right=2mm,top=1.5mm,bottom=1.5mm,
+  title={\sffamily\bfseries Finance reality check},fonttitle=\small}
+
+% ---------- operators ----------
+\DeclareMathOperator{\E}{\mathbb{E}}
+\DeclareMathOperator{\Var}{Var}
+\DeclareMathOperator{\Cov}{Cov}
+\DeclareMathOperator{\tr}{tr}
+\DeclareMathOperator{\diag}{diag}
+\DeclareMathOperator*{\argmin}{arg\,min}
+\DeclareMathOperator*{\argmax}{arg\,max}
+\newcommand{\KL}[2]{\mathrm{KL}\!\left(#1 \,\middle\|\, #2\right)}
+\newcommand{\Normal}{\mathcal{N}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\x}{\bm{x}}
+\newcommand{\T}{\top}
+\newcommand{\bmu}{\bm{\mu}}
+\newcommand{\bSigma}{\bm{\Sigma}}
+\newcommand{\bpi}{\bm{\pi}}
+\newcommand{\ELBO}{\mathcal{L}}
+\newcommand{\Hent}{\mathrm{H}}
+\newcommand{\resp}{\gamma}
+
+\title{\vspace{-1.2em}{\large\sffamily Foundations for a Quant Research Pipeline}\\[0.4em]
+\textbf{Module 8:\\ Mixture Models, EM, and Variational Inference}\\[0.3em]
+{\large A single merged treatment of Bishop Ch.\ 9 and \S10.1--10.3 and ESL \S8.5,\\ standing on Foundations B \S B.8 and Foundations D}}
+\author{Prepared for Tom Koreslesjak \;\textperiodcentered\; companion to \texttt{NEC\_thesis\_syllabus.md}}
+\date{June 2026}
+
+\begin{document}
+\maketitle
+\vspace{-1.5em}
+
+\begin{abstract}
+\noindent The conceptual core of the thesis, and the chapter the whole book has been arranging furniture for. The Gaussian mixture model is developed in full --- both of its log-likelihoods, EM executed with closed-form M-steps, and the three failure modes (collapse, label switching, local optima) traced to structural properties of the likelihood rather than recited as folklore. The variational Bayesian mixture is treated structurally: what priors buy (no singularities, automatic component pruning) and what algebra is deferred. The chapter then performs the translation that matters most here: GMM to mixture of experts --- same E-step, M-steps that are precisely Module 4's weighted problems, and a proof-backed identification of SGD-on-the-NLL with generalized EM. By the end, the corrected NEC's training loop is not a recipe but a theorem with an implementation.
+\end{abstract}
+
+\tableofcontents
+
+\subsection*{How this chapter was assembled (and what was cut)}
+
+This module inherits more finished work than any other, and the de-duplication ledger is correspondingly long. \emph{Already proven, cited not repeated:} EM's monotonicity (Foundations D, Ex.\ D.3(d)); EM as coordinate ascent on the ELBO (D, eq.\ D.5.4 and the capstone); the log-sum-exp trick (B, eq.\ B.6.10 --- the syllabus re-assigns its derivation here, discharged by citation, with the genuinely new part --- the log-domain mixture pipeline --- kept as Exercise~\ref{ex:lse}); the responsibility formula from Bayes (B.8.4, D \S D.8); mixtures generate fat tails (B, Ex.\ B.6). \emph{Assigned problems that duplicate finished work:} Bishop 10.1 \emph{is} Exercise D.3(a) verbatim --- folded, not re-assigned; ESL 8.1 and 8.2 are Gibbs' inequality (B, Ex.\ B.5) and the Gibbs-maximizer result (D, Ex.\ D.3(c)) in ESL's notation --- converted into the notation-bridge Exercise~\ref{ex:eslbridge}, which is the honest version of assigning them. \emph{Choices within assignments:} of Bishop 10.5/10.10/10.12 the syllabus asks for one; 10.5 is chosen --- it proves that variational inference with a point-mass over parameters \emph{is} EM, the unification theorem this book's architecture deserves --- with 10.12 (the full conjugate VB-GMM verification) flagged as optional for the dedicated. Cuts: Bishop \S9.1's $K$-means (kept as one paragraph: initialization device and hard-EM limit); Bishop \S10.2's conjugate algebra (Dirichlet, Normal--Wishart, digamma corrections --- the chapter presents the \emph{structure} and the two payoffs, defers the algebra to Cookbook \S8 plus Bishop's text, consistent with the conjugacy cut standing since Foundations B); Bishop \S10.3 (VB linear regression) and \S10.4+ (cut entirely); ESL \S8.5's Gibbs-sampling segue (one sentence).
+
+\subsection*{Notation}
+
+Data $\x_1, \dots, \x_N \in \R^p$ (for the unconditional mixture) or pairs $(\x_n, y_n)$ (for the mixture of experts). Latent labels $z_n \in \{1, \dots, K\}$, one-hot when convenient. Responsibilities $\resp_{nk} = p(z_n = k \mid \text{data}_n, \theta)$, component counts $N_k = \sum_n \resp_{nk}$. Mixture weights $\bpi$ on the simplex. All cross-references follow the ledger: (B.$\cdot$), (C.$\cdot$), (D.$\cdot$), (4.$\cdot$)--(7.$\cdot$).
+
+% =====================================================================
+\section{Latent-variable models and the Gaussian mixture}\label{sec:gmm}
+% =====================================================================
+
+A \emph{latent-variable model} explains observed data as the visible half of a joint distribution $p(x, z)$ whose hidden half $z$ encodes structure --- here, \emph{which regime generated this observation}. The Gaussian mixture model is the canonical instance:
+\begin{equation}
+p(\x) \;=\; \sum_{k=1}^{K} \pi_k\, \Normal(\x \mid \bmu_k, \bSigma_k),
+\qquad
+\bpi \in \Delta^{K-1},
+\label{eq:gmm}
+\end{equation}
+generatively: draw $z \sim \mathrm{Cat}(\bpi)$, then $\x \sim \Normal(\bmu_z, \bSigma_z)$ --- the sum rule marginalizing $z$ out, exactly the construction of (B.8.1) with the gate constant and the ``expert'' a density over $\x$ itself rather than over $y \mid \x$. Keep that dictionary in view from the start: \emph{the GMM is the MoE with the inputs deleted}; everything derived in this chapter transfers to the thesis model by reinstating input-dependence at marked spots (\S\ref{sec:moe}).
+
+Two structural facts before any fitting. \emph{Moments}: the mixture's mean and covariance are
+$\E[\x] = \sum_k \pi_k \bmu_k$ and
+$\Cov(\x) = \sum_k \pi_k\big(\bSigma_k + \bmu_k \bmu_k^\T\big) - \E[\x]\E[\x]^\T$
+(Bishop's 9.49--9.50; Exercise~\ref{ex:moments} derives them by the tower property and adds the fourth-moment punchline you already own from B, Ex.\ B.6: scale mixtures are leptokurtic --- the statistical argument \emph{for} regime structure in returns). \emph{Identifiability}: the likelihood is invariant under the $K!$ relabelings of components --- the same permutation symmetry that made neural losses non-convex (Module 6 \S6.1) --- so ``component 2'' has no meaning across runs, folds, or random seeds until you impose an ordering convention. This is not pedantry; it returns as a thesis-reporting requirement in \S\ref{sec:failures}.
+
+\begin{finbox}
+Why mixtures, for returns, in one paragraph you can give a committee: Foundations B \S B.7.3 proved that mixing Gaussians with unequal variances produces excess kurtosis --- the unconditional fat tails of returns are \emph{exactly} what conditionally-Gaussian regimes look like after marginalization. A GMM fit to returns is therefore not a curve-fitting convenience; it is the minimal model in which ``calm market, stressed market'' is a hypothesis with a likelihood. The thesis's MoE upgrades the hypothesis from \emph{states exist} to \emph{states are predictable from features} --- and this chapter builds the estimation theory for both.
+\end{finbox}
+
+% =====================================================================
+\section{Two log-likelihoods, one gap}\label{sec:twolik}
+% =====================================================================
+
+Everything about EM follows from comparing two objectives. The \emph{incomplete-data} log-likelihood --- the one you actually want to maximize --- is
+\begin{equation}
+\ell(\theta) = \sum_{n=1}^N \log p(\x_n \mid \theta)
+= \sum_{n=1}^N \log \sum_{k=1}^K \pi_k\, \Normal(\x_n \mid \bmu_k, \bSigma_k)
+= \sum_{n=1}^N \mathrm{LSE}_k\big( \log \pi_k + \log \Normal(\x_n \mid \bmu_k, \bSigma_k) \big),
+\label{eq:incomplete}
+\end{equation}
+a sum of log-sum-exps (B \S B.6.3 --- compute it in the log domain or watch it underflow; Exercise~\ref{ex:lse} quantifies exactly when). The log outside the sum couples all components: no closed-form maximizer exists, gradients exist but the objective is non-convex with the symmetries of \S\ref{sec:gmm}.
+
+The \emph{complete-data} log-likelihood --- the one you would maximize if the labels were visible --- is, with one-hot $z_{nk}$,
+\begin{equation}
+\log p(\bm X, \bm Z \mid \theta)
+= \sum_{n=1}^N \sum_{k=1}^K z_{nk}\, \big[ \log \pi_k + \log \Normal(\x_n \mid \bmu_k, \bSigma_k) \big],
+\label{eq:complete}
+\end{equation}
+and it is a \emph{pleasure}: the log sits inside, the objective separates by component, and maximization is Foundations B-grade statistics --- each Gaussian fitted to its own points, mixing weights equal to label fractions (Exercise~\ref{ex:complete}, Bishop 9.7). The entire difficulty of mixture estimation is the gap between \eqref{eq:incomplete} and \eqref{eq:complete}: the labels are missing. EM's resolution, prefabricated in Foundations D: \emph{replace the missing labels by their posterior expectations and iterate} --- maximize $\E_q[\log p(\bm X, \bm Z \mid \theta)]$, which keeps \eqref{eq:complete}'s separability while honestly averaging over label uncertainty, and choose $q$ to make the surrogate tight.
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[Syllabus, de-duplicated: the log-domain mixture pipeline]\label{ex:lse}
+\prioCore
+The LSE identity and max-shift stabilization are (B.6.10); cite, do not re-derive. The new, mixture-specific content:
+(a) Show that the \emph{naive} pipeline --- evaluate each $\Normal(\x \mid \bmu_k, \bSigma_k)$ as a number, multiply by $\pi_k$, sum, take log --- underflows in float64 whenever every component's squared Mahalanobis distance exceeds $\approx 2 \times 745 \approx 1490$ (a Mahalanobis radius near $39\sigma$) (use the float64 underflow threshold $\approx e^{-745}$ and the Gaussian log-density's form); convert that to a Mahalanobis radius and note how routinely a fat-tailed return panel (B \S B.7) exceeds it.
+(b) Write the correct pipeline: $a_{nk} = \log\pi_k + \log\Normal(\x_n \mid \bmu_k, \bSigma_k)$ computed directly in the log domain (no exponentials anywhere), $\ell_n = \mathrm{LSE}_k(a_{nk})$ via max-shift, $\resp_{nk} = \mathrm{softmax}_k(a_{nk})$ (Module 4's fused machinery). Verify the responsibilities are exact even when every $e^{a_{nk}}$ would underflow.
+(c) One sentence: which earlier chapter's ``library fused-op'' lesson is this the mixture version of?
+\end{exercise}
+
+
+% =====================================================================
+\section{EM for the Gaussian mixture, executed}\label{sec:em}
+% =====================================================================
+
+Foundations D supplied the theory whole: coordinate ascent on $\ELBO(q, \theta)$, E-step closing the KL gap, M-step raising the floor, likelihood monotone (D eq.\ D.5.4; monotonicity proven as Ex.\ D.3(d)). Here is its execution on \eqref{eq:gmm}.
+
+\emph{E-step.} The optimal $q$ is the exact posterior --- for a discrete label, a $K$-vector per sample, computable exactly (no variational approximation needed at this stage; D \S D.8 made the point): the \emph{responsibilities}
+\begin{equation}
+\resp_{nk}
+= \frac{\pi_k\, \Normal(\x_n \mid \bmu_k, \bSigma_k)}{\sum_{j} \pi_j\, \Normal(\x_n \mid \bmu_j, \bSigma_j)}
+= \mathrm{softmax}_k\big( \log \pi_k + \log \Normal(\x_n \mid \bmu_k, \bSigma_k) \big),
+\label{eq:estep}
+\end{equation}
+Bayes' rule as promised since (B.8.4), computed in the log domain via the softmax of log-joints (Module 4's machinery, Exercise~\ref{ex:lse}'s pipeline).
+
+\emph{M-step.} Maximize the expected complete-data log-likelihood $Q(\theta) = \sum_{n,k} \resp_{nk} [\log \pi_k + \log \Normal(\x_n \mid \bmu_k, \bSigma_k)]$ --- \eqref{eq:complete} with soft labels. The closed forms, whose from-scratch derivation is the syllabus's centerpiece Exercise~\ref{ex:mstep}:
+\begin{equation}
+\bmu_k = \frac{1}{N_k} \sum_{n} \resp_{nk}\, \x_n,
+\qquad
+\bSigma_k = \frac{1}{N_k} \sum_{n} \resp_{nk}\, (\x_n - \bmu_k)(\x_n - \bmu_k)^\T,
+\qquad
+\pi_k = \frac{N_k}{N},
+\label{eq:mstep}
+\end{equation}
+with $N_k = \sum_n \resp_{nk}$ the \emph{effective count} claimed by component $k$. Every line is an old friend wearing soft weights: the mean is a responsibility-weighted average --- optimal, not just natural, by the Bregman result (D, Prop.\ D.3.1); the covariance is the weighted MLE of (B \S B.4.2), Bessel caveat included in spirit; the weights are label fractions, derived under the simplex constraint by exactly the KKT machinery of Module 4 \S4.3; and the matrix calculus that produces $\bSigma_k$ runs on the $\partial \log|\cdot|$ identity planted in Foundations C \S C.6 for precisely this moment. Iterate \eqref{eq:estep}--\eqref{eq:mstep} to a fixed point: each sweep costs $O(NKp^2)$, the likelihood ascends monotonically, and convergence is to a stationary point --- about which the next section is the honesty.
+
+\begin{remark}[$K$-means, in passing]
+Freeze every $\bSigma_k = \epsilon \bm I$ and let $\epsilon \to 0$: responsibilities harden to nearest-centroid indicators and \eqref{eq:mstep} becomes the $K$-means update. $K$-means is hard-assignment EM on a degenerate GMM --- which is why it is the standard \emph{initializer} for EM (cheap, robust), and why its failure modes (sensitivity to scaling, spherical bias) are the degenerate cases of this chapter's.
+\end{remark}
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[Syllabus centerpiece: the M-step from scratch]\label{ex:mstep}
+\prioCore
+Maximize $Q(\theta) = \sum_{n,k} \resp_{nk}\big[\log \pi_k + \log\Normal(\x_n \mid \bmu_k, \bSigma_k)\big]$ with responsibilities frozen.
+(a) Means: set $\nabla_{\bmu_k} Q = 0$ (the quadratic-form gradient of Foundations A) and derive $\bmu_k = N_k^{-1}\sum_n \resp_{nk}\x_n$; confirm via D, Prop.\ D.3.1, that this weighted mean is the unique Bregman-optimal center, not merely a stationary point.
+(b) Covariances: derive the $\bSigma_k$ update of \eqref{eq:mstep}. \emph{(Route: parameterize by the precision $\bm\Lambda_k = \bSigma_k^{-1}$; use $\nabla_{\bm\Lambda} \log|\bm\Lambda| = \bm\Lambda^{-\T}$ --- the identity stated for this purpose in Foundations C \S C.6 --- and the linearity of the quadratic form in $\bm\Lambda$ via the trace trick (B.1.10's proof pattern); solve and invert.)}
+(c) Weights: maximize over $\bpi$ on the simplex with a Lagrange multiplier (KKT, Module 4 \S4.3) and obtain $\pi_k = N_k/N$; identify the multiplier's value and its shadow-price meaning.
+(d) Verify second-order/boundary sanity: why is the $\bSigma_k$ stationary point a maximizer for $N_k > p$, and what happens to it as $N_k \to 0$ (connect to \S\ref{sec:failures}, mode 1)?
+\end{exercise}
+
+
+% =====================================================================
+\section{How mixture estimation fails, structurally}\label{sec:failures}
+% =====================================================================
+
+Three failure modes, each traceable to a structural property of \eqref{eq:incomplete}; Exercise~\ref{ex:failures} works all three.
+
+\emph{1. Collapse: the unbounded likelihood.} Center one component on a single data point and shrink its variance: with $\bmu_k = \x_1$ and $\bSigma_k = \sigma^2 \bm I$, that component contributes density $\propto \sigma^{-p} \to \infty$ while every other point remains covered by the remaining components --- so $\sup_\theta \ell(\theta) = +\infty$ and \emph{the GMM has no maximum-likelihood estimator at all}. EM does not always find these singular spikes, but they are always there, adjacent to good solutions, and small-$N_k$ components drift toward them. The character of the failure is worth naming: it is the continuous density's fault (a density may exceed 1; B \S B.1.1), and discrete-emission mixtures are immune --- a Bernoulli mixture's likelihood is bounded above (Exercise~\ref{ex:bernoulli}(b) proves it, the instructive contrast). Remedies, in increasing principle: variance floors ($\bSigma_k \succeq \epsilon\bm I$ enforced); MAP-EM with a prior on $\bSigma_k$ (Module 4 \S4.5's move --- the M-step gains a shrinkage term); or the Bayesian treatment of \S\ref{sec:vb}, where the singularity vanishes outright.
+
+\emph{2. Label switching.} The $K!$ symmetry of \S\ref{sec:gmm} means the likelihood surface has $K!$ copies of every optimum. Harmless for prediction (the mixture density is invariant), poisonous for \emph{interpretation}: ``expert 2 is the stress regime'' is meaningless across restarts, folds, or bootstrap replicates unless components are matched --- by sorting on a statistic (e.g.\ component variance), or by greedy alignment to a reference run. Any thesis table that averages per-regime quantities across folds without an alignment rule is averaging apples with relabeled oranges.
+
+\emph{3. Local optima.} Non-convexity here is not the benign deep-learning kind: distinct local optima correspond to genuinely different \emph{clusterings}, often with materially different likelihoods. Practice: initialize from $K$-means (or several), run multiple seeds, keep the best held-out log-likelihood --- and log every restart in the Module 5 trial registry, because ``best of 20 initializations'' is a selection event like any other.
+
+\begin{necbox}
+Each failure mode has a gate-side twin that the corrected NEC inherits: collapse $\leftrightarrow$ a dead expert whose responsibilities (hence gradients, B.8.5) vanish --- the utilization diagnostics and load-balancing devices of (B \S B.6's box) are the MoE's variance floor; label switching $\leftrightarrow$ ``regime $k$'' must be aligned across walk-forward folds before any per-regime IC table is averaged (Module 5's protocol gains a clause here); local optima $\leftrightarrow$ initialization of the gate near-uniform with \emph{diverse} experts, never the reverse (a confident random gate at $t=0$ is a collapsed mixture before training starts --- \S\ref{sec:capstone} operationalizes).
+\end{necbox}
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[Syllabus: the three failure modes, constructed]\label{ex:failures}
+\prioCore
+(a) \emph{Collapse.} For a two-component GMM in one dimension with $\mu_1 = x_1$ and $\sigma_1 = \epsilon$, lower-bound the likelihood by a function diverging as $\epsilon \to 0$ (keep component 2 fixed and covering the rest), establishing $\sup_\theta \ell = \infty$; identify the divergence rate in $\epsilon$ and explain why EM iterations approach such spikes only when some $N_k \to$ small (connect to \eqref{eq:mstep}'s covariance with one point).
+(b) \emph{Label switching.} Show formally that the likelihood is invariant under any permutation $\tau \in S_K$ applied jointly to $(\pi_k, \bmu_k, \bSigma_k)$; conclude every optimum has $K!$ copies; then write the two-line protocol clause the thesis needs: an alignment rule for ``regime $k$'' across walk-forward folds, and what statistic you would sort on for volatility regimes.
+(c) \emph{Local optima.} Construct (describe precisely; no computation needed) a one-dimensional dataset and two initializations for $K = 2$ that converge to materially different fitted mixtures, and state the practice that Module 5's registry imposes on ``best of $m$ restarts.''
+\end{exercise}
+
+
+% =====================================================================
+\section{Variational Bayesian mixtures, structurally}\label{sec:vb}
+% =====================================================================
+
+Bishop \S10.2 promotes every GMM parameter to a random variable --- Dirichlet prior on $\bpi$, Gaussian--Wishart priors on $(\bmu_k, \bSigma_k^{-1})$ --- and approximates the joint posterior over labels \emph{and} parameters by the mean-field factorization of Foundations D \S D.6:
+\begin{equation}
+q(\bm Z, \bpi, \bmu, \bSigma) \;=\; q(\bm Z)\; q(\bpi, \bmu, \bSigma),
+\label{eq:vbfactor}
+\end{equation}
+cycled through the cavity update (D, eq.\ D.6.2). This chapter keeps the treatment \emph{structural} --- the factorization, the update cycle's shape, and the two payoffs --- and defers the conjugate algebra (digamma functions, Wishart expectations, Cookbook \S8's Gaussian moments) to Bishop's text, consistent with the conjugacy cut standing since Foundations B; Exercise~\ref{ex:vbpoint} (Bishop 10.5) proves the structural theorem that earns the section its place, and Bishop 10.12 is flagged, optional, for whoever wants the full verification.
+
+The update cycle's shape: $q(\bm Z)$'s update looks exactly like the E-step \eqref{eq:estep} except that $\log \pi_k$ and $\log \Normal$ are replaced by their \emph{expectations under the parameter posterior} --- EM with averaged parameters; $q(\bpi, \bmu, \bSigma)$'s update looks exactly like the M-step \eqref{eq:mstep} except that counts and moments update \emph{prior pseudo-counts} instead of overwriting them --- the M-step with Bayesian shock absorbers. Two payoffs justify the machinery:
+
+\emph{No singularities.} The Wishart prior puts zero mass on degenerate covariances; the offending $\sigma \to 0$ spike of \S\ref{sec:failures} is integrated away rather than patched --- the principled version of the variance floor, and the cleanest available answer to the GMM's ill-posed MLE.
+
+\emph{Automatic pruning.} Components the data do not need have their effective counts driven toward zero, their parameter posteriors collapse back to the prior, and their expected mixing weights fade --- the model \emph{turns off} surplus capacity (Bishop's figure 10.6 phenomenon; an Occam effect: the marginal likelihood charges rent for parameters that explain nothing). Start with generous $K$, let VB prune --- an alternative to the model-selection sweep of Exercise~\ref{ex:chooseK}, with the honest caveat that the pruning threshold is secretly set by the Dirichlet concentration: priors are knobs, and Module 5's registry wants them logged.
+
+One inheritance to keep in mind from D \S D.4: the factorization \eqref{eq:vbfactor} is a reverse-KL approximation, so the variational posterior \emph{understates} parameter uncertainty --- read VB error bars as lower bounds on your ignorance.
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[Bishop Ex.\ 10.5: variational inference with a point mass is EM]\label{ex:vbpoint}
+\prioCore
+Let the hidden variables comprise latents $\bm z$ and parameters $\bm\theta$, with variational family $q(\bm z, \bm\theta) = q_z(\bm z)\, q_\theta(\bm\theta)$ and $q_\theta(\bm\theta) = \delta(\bm\theta - \bm\theta_0)$, $\bm\theta_0$ a free parameter.
+(a) Substitute into the ELBO and show optimizing $q_z$ at fixed $\bm\theta_0$ is exactly the E-step (posterior at $\bm\theta_0$), while optimizing $\bm\theta_0$ at fixed $q_z$ maximizes $\E_{q_z}[\log p(\bm X, \bm z, \bm\theta_0)]$ --- the M-step with a log-prior term, i.e.\ MAP-EM (Module 4 \S4.5's move appearing automatically).
+(b) Handle the subtlety the exercise is secretly about: the differential entropy of $\delta$ is $-\infty$. Show it enters the ELBO as an additive constant in $\bm\theta_0$ (so coordinate updates are unaffected), and state what this says about comparing ELBO \emph{values} across models when point-mass factors are involved.
+(c) Conclude the unification in one sentence: EM, MAP-EM, and VB are one algorithm family indexed by how richly $q_\theta$ is parameterized --- and locate \S\ref{sec:vb}'s two payoffs as consequences of widening $q_\theta$ beyond a point.
+\end{exercise}
+
+
+% =====================================================================
+\section{From GMM to mixture of experts}\label{sec:moe}
+% =====================================================================
+
+The translation the whole chapter exists for. Reinstate the inputs:
+
+\begin{center}
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+& GMM (this chapter) & Mixture of experts (the thesis) \\
+\midrule
+Models & density of $\x$ & conditional density of $y$ given $\x$ \\
+Latent prior & $\pi_k$ constant & $\pi_k(\x) = \mathrm{softmax}_k(g(\x))$ --- the gate \\
+Component & $\Normal(\x \mid \bmu_k, \bSigma_k)$ & $\Normal(y \mid f_k(\x), \sigma_k^2)$ --- the expert \\
+Likelihood type & generative (joint in $\x$) & discriminative (conditional; Module 4 \S4.7) \\
+E-step & \eqref{eq:estep} & identical in form: (B.8.4) \\
+M-step, weights & $\pi_k = N_k/N$ & weighted softmax regression toward $\resp$ (M4, Ex.\ 4.5(b)) \\
+M-step, components & weighted Gaussian fits \eqref{eq:mstep} & weighted regressions (M4, Ex.\ 4.9; IRLS \S4.8) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Three remarks complete the translation; Exercise~\ref{ex:moeem} derives all of it. First, the E-step is \emph{unchanged}: responsibilities are Bayes' rule whether the prior over $z$ is constant or feature-conditioned --- the formula carried since (B.8.4) was already the general case. Second, the M-step's two halves are Module 4 problems \emph{verbatim}: the gate's update is cross-entropy toward soft labels (stationarity $\bpi(\x_n) = \bm\resp_n$ on average --- the $\pi - r$ gradient of (B.8.6) reaching zero), and a linear-Gaussian expert's update is exactly the weighted least squares of Bishop Ex.\ 3.3 --- the forward reference planted in Module 4 \S4.8.2 now lands. Third, with \emph{neural} gate and experts the M-steps have no closed forms; replacing each by a few gradient steps gives \emph{generalized EM} (any M-improvement preserves monotonicity), and taking that to its limit --- one simultaneous gradient step on everything --- recovers plain SGD on the mixture NLL, the equivalence proven in D \S D.8 (tight bound at the E-step optimum $\Rightarrow$ identical gradients). \emph{EM and backprop are not rival training procedures for the corrected NEC; they are two step-size policies on one objective.} What EM contributes irreplaceably is the \emph{vocabulary}: responsibilities, effective counts, collapse, pruning --- the diagnostic language in which gate behavior becomes legible.
+
+\emph{Forward-looking context, one paragraph as the topic list requests.} The same ELBO machinery with \emph{amortized} variational posteriors and reparameterized gradients (D \S D.7) is the variational autoencoder; with variational posteriors over network \emph{weights}, the Bayesian neural network. Neither is on the thesis's critical path; both become available, nearly free, if a stochastic gate or uncertainty-aware experts ever earn their complexity --- and Foundations E's Gumbel machinery (next) is the missing sampling piece for the discrete case.
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[Syllabus: EM for the mixture of experts, assembled]\label{ex:moeem}
+\prioCore
+The conditional mixture $p(y \mid \x) = \sum_k \pi_k(\x)\, \Normal(y \mid f_k(\x), \sigma_k^2)$, gate $\pi_k(\x) = \mathrm{softmax}_k(g_k(\x))$.
+(a) E-step: derive the responsibilities from Bayes' rule and verify they coincide with the variational optimum $q^\ast$ of the ELBO decomposition --- this is the syllabus's ``verify against $q^\ast$'' item; cite (B.8.4) and D, Ex.\ D.3(c), and write the two-line identification.
+(b) M-step, gate: show the gate's subproblem is $\max \sum_n \sum_k \resp_{nk} \log \pi_k(\x_n)$ --- weighted cross-entropy toward soft labels --- whose per-sample logit gradient is $\pi_k(\x_n) - \resp_{nk}$ (Module 4, Ex.\ 4.5(b)); conclude the M-step's stationarity condition and its reading (``the gate learns to predict the responsibilities'').
+(c) M-step, experts: for \emph{linear} experts $f_k(\x) = \x^\T\bm\beta_k$, show the subproblem is exactly Bishop Ex.\ 3.3's weighted least squares (Module 4, Ex.\ 4.9) with weights $\resp_{nk}/\sigma_k^2$, and write its closed form; derive also the $\sigma_k^2$ update (responsibility-weighted mean squared residual).
+(d) Monotonicity and the SGD identification: cite D, Ex.\ D.3(d) for monotone full EM; then show that replacing each M-step by one gradient step, and letting the E-step be implicit, yields exactly one SGD step on the mixture NLL --- use the tightness-at-$q^\ast$ identity of D \S D.8 to equate the gradients. State the practical conclusion for the corrected NEC's training loop in one sentence.
+\end{exercise}
+
+
+% =====================================================================
+\section{Capstone: training the corrected NEC, as a theorem with an implementation}\label{sec:capstone}
+% =====================================================================
+
+Assemble the chapter into the thesis's training procedure, each line load-bearing and cited.
+
+\emph{Objective.} Per-sample mixture NLL \eqref{eq:incomplete}'s conditional twin, computed as $-\mathrm{LSE}_k(\log \pi_k(\x) + \log \Normal(y \mid f_k(\x), \sigma_k^2))$ in the log domain with the (B.6.10) stabilization --- never as a log of a sum of densities (Exercise~\ref{ex:lse}'s float64 cliff).
+
+\emph{Training.} AdamW on the NLL (Foundations C), understood as generalized EM (\S\ref{sec:moe}): every gradient step implicitly recomputes responsibilities and nudges gate and experts toward their weighted M-step targets. Optionally, explicit EM epochs (freeze responsibilities, take several expert/gate steps) as a stabilization variant --- worth one ablation line in the thesis, not more.
+
+\emph{Initialization} (\S\ref{sec:failures}, mode 3, operationalized): gate logits near zero --- a near-uniform gate, entropy near $\log K$ (B \S B.6) --- so no expert starts dead; experts \emph{diversified} (different seeds; or pre-trained briefly on volatility-sorted data slices to break symmetry deliberately and interpretably); $\sigma_k$ warm-started frozen (Module 6 \S6.3's heteroskedastic caution).
+
+\emph{Monitoring} (the failure modes as dashboards): NLL (monotone only under full M-steps --- do not panic at SGD noise; C \S C.3); gate entropy per sample and per batch; expert utilization $N_k/N$ with alarms near zero (collapse twin); responsibility sharpness over training (healthy specialization sharpens gradually --- instant sharpness is collapse, permanent uniformity is a dead gate).
+
+\emph{Reporting} (\S\ref{sec:failures}, mode 2): align expert labels across folds by a declared statistic (e.g.\ ascending expert $\sigma_k$, or gate-correlation with VIX) \emph{before} any per-regime table; log restarts, $K$ values, and prior/floor settings in the Module 5 registry; if VB-style pruning is used to choose $K$, report the concentration parameter as the hyperparameter it is.
+
+\medskip
+\noindent\textbf{Checkpoint (from the syllabus).} Closed book: write the MoE likelihood and state its exact relation to the GMM (the dictionary of \S\ref{sec:moe}); state EM as coordinate ascent on the ELBO and prove monotonicity (or cite D, Ex.\ D.3(d), and reproduce it); derive the GMM M-step closed forms \eqref{eq:mstep} from scratch; apply the log-sum-exp trick to a mixture likelihood and say exactly what fails numerically without it; and articulate why the variational view matters for any Bayesian or stochastic-gate extension (priors kill singularities and prune components; reparameterization is the gradient path through sampling --- D \S D.7, Foundations E next). If all five are comfortable, the thesis's core estimator is yours from first principles.
+
+% =====================================================================
+\section{Exercises}\label{sec:exercises}
+% =====================================================================
+
+\noindent\textbf{Importance labels.} Each exercise carries a priority badge for the NEC/MoE thesis track, reflecting how load-bearing it is --- \emph{not} how hard it is. \prioCore mark the five the checkpoint demands closed-book: the log-domain mixture pipeline (\ref{ex:lse}), the M-step from scratch (\ref{ex:mstep}), the three failure modes with their protocol clauses (\ref{ex:failures}), the VB-contains-EM unification (\ref{ex:vbpoint}), and the MoE assembly that \emph{is} the corrected NEC's estimator (\ref{ex:moeem}). \prioWorth: mixture moments (\ref{ex:moments}), the ESL notation bridge (\ref{ex:eslbridge}), and choosing $K$ (\ref{ex:chooseK}) --- the last feeding a pre-registered thesis decision. \prioLow: the complete-data baseline (\ref{ex:complete}, contained in \ref{ex:mstep} with hard labels) and the Bernoulli boundedness contrast (\ref{ex:bernoulli}).
+
+Questions only, as established. \textbf{Core exercises (\prioCore) sit inline in the chapter body as checkpoint exercises, at the end of the section they test}; this section collects the supplementary exercises only. De-dup ledger for this set: Bishop 10.1 $\equiv$ Exercise D.3(a), not re-assigned; the syllabus's EM-monotonicity and coordinate-ascent exercises are D.3(d) and D's eq.\ (D.5.4), cited inside Exercise~\ref{ex:moeem} rather than repeated; the LSE-trick derivation is (B.6.10), with only its mixture-specific consequences assigned; ESL 8.1/8.2 appear as the notation bridge they truly are.
+
+\subsection*{On mixtures and their likelihoods (Sections~\ref{sec:gmm}--\ref{sec:twolik})}
+
+\begin{exercise}[Bishop Ex.\ 9.12, extended]\label{ex:moments}
+\prioWorth
+For the mixture $p(\x) = \sum_k \pi_k\, p(\x \mid k)$ with component means $\bmu_k$ and covariances $\bSigma_k$:
+(a) derive $\E[\x] = \sum_k \pi_k \bmu_k$ and $\Cov(\x) = \sum_k \pi_k\big(\bSigma_k + \bmu_k\bmu_k^\T\big) - \E[\x]\E[\x]^\T$ via the tower property and the law of total variance (B, Lemma B.2.2 and Prop.\ B.2.3);
+(b) specialize to centered Gaussian components with equal means: recover exactly the setup of Foundations B Exercise B.6, and restate its conclusion (scale mixtures are leptokurtic) as a property of \eqref{eq:gmm};
+(c) one sentence: why does (b) make the GMM the minimal generative account of fat-tailed returns rather than an arbitrary flexible family?
+\end{exercise}
+
+\begin{exercise}[Bishop Ex.\ 9.7: the complete-data baseline]\label{ex:complete}
+\prioLow
+Maximize the complete-data log-likelihood \eqref{eq:complete} (labels $z_{nk}$ \emph{known}, one-hot) over $(\bpi, \bmu, \bSigma)$. Show the problem separates: each component's $(\bmu_k, \bSigma_k)$ is the plain Gaussian MLE (B, Ex.\ B.2) over \emph{its own} points, and $\pi_k$ is the fraction of points labeled $k$ (Lagrange multiplier on the simplex --- Module 4 \S4.3). Conclude in one sentence why \eqref{eq:mstep} is exactly this answer with hard labels softened to responsibilities.
+\end{exercise}
+
+\subsection*{On EM (Section~\ref{sec:em})}
+
+\begin{exercise}[Bishop Ex.\ 9.15, paired with the boundedness contrast]\label{ex:bernoulli}
+\prioLow
+A mixture of multivariate Bernoullis: components $p(\x \mid \bmu_k) = \prod_{i=1}^{p} \mu_{ki}^{x_i}(1 - \mu_{ki})^{1 - x_i}$ on $\x \in \{0,1\}^p$.
+(a) Maximize the expected complete-data log-likelihood over $\bmu_k$ and derive the M-step $\bmu_k = N_k^{-1}\sum_n \resp_{nk}\x_n$ --- the same weighted-mean template as \eqref{eq:mstep}, emission family swapped.
+(b) Prove the incomplete-data log-likelihood of this mixture is \emph{bounded above} (each factor is a probability $\le 1$), so no collapse singularity exists --- and state precisely which property of continuous densities reintroduces the pathology for the GMM (\S\ref{sec:failures}, mode 1).
+(c) One sentence: what does this contrast imply about mixtures over \emph{discretized} return buckets as a robustness variant?
+\end{exercise}
+
+\subsection*{Bridges and unifications (Sections~\ref{sec:vb}--\ref{sec:moe})}
+
+\begin{exercise}[ESL Ex.\ 8.1--8.2, as the notation bridge they are]\label{ex:eslbridge}
+\prioWorth
+ESL \S8.5 writes EM via $R(\theta', \theta) = \E\big[\log p(\bm X, \bm Z \mid \theta') \,\big|\, \bm X, \theta\big]$ and a maximization over distributions $\tilde P(\bm Z)$.
+(a) Build the dictionary: identify ESL's $\tilde P$, $R$, and its lower-bound function with this book's $q$, $\E_q[\log p(\bm X, \bm Z \mid \theta)]$, and $\ELBO(q, \theta)$, term by term.
+(b) ESL 8.1 asks: show $\E_q[\log r(Y)/q(Y)]$ is maximized over densities $r$ at $r = q$. Recognize this as Gibbs' inequality (B, Theorem B.6.1 / Ex.\ B.5) and give the one-line proof in ESL's notation.
+(c) ESL 8.2 asks: show the optimal $\tilde P(\bm Z)$ is the conditional $\Pr(\bm Z \mid \bm X, \theta')$. Recognize this as the Gibbs-maximizer result you proved as D, Ex.\ D.3(c), and translate that proof into ESL's notation.
+(d) One sentence: why is owning this dictionary worth an exercise (what goes wrong when you read ESL \S8.5 and Bishop Ch.\ 9 side by side without it)?
+\end{exercise}
+
+\begin{exercise}[Supplementary: choosing $K$]\label{ex:chooseK}
+\prioWorth
+(a) Count the free parameters of a $p$-dimensional, $K$-component GMM with full covariances: $d(K) = (K - 1) + Kp + Kp(p+1)/2$ (justify each term; the symmetric-matrix count is Bishop Ex.\ 2.21's formula, derivable in one line).
+(b) Write the AIC and BIC criteria (Module 5 \S5.2) for the GMM as functions of the maximized log-likelihood and $d(K)$, and explain the one structural caveat: the regularity conditions behind these criteria are violated at mixture boundaries (a component with $\pi_k = 0$), so treat the comparison as heuristic ranking, not calibrated testing.
+(c) Describe the held-out alternative --- per-observation out-of-sample NLL, read as compression (D \S D.2) --- and why Module 5's purging discipline applies to this likelihood comparison exactly as to any backtest.
+(d) One paragraph: compare all three routes (information criteria, held-out NLL, VB pruning) for the thesis's choice of expert count $K \in \{2, 3, 5\}$, and state which combination you would pre-register and why.
+\end{exercise}
+
+% =====================================================================
+\section*{Source map and what comes next}
+\addcontentsline{toc}{section}{Source map and what comes next}
+% =====================================================================
+
+\begin{center}
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+Section & Primary source(s) & Feeds directly into \\
+\midrule
+\ref{sec:gmm} GMM, moments, identifiability & Bishop \S9.2 & regime hypothesis; reporting rules \\
+\ref{sec:twolik} Two likelihoods & Bishop \S9.2--9.3; ESL \S8.5 & why EM exists \\
+\ref{sec:em} EM executed & Bishop \S9.2--9.4 + D & the estimator itself \\
+\ref{sec:failures} Failure modes & Bishop \S9.2 + own & gate diagnostics; thesis protocol clauses \\
+\ref{sec:vb} VB mixtures, structurally & Bishop \S10.1--10.2 & $K$ selection; singularity cure \\
+\ref{sec:moe} GMM $\to$ MoE & Bishop \S14.5 spirit + B \S B.8 & the corrected NEC's training \\
+\ref{sec:capstone} Training capstone & synthesis & thesis experiments, Module 10 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\medskip
+Two modules remain in Part IV. Module 9 adds \emph{time} to the latent labels --- Markov persistence, the forward--backward recursions, Baum--Welch (which you will recognize instantly as EM with responsibilities computed by dynamic programming), and the Hamilton filter that is the thesis's classical baseline; its centerpiece comparison, Markov gating versus feature-conditioned gating, was pre-framed in Module 4 \S4.7 and D \S D.8. Foundations E then supplies the Gumbel machinery for Module 10's stochastic-routing theory. The mixture mathematics is now complete; what follows is its dynamics and its engineering.
+
+\end{document}

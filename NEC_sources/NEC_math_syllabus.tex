@@ -1,0 +1,409 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{amsmath}
+\usepackage{amssymb}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue,
+  urlcolor=blue
+}
+
+\setlist[itemize]{leftmargin=1.4em}
+\setlist[enumerate]{leftmargin=1.6em}
+\emergencystretch=3em
+\renewcommand{\arraystretch}{1.15}
+
+\title{\textbf{NEC Math Companion Syllabus}\\
+Mathematical Foundations for the NEC / MoE Thesis}
+\author{Companion to \texttt{NEC\_thesis\_syllabus.md}}
+\date{Created June 2026}
+
+\begin{document}
+\maketitle
+
+\begin{center}
+\begin{tabular}{ll}
+\textbf{Purpose} & Deepen only the math that supports the NEC thesis \\
+\textbf{Orientation} & Connect new ML math to prior physics/math background \\
+\textbf{Main split} & Proposal-level math first; thesis-depth math after proposal \\
+\end{tabular}
+\end{center}
+
+\tableofcontents
+\newpage
+
+\section{Verdict and Scope}
+
+You should go deeper in math, but not equally everywhere. The NEC thesis needs a clear mathematical spine:
+
+\begin{enumerate}
+  \item Mixture-model probability.
+  \item Optimization and training dynamics.
+  \item Load balancing and expert collapse.
+  \item HMM / Markov-switching math.
+  \item Financial validation statistics.
+\end{enumerate}
+
+Information theory and ensemble bias-variance are useful supporting material. They should appear if they help explain gates, entropy, regularization, and why multiple experts might help. They should not become the main thesis.
+
+\begin{quote}
+Before proposal: understand and implement the math. After proposal: deepen derivations for the thesis and defense.
+\end{quote}
+
+\section{Connection to the Current Syllabus}
+
+\begin{longtable}{>{\raggedright\arraybackslash}p{0.28\textwidth} >{\raggedright\arraybackslash}p{0.28\textwidth} >{\raggedright\arraybackslash}p{0.34\textwidth}}
+\textbf{Current syllabus module} & \textbf{Math topic} & \textbf{Thesis use} \\
+\hline
+Module 2: Linear algebra & Matrix calculus, projections, SVD & Regression, PCA, gradients, softmax gate \\
+Module 3: Probability/statistics & Conditional probability, likelihood, entropy & MoE probability, losses, gate diagnostics \\
+Module 4: Linear/logistic models & Softmax, convex losses, regularization & NEC classifier/gate math \\
+Module 5: Validation & Sampling error, purging, multiple testing & Defend empirical claims \\
+Module 6: Neural networks & Backprop, optimization & Train corrected NEC \\
+Module 7: Sequence models & Recurrences, hidden states & LSTM gate encoder \\
+Module 8: Mixture models & Latent variables, EM & Mathematical heart of MoE \\
+Module 9: HMMs/regimes & Dynamic programming, Markov chains & Hamilton baseline \\
+Module 10: MoE theory & Routing, load balancing & Corrected NEC design \\
+Module 11: Empirical asset pricing & Factor math, residual returns & Finance interpretation \\
+\end{longtable}
+
+\section{Bridge From Previous Math}
+
+You are not starting from zero. Several pieces of your physics/math background transfer directly:
+
+\begin{itemize}
+  \item Linear algebra / tensors -> neural network layers, PCA, covariance matrices, embeddings, matrix calculus.
+  \item Calculus and variational principles -> optimization, regularized objectives, Lagrangian penalties, gradient descent.
+  \item ODEs / dynamical systems -> state evolution intuition, though HMMs are stochastic state models rather than deterministic systems.
+  \item Sturm-Liouville / spectral thinking -> useful for covariance and PCA intuition, but not the center of NEC.
+  \item Green's functions / propagators -> useful analogy for forward recursions, but HMM forward-backward is discrete probabilistic recursion.
+  \item Quantum mechanics / statistical mechanics -> useful analogy for softmax, partition functions, entropy, and variational free energy.
+  \item Probability -> direct foundation for latent-variable models, mixture likelihoods, and regime inference.
+\end{itemize}
+
+The new math is less physics-flavored and more statistical ML-flavored: conditional likelihoods, latent variables, gates, EM, regularization, and financial validation.
+
+\section{Depth Map}
+
+\small
+\begin{longtable}{>{\raggedright\arraybackslash}p{0.22\textwidth} >{\raggedright\arraybackslash}p{0.24\textwidth} >{\raggedright\arraybackslash}p{0.29\textwidth} >{\raggedright\arraybackslash}p{0.11\textwidth}}
+\textbf{Topic} & \textbf{Pre-proposal depth} & \textbf{Thesis-depth after proposal} & \textbf{Priority} \\
+\hline
+Mixture-model probability & Derive MoE equation and implement soft MoE & Likelihood derivation, EM comparison, log-sum-exp, responsibilities & Highest \\
+Optimization & Backprop, Adam, regularization, gradient flow through gates & Nonconvex training, collapse dynamics, penalty methods & Highest \\
+Load balancing & Know formula and implement it & Derive auxiliary loss, analyze utilization/entropy tradeoff & Highest \\
+HMM / dynamic programming & Implement forward algorithm and understand Hamilton filter & Forward-backward, Viterbi, Baum-Welch, Markov-switching regression & High \\
+Financial validation statistics & Implement purging, rank-IC, backtest costs & Multiple testing, deflated Sharpe, uncertainty of IC & High \\
+Information theory & Entropy, KL, cross-entropy & Gate entropy, mutual information diagnostics if useful & Medium \\
+Bias-variance / ensembles & ESL-level bias-variance & Optional expert-ensemble discussion & Low-medium \\
+Stochastic calculus & Skip & Skip unless supervisor requires it & Low \\
+Measure theory & Skip & Skip & Low \\
+\end{longtable}
+\normalsize
+
+\section{Pillar 1: Linear Algebra and Matrix Calculus}
+
+\textbf{Connected current modules:} Module 2, Module 4, Module 6.
+
+\textbf{Why it matters.} MLP experts, LSTM gates, softmax gates, ridge/logistic baselines, PCA, and covariance diagnostics are all linear algebra plus nonlinearities.
+
+\textbf{Previous-knowledge bridge.} Inner products, basis changes, eigenvectors, and quadratic forms already show up in physics. Here the same objects become regression, covariance, and gradient machinery.
+
+\textbf{Readings by section number.}
+\begin{itemize}
+  \item Strang, \emph{Linear Algebra and Its Applications}: Sec 3.2-3.4, 5.1-5.3, 6.1-6.3.
+  \item Matrix Cookbook: Sec 2.1, 2.4, 2.5, 8.1, 8.2.
+  \item ESL: Ch 3.2-3.4.
+\end{itemize}
+
+\textbf{Focused exercise set.}
+\begin{itemize}
+  \item Strang Sec 3.3: Exercises 1, 3, and 7.
+  \item Strang Sec 6.3: Exercises 1 and 3.
+  \item ESL Ch 3: Exercises 3.4 and 3.6.
+  \item Applied: derive and implement ridge regression from scratch.
+  \item Applied: derive the softmax Jacobian and verify it numerically.
+\end{itemize}
+
+\textbf{Thesis deliverable.} You should be able to write
+\[
+\pi(x) = \mathrm{softmax}(Wh(x)+b)
+\]
+and explain how gradients flow from the prediction loss through \(\pi(x)\) into the gate parameters.
+
+\section{Pillar 2: Mixture-Model Probability}
+
+\textbf{Connected current modules:} Module 3, Module 8, Module 10.
+
+\textbf{Why it matters.} This is the mathematical heart of the thesis. A proper MoE is a conditional mixture model:
+\[
+p(y \mid x) = \sum_k p(z=k \mid x)p(y \mid x,z=k).
+\]
+
+\textbf{Previous-knowledge bridge.} This extends ordinary probability and Bayes rule. The physics analogy is summing over latent states: the final prediction marginalizes over hidden expert assignments.
+
+\textbf{Readings by section number.}
+\begin{itemize}
+  \item Bishop Ch 2.1-2.3.
+  \item Bishop Ch 9.1-9.4.
+  \item ESL Ch 8.5.
+\end{itemize}
+
+\textbf{Focused exercise set.}
+\begin{itemize}
+  \item Bishop Ch 2: Exercise 2.20.
+  \item Bishop Ch 9: Exercises 9.7, 9.12, and 9.15.
+  \item ESL Ch 8: Exercise 8.1 or 8.2.
+  \item Applied: implement a 2-component GMM and compare with sklearn.
+  \item Applied: implement a 3-expert soft MoE on synthetic regime data.
+\end{itemize}
+
+\textbf{Thesis deliverable.} You should be able to derive
+\[
+\mathcal{L}(\theta) =
+-\sum_i \log \sum_k \pi_k(x_i;\theta)p(y_i \mid x_i,z_i=k;\theta)
+\]
+and explain EM, gradient descent, hard routing, and soft routing.
+
+\section{Pillar 3: Information Theory for Gates}
+
+\textbf{Connected current modules:} Module 3, Module 10.
+
+\textbf{Why it matters.} You need enough information theory to talk about gate entropy, cross-entropy loss, KL divergence, expert collapse, and whether the gate uses all experts.
+
+\textbf{Previous-knowledge bridge.} Entropy connects naturally to statistical mechanics. Softmax can be read as a Boltzmann-like distribution over experts.
+
+\textbf{Readings by section number.}
+\begin{itemize}
+  \item Bishop Ch 1.6.
+  \item Goodfellow Ch 3.13.
+  \item Shazeer et al. (2017), Sec 4.
+\end{itemize}
+
+\textbf{Focused exercise set.}
+\begin{itemize}
+  \item Bishop Ch 1: Exercises 1.10 and 1.11.
+  \item Applied: compute entropy of MoE gate probabilities over a batch.
+  \item Applied: plot gate entropy over training and identify collapse.
+  \item Applied: add an entropy penalty and compare it with Shazeer load balancing.
+\end{itemize}
+
+\textbf{Thesis deliverable.} You should be able to report
+\[
+H(\pi(x)) = -\sum_k \pi_k(x)\log \pi_k(x)
+\]
+and interpret low entropy, high entropy, and healthy expert specialization.
+
+\section{Pillar 4: Optimization and Training Dynamics}
+
+\textbf{Connected current modules:} Module 4, Module 6, Module 10.
+
+\textbf{Why it matters.} MoE success often depends less on architectural elegance and more on training dynamics. Gates can collapse; experts can fail to specialize; hard routing can block gradient flow.
+
+\textbf{Previous-knowledge bridge.} A training objective is an energy functional; regularization and load balancing are penalty terms; optimization searches for parameters that reduce the objective.
+
+\textbf{Readings by section number.}
+\begin{itemize}
+  \item Prince Ch 6.1-6.5 and Ch 7.1-7.5.
+  \item Goodfellow Ch 8.1-8.5.
+  \item Goodfellow Ch 7.1-7.12.
+\end{itemize}
+
+\textbf{Focused exercise set.}
+\begin{itemize}
+  \item Prince Ch 7: Problems 7.1 and 7.2.
+  \item Goodfellow Ch 6: Exercises 6.1 and 6.2.
+  \item Applied: derive backprop for a 2-layer MLP and verify with \texttt{torch.autograd}.
+  \item Applied: train the same MoE with and without load balancing and compare expert utilization.
+\end{itemize}
+
+\textbf{Thesis deliverable.} Explain why hard argmax routing is problematic for gradient flow, why soft routing trains end-to-end, why MoE loss is nonconvex, and why auxiliary losses are penalty methods.
+
+\section{Pillar 5: Load Balancing and Expert Collapse}
+
+\textbf{Connected current modules:} Module 10, Thesis Research Design.
+
+\textbf{Why it matters.} Without balancing, the gate can route most samples to one expert. Then the model becomes a single predictor with extra unused parts.
+
+\textbf{Previous-knowledge bridge.} This is a constrained optimization idea: low prediction loss plus a non-degenerate allocation of samples across experts. The auxiliary loss acts like a Lagrange-style penalty.
+
+\textbf{Readings by section number.}
+\begin{itemize}
+  \item Shazeer et al. (2017), Sec 4.
+  \item Fedus, Zoph, Shazeer (2022), Sec 2.2-2.3.
+  \item Goodfellow Ch 7.1-7.2.
+\end{itemize}
+
+\textbf{Focused exercise set.}
+\begin{itemize}
+  \item Paper exercise: reproduce Shazeer's auxiliary load-balancing loss from Sec 4.
+  \item Paper exercise: explain why expert utilization and average gate probability both matter.
+  \item Applied: implement the load-balancing term.
+  \item Applied: run no balancing, weak balancing, and strong balancing experiments.
+\end{itemize}
+
+\textbf{Thesis deliverable.} Include a table varying the balancing coefficient and reporting rank-IC, expert entropy, expert utilization, and turnover.
+
+\section{Pillar 6: Dynamic Programming, HMMs, and Hamilton}
+
+\textbf{Connected current modules:} Module 9, Module 11.
+
+\textbf{Why it matters.} The HMM/Hamilton baseline is the classical finance comparison. You need enough dynamic programming to understand latent regime inference.
+
+\textbf{Previous-knowledge bridge.} Think of this as a discrete-time state evolution problem. Unlike deterministic dynamical systems, the state is hidden and probabilistic. The forward algorithm propagates a probability vector through time.
+
+\textbf{Readings by section number.}
+\begin{itemize}
+  \item Bishop Ch 13.1-13.3.
+  \item Tsay Ch 4.1-4.6.
+  \item Hamilton (1989), Sec 1-4.
+\end{itemize}
+
+\textbf{Focused exercise set.}
+\begin{itemize}
+  \item Bishop Ch 13: Exercises 13.1, 13.3, and 13.5.
+  \item Tsay Ch 4: two end-of-chapter exercises tied to Markov switching or volatility regimes.
+  \item Applied: implement the HMM forward algorithm.
+  \item Applied: fit a two-state model to SPY returns and compare states with realized volatility.
+\end{itemize}
+
+\textbf{Thesis deliverable.} Explain Hamilton filtering \(p(s_t \mid y_1,\ldots,y_t)\) and contrast it with MoE gating \(p(z=k \mid x_t)\). The key distinction is temporal Markov persistence versus feature-conditioned routing.
+
+\section{Pillar 7: Financial Validation Statistics}
+
+\textbf{Connected current modules:} Module 5, Module 11, Module 12.
+
+\textbf{Why it matters.} A complicated MoE is not convincing if the validation leaks information.
+
+\textbf{Previous-knowledge bridge.} This is applied statistics: sampling error, dependence, multiple testing, and estimating uncertainty under non-i.i.d. data.
+
+\textbf{Readings by section number.}
+\begin{itemize}
+  \item ESL Ch 7.1-7.12.
+  \item Lopez de Prado AFML Ch 7.1-7.6.
+  \item Bailey and Lopez de Prado (2014), Sec 1-4.
+\end{itemize}
+
+\textbf{Focused exercise set.}
+\begin{itemize}
+  \item ESL Ch 7: Exercises 7.1, 7.2, and 7.10.
+  \item Applied: implement purging and embargoing for a forward-return label.
+  \item Applied: compute daily rank-IC and IC information ratio.
+  \item Applied: simulate many random strategies and show why the best Sharpe is biased upward.
+\end{itemize}
+
+\textbf{Thesis deliverable.} Justify chronological splits, purging and embargoing, rank-IC rather than only MSE, transaction costs, and multiple-testing caution.
+
+\section{Optional Math: Bias-Variance for Experts and Ensembles}
+
+\textbf{Verdict.} Learn standard ESL bias-variance before the proposal. Save non-independent ensemble bias-variance for after the proposal, and only include it if it helps the thesis discussion.
+
+\textbf{Readings by section number.}
+\begin{itemize}
+  \item ESL Ch 2.9.
+  \item ESL Ch 8.7 if you want ensemble context.
+\end{itemize}
+
+\textbf{Focused exercise set.}
+\begin{itemize}
+  \item ESL Ch 2: Exercise 2.9 or one nearby bias-variance exercise from your edition.
+  \item Applied: train several experts with different seeds and measure prediction correlation.
+  \item Applied: compare an average ensemble to a gated MoE.
+\end{itemize}
+
+\textbf{Thesis deliverable.} Use this to support a short discussion: MoE is not just an ensemble; it is a conditional ensemble whose weights depend on \(x\).
+
+\section{Before-Proposal Math Plan}
+
+\subsection{Block A: NEC Probability and Gate Math}
+
+ESL Ch 2.1-2.9; Bishop Ch 2.1-2.3; Bishop Ch 9.1-9.4; ESL Ch 8.5. Implement GMM and soft MoE on synthetic data.
+
+\subsection{Block B: Optimization and Deep Learning}
+
+Prince Ch 6.1-6.5 and 7.1-7.5; Goodfellow Ch 8.1-8.5. Derive 2-layer backprop, implement a PyTorch MLP, and verify gradients.
+
+\subsection{Block C: HMM / Hamilton Baseline}
+
+Bishop Ch 13.1-13.3; Tsay Ch 4.6; Hamilton (1989), Sec 1-4. Implement the HMM forward algorithm and fit a two-state volatility model to SPY.
+
+\subsection{Block D: Financial Validation}
+
+ESL Ch 7.1-7.12; AFML Ch 7.1-7.6. Implement purged walk-forward splitting, rank-IC, and a decile backtest.
+
+\subsection{Proposal-Level Math Deliverables}
+
+Before proposal, be able to write and defend:
+
+\begin{enumerate}
+  \item MoE conditional mixture equation.
+  \item Original NEC hard-routing defect.
+  \item Corrected soft-routing equation.
+  \item Load-balancing loss at a high level.
+  \item HMM/Hamilton baseline at a high level.
+  \item Walk-forward validation and purging logic.
+\end{enumerate}
+
+\section{After-Proposal Math Plan}
+
+This is where the deeper theory belongs.
+
+\textbf{Deepen mixture-model theory:} responsibilities, EM versus gradient descent, Gaussian mixture likelihood, mixture density network connection, identifiability, and label switching.
+
+\textbf{Deepen optimization and load balancing:} expert collapse dynamics, gate entropy, Shazeer versus Switch load balancing, penalty-method interpretation, and balancing coefficient sensitivity.
+
+\textbf{Deepen HMM and regime-switching:} forward-backward smoothing, Viterbi path, Baum-Welch updates, Markov-switching regression, regime persistence, and transition matrix interpretation.
+
+\textbf{Deepen financial statistics:} deflated Sharpe, multiple testing, confidence intervals for IC, robustness across market regimes, and transaction-cost sensitivity.
+
+\subsection{Thesis-Level Math Deliverables}
+
+By January 2027, the thesis should include:
+
+\begin{enumerate}
+  \item A formal MoE model section.
+  \item A short EM/HMM comparison section.
+  \item A corrected NEC architecture section.
+  \item A load-balancing and gate-diagnostics section.
+  \item A validation/statistical testing section.
+\end{enumerate}
+
+\section{What Not To Overlearn}
+
+Do not spend major time on these unless your supervisor specifically pushes you there:
+
+\begin{itemize}
+  \item stochastic calculus,
+  \item measure-theoretic probability,
+  \item PDE theory,
+  \item advanced random matrix theory,
+  \item optimal transport,
+  \item PAC-Bayes,
+  \item deep information theory.
+\end{itemize}
+
+\section{Final Math Thesis Spine}
+
+The thesis math can be organized as:
+
+\begin{enumerate}
+  \item Conditional mixture probability: \(p(y \mid x)=\sum_k p(z=k \mid x)p(y \mid x,z=k)\).
+  \item NEC defect: three-class gate -> binary hard route.
+  \item Corrected MoE: \(\pi_k(x)=\mathrm{softmax}(g_k(x))\), \(\hat{y}=\sum_k \pi_k(x)f_k(x)\).
+  \item Training objective: prediction loss plus \(\alpha\) times load-balancing loss.
+  \item Classical baseline: HMM / Hamilton filter with Markov state persistence.
+  \item Financial evaluation: walk-forward validation, purging, rank-IC, transaction-cost backtest.
+\end{enumerate}
+
+If you can explain and implement those six pieces, the math foundation is strong enough for the proposal. The deeper derivations can be added during the thesis phase.
+
+\end{document}

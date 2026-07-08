@@ -1,0 +1,10 @@
+\contentsline {section}{\numberline {7.1}The encoder's job: from a window of history to one vector}{2}{section.1}%
+\contentsline {section}{\numberline {7.2}Backpropagation through time}{3}{section.2}%
+\contentsline {section}{\numberline {7.3}The vanishing/exploding-gradient theorem}{4}{section.3}%
+\contentsline {section}{\numberline {7.4}Gates: engineered gradient highways}{5}{section.4}%
+\contentsline {subsection}{\numberline {7.4.1}GRU}{5}{subsection.4.1}%
+\contentsline {subsection}{\numberline {7.4.2}LSTM}{6}{subsection.4.2}%
+\contentsline {section}{\numberline {7.5}Hidden states, and why financial sequence models overfit}{7}{section.5}%
+\contentsline {section}{\numberline {7.6}Capstone: reading the NEC code, line by line}{8}{section.6}%
+\contentsline {section}{\numberline {7.7}Exercises}{9}{section.7}%
+\contentsline {section}{Source map and what comes next}{11}{section*.11}%

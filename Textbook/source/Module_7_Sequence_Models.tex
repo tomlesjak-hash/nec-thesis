@@ -1,0 +1,401 @@
+% =====================================================================
+%  Foundations for a Quant Research Pipeline
+%  Chapter: Module 7 — Sequence Models for NEC Gating
+%  Companion textbook to NEC_thesis_syllabus.md
+%  Sources synthesized: Goodfellow Ch 10; Olah, "Understanding LSTM
+%  Networks". (Prince Ch 12 was assigned but covers transformers — see preface.)
+% =====================================================================
+\documentclass[11pt]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{mathpazo}
+\usepackage{microtype}
+\usepackage[margin=1.05in]{geometry}
+\usepackage{amsmath,amssymb,amsthm,mathtools,bm}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{tcolorbox}
+\tcbuselibrary{breakable}
+\usepackage{booktabs}
+\usepackage[colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,urlcolor=blue!50!black]{hyperref}
+
+\linespread{1.05}
+\setlength{\parskip}{0.35em}
+
+% ---------- colors ----------
+\definecolor{necblue}{RGB}{20,45,90}
+\definecolor{finmaroon}{RGB}{110,30,30}
+\definecolor{boxbg}{RGB}{245,247,250}
+\definecolor{finbg}{RGB}{250,246,243}
+
+% ---------- module-7 numbering ----------
+\renewcommand{\thesection}{7.\arabic{section}}
+\numberwithin{equation}{section}
+
+% ---------- theorem environments ----------
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{corollary}[theorem]{Corollary}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{example}[theorem]{Example}
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+
+\newcounter{exercise}
+\renewcommand{\theexercise}{7.\arabic{exercise}}
+\newenvironment{exercise}[1][]{\refstepcounter{exercise}\par\medskip
+  \noindent\textbf{Exercise \theexercise}\if\relax\detokenize{#1}\relax\else\ \textnormal{[#1]}\fi\textbf{.}\ \itshape}{\par\medskip}
+% ---------- exercise importance badges (priority for the NEC/MoE thesis track) ----------
+\definecolor{priogray}{RGB}{120,120,120}
+\newcommand{\prioCore}{{\normalfont\small\textbf{\textcolor{necblue}{[\,\ensuremath{\bigstar\bigstar\bigstar}\ Core\,]}}}\hspace{0.5em}}
+\newcommand{\prioWorth}{{\normalfont\small\textbf{\textcolor{finmaroon}{[\,\ensuremath{\bigstar\bigstar}\ Worth it\,]}}}\hspace{0.5em}}
+\newcommand{\prioLow}{{\normalfont\small\textcolor{priogray}{[\,\ensuremath{\bigstar}\ Low priority\,]}}\hspace{0.5em}}
+\newcommand{\prioOpt}{{\normalfont\small\textcolor{priogray}{[\,\ensuremath{\circ}\ Optional\,]}}\hspace{0.5em}}
+\newcommand{\corebadge}{}% superseded by the four \prio badges above
+
+% ---------- boxes ----------
+\newtcolorbox{necbox}{breakable,colback=boxbg,colframe=necblue,
+  boxrule=0.8pt,arc=1.5mm,left=2mm,right=2mm,top=1.5mm,bottom=1.5mm,
+  title={\sffamily\bfseries NEC connection},fonttitle=\small}
+\newtcolorbox{finbox}{breakable,colback=finbg,colframe=finmaroon,
+  boxrule=0.8pt,arc=1.5mm,left=2mm,right=2mm,top=1.5mm,bottom=1.5mm,
+  title={\sffamily\bfseries Finance reality check},fonttitle=\small}
+
+% ---------- operators ----------
+\DeclareMathOperator{\E}{\mathbb{E}}
+\DeclareMathOperator{\Var}{Var}
+\DeclareMathOperator{\diag}{diag}
+\DeclareMathOperator{\ReLU}{ReLU}
+\DeclareMathOperator*{\argmax}{arg\,max}
+\newcommand{\Normal}{\mathcal{N}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\x}{\bm{x}}
+\newcommand{\T}{\top}
+\newcommand{\bh}{\bm{h}}
+\newcommand{\bc}{\bm{c}}
+\newcommand{\bW}{\bm{W}}
+\newcommand{\bU}{\bm{U}}
+\newcommand{\bJ}{\bm{J}}
+\newcommand{\sg}{\sigma}
+
+\title{\vspace{-1.2em}{\large\sffamily Foundations for a Quant Research Pipeline}\\[0.4em]
+\textbf{Module 7:\\ Sequence Models for NEC Gating}\\[0.3em]
+{\large A single merged treatment of Goodfellow Ch.\ 10 and Olah's\\ ``Understanding LSTM Networks,'' ending inside the NEC code}}
+\author{Prepared for Tom Koreslesjak \;\textperiodcentered\; companion to \texttt{NEC\_thesis\_syllabus.md}}
+\date{June 2026}
+
+\begin{document}
+\maketitle
+\vspace{-1.5em}
+
+\begin{abstract}
+\noindent The last architectural piece of the thesis: the recurrent encoder that turns a window of market history into the vector the gate routes on. The chapter derives backpropagation through time as Module 6's backprop with weights tied across time, proves the vanishing/exploding-gradient theorem as the third and final appearance of this book's geometric-amplification motif, and dissects the GRU and LSTM gates as engineered gradient highways --- per-coordinate, input-dependent forgetting rates with readable memory timescales. It closes by reading \texttt{nec\_hybrid\_explained.py} line by line at the level of mathematics rather than code: every tensor shape, every design defect, and the precise textbook section that diagnosed each one. By the end, nothing in the existing NEC is mysterious, and every change the corrected model makes has a derivation behind it.
+\end{abstract}
+
+\tableofcontents
+
+\subsection*{How this chapter was assembled (and what was cut)}
+
+\textbf{Audit findings first, because this module's reading list needed surgery.} (i) The syllabus assigns ``Prince Ch.\ 12.1--12.6'' for RNNs, GRU, and LSTM. Prince's \emph{Understanding Deep Learning} Chapter 12 is \textbf{Transformers} --- verified against the local copy --- and the book contains \emph{no} recurrent-networks chapter at all (the author omitted RNNs deliberately). The assigned ``Prince Problems 12.1--12.2'' are self-attention problems, irrelevant to this module's topics; Exercise~\ref{ex:linrnn} substitutes. (ii) The syllabus assigns ``Goodfellow Ch.\ 10, Exercises 10.1--10.2''; as established in Module 6's audit, Goodfellow contains no exercises; Exercise~\ref{ex:birnn} substitutes. The chapter's real sources are therefore Goodfellow Ch.\ 10 (which covers this material thoroughly) and Olah's essay; Prince Ch.\ 12 becomes relevant only if transformer baselines are added to the thesis later.
+
+Cuts from Goodfellow Ch.\ 10, with reasons:
+\begin{itemize}[leftmargin=2em,itemsep=0.15em]
+\item \emph{Encoder--decoder / sequence-to-sequence machinery (\S10.4), recursive nets (\S10.6), echo-state networks.} The NEC consumes a sequence \emph{encoder} --- one vector out --- not a translation system; seq2seq survives as the one-paragraph contrast the topic list asks for (\S\ref{sec:setup}).
+\item \emph{Teacher forcing (\S10.2.1).} A training device for output-feedback models; an encoder has no outputs to feed back. One sentence where relevant.
+\item \emph{Bidirectional RNNs (\S10.3).} Not cut --- \emph{converted}: in a prediction pipeline bidirectionality is a leakage question, and it becomes Exercise~\ref{ex:birnn}, whose answer is more subtle than ``illegal.''
+\item \emph{Gradient clipping mechanics.} Done in Module 6 \S6.6; here it gets its second justification (mechanical explosion) and a cross-reference.
+\item \emph{Leaky units and skip connections through time (\S10.9).} One sentence as the linear precursor of gates.
+\end{itemize}
+
+\subsection*{Notation}
+
+Sequences run $t = 1, \dots, T$ with inputs $\x_t \in \R^{d}$, hidden states $\bh_t \in \R^{n}$, and (for LSTM) cell states $\bc_t \in \R^n$. $\sg(\cdot)$ is the elementwise logistic sigmoid, $\tanh(\cdot)$ elementwise, $\odot$ elementwise product. Recurrent Jacobians are $\bJ_t = \partial \bh_t / \partial \bh_{t-1}$ ($n \times n$). The encoder's deliverable is $\bh_T$ (or $[\bh_T; \bc_T]$), the fixed-length summary handed to the gate. Module and equation cross-references follow the established ledger: (B.$\cdot$) Foundations B, (C.$\cdot$) Foundations C, (4.$\cdot$)/(5.$\cdot$)/(6.$\cdot$) Modules 4--6.
+
+% =====================================================================
+\section{The encoder's job: from a window of history to one vector}\label{sec:setup}
+% =====================================================================
+
+The NEC's data interface (syllabus \S3) is a tensor of shape $(\text{batch}, T, d)$: for each asset-date, a trailing window of $T$ daily feature vectors. The encoder's job is a map
+\begin{equation}
+(\x_{1}, \dots, \x_{T}) \;\longmapsto\; \bh_T \in \R^{n},
+\label{eq:encoder}
+\end{equation}
+a \emph{learned summary statistic} of the window, consumed here by the gate (and, optionally, by experts). Hold two reference points while learning the machinery. First, you already use fixed encoders daily: a 20-day realized volatility is \eqref{eq:encoder} with a hand-chosen quadratic form; an EMA of returns is \eqref{eq:encoder} with a hand-chosen exponential kernel (Exercise~\ref{ex:linrnn} makes this exact: an EMA \emph{is} a one-dimensional linear RNN). The recurrent encoder's promise is only that the kernel and the nonlinearity are learned rather than chosen --- a promise that must beat the hand-chosen versions out of sample to justify its variance (\S\ref{sec:overfit}). Second, the contrast the topic list requests: \emph{sequence-to-sequence} models (translation, transcription) emit an output \emph{per step} or decode a new sequence from the summary; they need alignment machinery, teacher forcing, and decoder stacks. An \emph{encoder-only} use case needs none of it --- which is why this chapter is shorter than Goodfellow Ch.\ 10 and why several of its sections were cuttable.
+
+The architecture: a \emph{recurrent} network maintains a state and applies one shared transition repeatedly,
+\begin{equation}
+\bh_t = \tanh\big( \bW \bh_{t-1} + \bU \x_t + \bm{b} \big),
+\qquad \bh_0 = \bm 0,
+\label{eq:rnn}
+\end{equation}
+the \emph{vanilla RNN}. Read it as a discrete-time driven dynamical system: $\bW$ is the autonomous dynamics (what the state does on its own), $\bU\x_t$ the forcing, $\tanh$ the saturation that keeps the state bounded. One transition, applied $T$ times: the parameter count is independent of $T$, which is the entire point --- and, as the next section shows, also the entire problem.
+
+% =====================================================================
+\section{Backpropagation through time}\label{sec:bptt}
+% =====================================================================
+
+Unroll \eqref{eq:rnn}: the computation from $\x_{1:T}$ to a loss $\mathcal{L}$ on $\bh_T$ is a $T$-layer feedforward network whose layers \emph{share} the parameters $(\bW, \bU, \bm b)$. Module 6's backprop machinery (the boxed recursion 6.4.1) therefore applies verbatim, with one new feature: because every ``layer'' holds the same $\bW$, the total gradient \emph{sums} the per-layer contributions. Running the chain rule along the unrolled graph (Exercise~\ref{ex:bptt} executes it for $T = 3$ explicitly, then by induction):
+\begin{equation}
+\frac{\partial \mathcal{L}}{\partial \bW}
+\;=\; \sum_{t=1}^{T}
+\underbrace{\frac{\partial \mathcal{L}}{\partial \bh_T}}_{\text{from the head}}
+\;\underbrace{\Bigg( \prod_{s = t+1}^{T} \bJ_s \Bigg)}_{\text{through time}}
+\;\underbrace{\frac{\partial^{+} \bh_t}{\partial \bW}}_{\text{local, at step } t},
+\qquad
+\bJ_s = \frac{\partial \bh_s}{\partial \bh_{s-1}} = \diag\!\big(1 - \bh_s^{\odot 2}\big)\, \bW,
+\label{eq:bptt}
+\end{equation}
+where $\partial^{+}$ denotes the direct (single-step) dependence and the Jacobian uses $\tanh' = 1 - \tanh^2$. This is \emph{backpropagation through time}: Module 6's boxed recursion with the VJP running along the time axis, sensitivities $\bm\delta_t = \bJ_{t+1}^\T \bm\delta_{t+1}$ flowing right to left. Memory cost is Foundations C, Exercise C.7(b) made painful: all $T$ hidden states must be stored, so memory grows linearly in window length --- the practical reason for \emph{truncated} BPTT, which backpropagates only $k < T$ steps from each loss and treats older states as constants. Truncation is not free: it deletes exactly the terms $t \le T - k$ from \eqref{eq:bptt}, biasing the gradient against long-range structure; Exercise~\ref{ex:tbptt} quantifies the bias and uncovers its cruel punchline --- truncation is harmless precisely when those terms were vanishing anyway.
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[Syllabus: BPTT for three steps, then $T$]\label{ex:bptt}
+\prioCore
+Take the vanilla RNN \eqref{eq:rnn} with $T = 3$ and a loss $\mathcal{L}$ on $\bh_3$ only.
+(a) By explicit chain rule on the unrolled graph (no formula-quoting), derive $\partial \mathcal{L}/\partial \bW$ as the sum of three terms --- the direct contribution at $t = 3$, the one-hop contribution from $t = 2$ through $\bJ_3$, and the two-hop contribution from $t = 1$ through $\bJ_3 \bJ_2$ --- with $\bJ_s = \diag(1 - \bh_s^{\odot 2})\bW$. Keep the $\partial^{+}\bh_t/\partial\bW$ outer-product structure explicit (Foundations C, Example C.6.1: sensitivity times input, here input $= \bh_{t-1}$).
+(b) Generalize to arbitrary $T$ by induction, recovering \eqref{eq:bptt}, and derive the same result for $\partial\mathcal{L}/\partial\bU$ (what replaces $\bh_{t-1}$ in the outer product?).
+(c) Two structural observations, one sentence each: why does weight tying turn the gradient into a \emph{sum over time} (contrast Module 6, where each layer's weight got one term)? And which intermediate quantities must be cached, confirming the linear-in-$T$ memory claim of \S\ref{sec:bptt}?
+\end{exercise}
+
+
+% =====================================================================
+\section{The vanishing/exploding-gradient theorem}\label{sec:vanish}
+% =====================================================================
+
+Everything interesting in \eqref{eq:bptt} sits in the product $\prod_{s=t+1}^{T} \bJ_s$ --- a product of $T - t$ Jacobians, and the third time this book has met a geometric amplification: gradient-descent modes contract as $(1-\eta\lambda)^t$ (Foundations C \S C.2), depth scales variance as $(n\sigma_W^2)^L$ (C \S C.7, Module 6 \S6.5), and now temporal credit assignment scales as the spectral radius to the power of the time gap. One tool makes the statement clean, recorded as a fact:
+
+\begin{lemma}[Gelfand's formula, stated]\label{lem:gelfand}
+For any square matrix $\bJ$ and any matrix norm, $\lim_{k \to \infty} \|\bJ^k\|^{1/k} = \rho(\bJ)$, the spectral radius (largest eigenvalue magnitude). Hence $\|\bJ^k\|$ grows or decays geometrically at asymptotic rate $\rho(\bJ)^k$, whatever the norm says for small $k$.
+\end{lemma}
+
+\begin{theorem}[Vanishing/exploding gradients]\label{thm:vanish}
+Suppose the recurrent Jacobians share the bound-relevant structure $\bJ_s \approx \bJ$ with spectral radius $\rho$ (the constant-Jacobian idealization; Exercise~\ref{ex:vanishproof} states the honest varying-$\bJ_s$ version with $\sup_s \|\bJ_s\| \le \rho$). Then the gradient contribution of step $t$ to a loss at $T$ scales as $\rho^{\,T - t}$: for $\rho < 1$ it \emph{vanishes} geometrically --- early inputs become invisible to learning --- and for $\rho > 1$ it \emph{explodes} geometrically --- gradients are dominated by rare amplification events and training destabilizes.
+\end{theorem}
+
+For the vanilla RNN the structure is worse than neutral: $\bJ_s = \diag(1 - \bh_s^{\odot 2})\,\bW$, and the diagonal factor is $\le 1$ everywhere and $\ll 1$ wherever $\tanh$ saturates --- so even with $\bW$ tuned to $\rho(\bW) \approx 1$, saturation drags the effective radius below one, and vanishing is the \emph{default}, not the accident. The two failure modes get asymmetric remedies, both already in your kit or about to be: explosion is occasional and mechanical, handled by the norm clipping of Module 6 \S6.6 (this is that section's promised second justification); vanishing is structural and cannot be clipped away --- it requires changing the architecture so that some path through time has Jacobian $\approx \bm I$ by \emph{construction}. Linear self-loops (``leaky units'') are the primitive version; gates, next, are the engineered one.
+
+\begin{finbox}
+Translate $\rho$ into trading horizons: the effective memory of an encoder is $\tau \approx 1/\log(1/\rho)$ steps --- at an effective $\rho = 0.9$, about ten days; at $\rho = 0.99$, about a hundred. The financial structures the NEC gate wants to see --- volatility regimes persisting for weeks to months (Foundations B \S B.7's clustering) --- sit at the long end, exactly where a vanilla RNN is congenitally blind. This, and not fashion, is why the existing NEC reaches for an LSTM and why the corrected model will keep \emph{some} gated encoder: the architecture choice is a statement about which autocorrelation horizons the gate is allowed to learn from.
+\end{finbox}
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[Syllabus: the vanishing/exploding theorem, honestly]\label{ex:vanishproof}
+\prioCore
+(a) Constant-Jacobian case: for $\bJ_s = \bJ$ with spectral radius $\rho$, use Lemma~\ref{lem:gelfand} to show the step-$t$ gradient contribution in \eqref{eq:bptt} scales as $\rho^{\,T-t}$ asymptotically, giving explosion for $\rho > 1$ and vanishing for $\rho < 1$.
+(b) Varying Jacobians: show that $\sup_s \|\bJ_s\|_2 \le \bar\rho < 1$ forces $\big\|\prod_{s=t+1}^{T} \bJ_s\big\|_2 \le \bar\rho^{\,T-t}$ (submultiplicativity --- Foundations A norms), so vanishing needs only a uniform bound; explain why the symmetric claim for explosion is \emph{not} automatic (a product of matrices each with some eigenvalue $> 1$ need not blow up --- give a $2\times 2$ rotation-flavored counterexample or argue why directions matter).
+(c) For the vanilla RNN specifically, bound $\|\bJ_s\|_2 \le \|\bW\|_2 \cdot \max_i (1 - h_{s,i}^2)$ and conclude that tanh saturation strictly tightens the vanishing bound; where in state space is the network most amnesiac?
+(d) State the implication for financial sequences in two sentences, using the memory-horizon translation $\tau \approx 1/\log(1/\rho)$ of \S\ref{sec:vanish}'s box.
+\end{exercise}
+
+
+% =====================================================================
+\section{Gates: engineered gradient highways}\label{sec:gates}
+% =====================================================================
+
+\subsection{GRU}
+
+The gated recurrent unit replaces the monolithic transition \eqref{eq:rnn} with a \emph{convex-combination} update controlled by two learned, input-dependent gates:
+\begin{equation}
+\begin{aligned}
+\bm r_t &= \sg\big( \bW_r \bh_{t-1} + \bU_r \x_t + \bm b_r \big)
+&&\text{(reset: how much past to consult)}\\
+\bm z_t &= \sg\big( \bW_z \bh_{t-1} + \bU_z \x_t + \bm b_z \big)
+&&\text{(update: how much to rewrite)}\\
+\tilde{\bh}_t &= \tanh\big( \bW_h (\bm r_t \odot \bh_{t-1}) + \bU_h \x_t + \bm b_h \big)
+&&\text{(candidate state)}\\
+\bh_t &= (1 - \bm z_t) \odot \bh_{t-1} \;+\; \bm z_t \odot \tilde{\bh}_t
+&&\text{(interpolation).}
+\end{aligned}
+\label{eq:gru}
+\end{equation}
+The last line is the architectural insight: the new state is a per-coordinate \emph{blend} of the old state and a proposal, not a wholesale nonlinear rewrite. Differentiate it: holding the gate paths aside,
+\begin{equation}
+\frac{\partial \bh_t}{\partial \bh_{t-1}} \;\supseteq\; \diag(1 - \bm z_t),
+\label{eq:gruhighway}
+\end{equation}
+so wherever the update gate closes ($z \to 0$), the Jacobian's direct term approaches the \emph{identity} --- a path through time with $\rho = 1$ by construction, immune to Theorem~\ref{thm:vanish}'s decay, for exactly the coordinates the network elects to preserve. Exercise~\ref{ex:gru} derives the full Jacobian including the gate paths and confirms the suppression claim honestly.
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[Syllabus: the GRU's gradient highway]\label{ex:gru}
+\prioCore
+(a) From the gate equations \eqref{eq:gru}, assemble the update $\bh_t = (1 - \bm z_t)\odot \bh_{t-1} + \bm z_t \odot \tilde\bh_t$ and compute the \emph{full} Jacobian $\partial \bh_t/\partial \bh_{t-1}$: the direct term $\diag(1 - \bm z_t)$ plus the three indirect paths (through $\bm z_t$, through $\tilde\bh_t$'s recurrent argument, and through $\bm r_t$).
+(b) Show that as $\bm z_t \to \bm 0$ the indirect paths are suppressed along with the rewrite (which factors kill them?), so the Jacobian tends to the identity --- the precise version of \eqref{eq:gruhighway}.
+(c) Interpret each gate in rolling-statistic language: what fixed setting of $(\bm r, \bm z)$ reproduces (i) a plain EMA of the inputs, (ii) a frozen state that ignores new data entirely?
+\end{exercise}
+
+
+\subsection{LSTM}
+
+The LSTM achieves the same end with an explicit \emph{memory register}. Olah's image is the right one: a cell state $\bc_t$ rides a conveyor belt along time, touched only by elementwise gates; the hidden state $\bh_t$ is a gated \emph{readout} of the cell:
+\begin{equation}
+\begin{aligned}
+\bm f_t &= \sg(\cdot), \quad \bm i_t = \sg(\cdot), \quad \bm o_t = \sg(\cdot),
+\qquad \bm g_t = \tanh(\cdot)
+&&\text{(forget, input, output, candidate)}\\
+\bc_t &= \bm f_t \odot \bc_{t-1} \;+\; \bm i_t \odot \bm g_t
+&&\text{(the conveyor belt)}\\
+\bh_t &= \bm o_t \odot \tanh(\bc_t)
+&&\text{(readout),}
+\end{aligned}
+\label{eq:lstm}
+\end{equation}
+each gate a sigmoid of $(\bW_\bullet \bh_{t-1} + \bU_\bullet \x_t + \bm b_\bullet)$ with its own parameters. The belt's Jacobian, gates held aside, is
+\begin{equation}
+\frac{\partial \bc_t}{\partial \bc_{t-1}} \;\supseteq\; \diag(\bm f_t):
+\label{eq:lstmhighway}
+\end{equation}
+where the forget gate saturates open ($f \to 1$), the cell-state pathway is the identity --- ``LSTM gates protect gradient flow'' as a one-line theorem (Exercise~\ref{ex:lstm} does it properly, indirect paths and all, and explains the once-standard trick of initializing $\bm b_f$ positive so training \emph{starts} with long memory). Note what is additive and what is multiplicative: information \emph{enters} the cell additively ($+\, \bm i \odot \bm g$), so writing does not erase --- contrast the vanilla RNN, where every step rewrites the whole state through a squashing nonlinearity.
+
+Read the gates with Foundations B eyes: a sigmoid gate is a two-state Boltzmann distribution (B \S B.6.3) per coordinate --- a soft binary decision, ``keep or rewrite,'' made continuously and differentiably. A forget gate stuck at $f$ implements an EMA with timescale $\tau \approx -1/\log f$ (Exercise~\ref{ex:linrnn}): \emph{the LSTM is, among other things, a bank of learned, state-dependent EMAs}, which is precisely the language in which a quant already thinks about rolling features. And the conceptual rhyme with the thesis is worth saying aloud: sigmoid gates route information \emph{within} a model across time; the NEC's softmax gate routes samples \emph{across} models --- the same Boltzmann machinery (B \S B.6) at two different scales, and the reason the syllabus titles this module ``sequence models \emph{for NEC gating}.''
+
+\emph{GRU versus LSTM} (Exercise~\ref{ex:grulstm} makes it quantitative): the GRU drops the separate cell state, merges forget/input into one update gate ($\bm z_t$ and $1 - \bm z_t$: writing \emph{is} forgetting), and drops the output gate --- three weight blocks per layer instead of four, $3n(n + d + 1)$ parameters versus $4n(n + d + 1)$. On small, noisy datasets the GRU is routinely as good or better --- 25\% fewer parameters is pure variance reduction (Foundations B, eq.\ B.5.1) with no demonstrated bias penalty at this scale --- which is why the syllabus's own corrected-model sketches (the \texttt{seq} model in \texttt{OP model/}) already use GRUs, and why ``replace the 8-layer LSTM with a 1--2-layer GRU'' will appear in the capstone's recommendations.
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[Syllabus: the LSTM's conveyor belt]\label{ex:lstm}
+\prioCore
+(a) From \eqref{eq:lstm}, compute $\partial \bc_t / \partial \bc_{t-1}$ in full: the direct term $\diag(\bm f_t)$ plus the indirect paths through the gates' dependence on $\bh_{t-1} = \bm o_{t-1} \odot \tanh(\bc_{t-1})$.
+(b) Show that with $\bm f_t \to \bm 1$ (and gates otherwise unsaturated) the cell pathway is approximately the identity, and explain why the \emph{additive} write $+\,\bm i_t \odot \bm g_t$ matters for this argument --- what would a multiplicative write do to the highway?
+(c) Explain the classical practice of initializing the forget-gate bias $\bm b_f$ to $+1$ or $+2$ in terms of where $\sg$ saturates, and what it buys during early training.
+(d) What does the output gate $\bm o_t$ decouple from what? Give one financial example where a quantity worth \emph{remembering} (in $\bc$) is not worth \emph{emitting} (in $\bh$) at every step.
+\end{exercise}
+
+\begin{exercise}[Syllabus: LSTM vs.\ GRU, quantitatively]\label{ex:grulstm}
+\prioCore
+(a) Count parameters per layer for input dimension $d$ and hidden size $n$, biases included: show LSTM $= 4n(n + d + 1)$ and GRU $= 3n(n + d + 1)$, and identify exactly which structures the GRU drops (separate cell state; independent input gate, replaced by $1 - \bm z$; output gate).
+(b) Evaluate both counts for the existing NEC encoder ($d = 1$ ostensibly, $n = 256$, 8 layers --- note layers above the first have input dimension $n$) and for the proposed replacement ($n = 32$, 2 layers). What is the ratio?
+(c) Argue the small-data case for the GRU in bias--variance terms (Foundations B, eq.\ B.5.1), and state the honest caveat: what could the LSTM's extra machinery buy that a GRU cannot, and under which data regime would you expect to detect it?
+\end{exercise}
+
+
+% =====================================================================
+\section{Hidden states, and why financial sequence models overfit}\label{sec:overfit}
+% =====================================================================
+
+What \emph{is} $\bh_T$? Mechanically, a learned rolling statistic: a point in $\R^n$ summarizing the window through learned kernels and gates. Two interpretation tools keep it honest, both cheap. \emph{Probe regressions}: regress each coordinate (or principal component --- Foundations A) of $\bh_T$ on the hand-crafted features you already trust (realized vol, momentum, drawdown); high $R^2$ means the encoder has rediscovered known features (reassuring, and deflating), low $R^2$ means it found something else (interesting, and suspicious --- in that order). \emph{Ablation against fixed encoders}: the OP pipeline's rolling features \emph{are} a hand-built \eqref{eq:encoder}; a learned encoder that cannot beat them out of sample, under Module 5's protocol, is negative evidence with high credibility.
+
+The deck is stacked toward overfitting, by an accounting you can now perform precisely. The effective sample is far smaller than the row count: adjacent windows share $T - 1$ days (Module 5 \S5.4's overlap channel, now inside the \emph{features}), cross-sectional rows share the date's market move (channel 3), and the usable signal is Foundations B's single-digit-percent sliver. Against that, an 8-layer, 256-unit LSTM brings on the order of $4 \times 10^6$ parameters --- Module 6 \S6.2's region-counting surplus pointed in exactly the wrong direction. The defensive checklist, every line a cross-reference: small hidden dimensions and shallow stacks (6.2); LayerNorm, never BatchNorm, inside sequence models (6.7 --- and note the existing NEC violates this in its classifier head); dropout between recurrent layers only with care (naive i.i.d.\ dropout re-sampled each step disrupts the very memory the gates protect; variational/locked dropout re-uses one mask per sequence --- one sentence of awareness is enough here); norm clipping (6.6); early stopping on purged-validation rank-IC (6.8, 5.5); and the probe/ablation honesty tests above.
+
+% =====================================================================
+\section{Capstone: reading the NEC code, line by line}\label{sec:capstone}
+% =====================================================================
+
+With the machinery built, \texttt{OP model/nec/nec\_hybrid\_explained.py} reads in ten minutes. The shape flow, for input $\x$ of shape $(B, T, d)$:
+
+\begin{center}
+\small
+\begin{tabular}{@{}llll@{}}
+\toprule
+Stage & Code & Output shape & Mathematics \\
+\midrule
+Encoder & \texttt{C\_L}: 8-layer LSTM, $n = 256$ & \texttt{out} $(B, T, 256)$ & eq.\ \eqref{eq:lstm}, stacked; all steps returned \\
+Head select & \texttt{out[:, -1, :]} inside \texttt{C\_F} & $(B, 256)$ & take $\bh_T$ of last layer \\
+Head norm & \texttt{BatchNorm1d} & $(B, 256)$ & eq.\ (6.7.1) across the \emph{batch} \\
+Gate scores & \texttt{Linear(256, 3)} + \texttt{Softmax} & $(B, 3)$ & softmax regression head (4.8) \\
+Experts & \texttt{NEC\_MLP} $\times 2$ on \texttt{x[:, -1, :-1]} & $(B,)$ each & 4-layer ReLU funnels (6.1--6.2) \\
+Routing & \texttt{where(argmax(prob) == 1, e, n)} & $(B,)$ & hard binary selection \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The defect ledger, each entry with its diagnosing section:
+
+\begin{enumerate}[leftmargin=2em,itemsep=0.2em]
+\item \emph{Hard \texttt{argmax} routing.} $\partial(\argmax)/\partial(\text{logits}) = 0$ a.e.: the regression loss sends no gradient to the gate (B \S B.8.4; Module 4 \S4.10). The gate must be trained on a side objective that need not align with predictive performance.
+\item \emph{Three classes, one bit.} The router checks only \texttt{== 1}: classes 0 and 2 are collapsed, discarding a third of the computed posterior (B \S B.8.4; the thesis syllabus's founding observation).
+\item \emph{Explicit \texttt{nn.Softmax} inside the model.} The head emits probabilities, not logits. If trained with \texttt{CrossEntropyLoss} (which expects logits) this is simply wrong --- softmax applied twice; if trained with a log of these probabilities, it is the unfused, numerically unstable chain that Module 4 \S4.10 and Foundations B \S B.6.3 exist to forbid. Corrected models emit logits and use the fused loss.
+\item \emph{BatchNorm in the classifier head.} Cross-sample coupling of dates inside each batch --- the leakage channel of Module 6 \S6.7's box, sitting directly upstream of the regime decision. LayerNorm is the drop-in repair.
+\item \emph{Encoder scale.} Eight LSTM layers at $n = 256$ ($\sim 4$M parameters, inter-layer dropout 0.4 fighting the consequences) against the effective-sample arithmetic of \S\ref{sec:overfit}. A 1--2 layer GRU at $n \in [16, 64]$ is the right opening bid, by the parameter-count argument of Exercise~\ref{ex:grulstm}.
+\item \emph{Sequence information reaches only the gate.} Both experts consume \texttt{x[:, -1, :-1]} --- the last step's raw features. Defensible as a design (regime-from-history, prediction-from-snapshot), but it means the encoder's entire value flows through the routing decision that defect 1 prevents from training. The corrected model should decide \emph{deliberately} whether experts also see $\bh_T$, and say so in the thesis.
+\item \emph{Silent feature slicing.} \texttt{[:-1]} drops the last feature column undocumented --- a column evidently reserved (a label? an ID?). Until provenance is established, this is a potential leakage or alignment bug of exactly the kind Module 5 \S5.4 catalogues; the corrected pipeline names its columns.
+\item \emph{Default-config mismatch.} \texttt{C\_L} defaults to $n = 256$ while \texttt{C\_F} expects 64: the defaults do not compose --- evidence the file was assembled from screenshots, and a reminder that the corrected implementation needs shape assertions (Module 6 \S6.9, step 1).
+\end{enumerate}
+
+\begin{necbox}
+What the corrected NEC keeps, changes, and decides --- the chapter's deliverable to the thesis. \emph{Keep}: the architecture's thesis --- a sequence encoder informing a regime gate over specialized experts; it is a sound MoE skeleton (B \S B.8). \emph{Change} (each with its derivation): soft routing trained by the mixture NLL (B.8.3, gradients B.8.5--B.8.6) replacing defects 1--2; logits + fused loss replacing defect 3; LayerNorm replacing defect 4; a small GRU replacing defect 5; named, audited feature columns replacing defect 7; shape assertions for defect 8. \emph{Decide and document}: experts on snapshot features vs.\ snapshot $+\, \bh_T$ (defect 6) --- run both under Module 5's protocol, pre-registered. Every item on this list now has a textbook section behind it; none is a matter of taste.
+\end{necbox}
+
+\medskip
+\noindent\textbf{Checkpoint (from the syllabus).} Closed book: derive BPTT \eqref{eq:bptt} for $T = 3$ and in general; prove the vanishing/exploding theorem and state the eigenvalue intuition honestly (Lemma~\ref{lem:gelfand}'s role, the tanh saturation factor); derive the GRU and LSTM gradient highways \eqref{eq:gruhighway}/\eqref{eq:lstmhighway} and say which gates do what; and explain, at the level of mathematics, what \texttt{C\_L} and \texttt{C\_F} compute in the current code and which textbook results indict each defect in the ledger. If all four are comfortable, Part III is complete: you have the math, the models, the judge, the optimizer, and the architecture --- and the road into Part IV (mixtures, EM, and the thesis's core) is open.
+
+% =====================================================================
+\section{Exercises}\label{sec:exercises}
+% =====================================================================
+
+\noindent\textbf{Importance labels.} Each exercise carries a priority badge for the NEC/MoE thesis track, reflecting how load-bearing it is --- \emph{not} how hard it is. \prioCore mark what the checkpoint and the corrected encoder demand closed-book: BPTT (\ref{ex:bptt}), the vanishing/exploding theorem done honestly (\ref{ex:vanishproof}), the two gradient highways (\ref{ex:gru}, \ref{ex:lstm}), and the GRU-vs-LSTM accounting behind the capstone's ``shrink the encoder'' recommendation (\ref{ex:grulstm}). \prioWorth a notch below: truncation's bias and its design corollary (\ref{ex:tbptt}), the linear-RNN-as-EMA-bank reading (\ref{ex:linrnn}), the bidirectional-leakage adjudication (\ref{ex:birnn}), and the applied milestone (\ref{ex:milestone}).
+
+Questions only, as established. \textbf{Core exercises (\prioCore) sit inline in the chapter body as checkpoint exercises, at the end of the section or subsection they test}; this section collects the supplementary exercises only. The six syllabus analytical exercises all appear; the two assigned textbook-problem sets were invalid (see preface: Prince Ch.\ 12 covers transformers; Goodfellow has no exercises) and are replaced by two substitutes chosen to cover the same conceptual ground with this pipeline's priorities. The applied milestones close the set, flagged per house policy.
+
+\subsection*{On BPTT (Section~\ref{sec:bptt})}
+
+\begin{exercise}[Syllabus: truncated BPTT's bias]\label{ex:tbptt}
+\prioWorth
+Truncated BPTT with window $k$ keeps only the $t > T - k$ terms of \eqref{eq:bptt}.
+(a) Write the omitted remainder explicitly and show the truncated gradient is biased: its expectation misses exactly the long-range terms.
+(b) Under the uniform bound of Exercise~\ref{ex:vanishproof}(b), bound the remainder norm by a geometric tail $\propto \bar\rho^{\,k}$, and conclude: the bias is negligible iff $\bar\rho^{\,k} \ll 1$ --- i.e.\ truncation is safe precisely when the long-range gradients were vanishing regardless.
+(c) Spell out the cruel corollary in one paragraph: for a model intended to learn \emph{long}-horizon regime structure ($\bar\rho \approx 1$ on the gated highway), truncation at $k$ caps the learnable horizon at roughly $k$ steps no matter what the architecture protects --- so window length $T$, truncation $k$, and the regime horizons of interest must be chosen \emph{together}. What does this say about the NEC's choice of $T$ for 20--60-day regimes?
+\end{exercise}
+
+\subsection*{Substitutes for the invalid textbook assignments (see preface)}
+
+\begin{exercise}[Substitute for Prince Probs.\ 12.1--12.2: the linear RNN as a bank of EMAs]\label{ex:linrnn}
+\prioWorth
+Drop the nonlinearity: $\bh_t = \bW \bh_{t-1} + \bU \x_t$, $\bh_0 = \bm 0$.
+(a) Solve the recursion: $\bh_T = \sum_{t=1}^{T} \bW^{T-t}\, \bU\, \x_t$ --- the encoder is a convolution of the input history with the matrix-power kernel $\bW^{T-t}$.
+(b) Diagonalize $\bW$ (assume diagonalizable, eigenvalues $\lambda_j$): show each eigen-coordinate of $\bh_T$ is an exponentially-weighted sum of inputs with per-mode memory timescale $\tau_j = -1/\log|\lambda_j|$, and that a one-dimensional case with $w = 1 - \alpha$ is \emph{exactly} the standard EMA with smoothing $\alpha$.
+(c) Complex eigenvalues: what input structure does a mode with $\lambda_j = r e^{i\theta}$ detect? (Damped oscillation --- give the period in days for $\theta = 2\pi/20$.) Why might that be useful or dangerous for a market-regime encoder?
+(d) Design question: an encoder meant to span reversal-to-momentum horizons of 5--60 trading days should have its $|\lambda_j|$ spread over what range? Compare with the OP pipeline's hand-chosen rolling windows --- what has the learned encoder actually been given license to tune?
+\end{exercise}
+
+\begin{exercise}[Substitute for Goodfellow Ex.\ 10.1--10.2: when is a bidirectional encoder lookahead?]\label{ex:birnn}
+\prioWorth
+A bidirectional RNN runs a forward pass and a backward pass over the window and concatenates: $\bh_t^{\mathrm{bi}} = [\overrightarrow{\bh}_t;\, \overleftarrow{\bh}_t]$, where $\overleftarrow{\bh}_t$ is a function of $\x_{t:T}$.
+(a) Show that any per-step output built on $\bh_t^{\mathrm{bi}}$ with $t < T$ depends on inputs dated after $t$.
+(b) Now adjudicate three usage patterns against Module 5 \S5.4's information-set discipline, assuming the window $[1, T]$ ends at the prediction date and the label lives at $T + h$: (i) per-step labels $y_t$ predicted from $\bh_t^{\mathrm{bi}}$; (ii) a single prediction from $\bh_T^{\mathrm{bi}}$; (iii) a single prediction from the concatenated \emph{final} states $[\overrightarrow{\bh}_T; \overleftarrow{\bh}_1]$. Which are leakage, which are legal, and why? \emph{(Careful: one of these is legal despite ``using the backward pass,'' and one is illegal despite looking innocuous.)}
+(c) The existing NEC sets \texttt{bidirectional=False}. State in two sentences whether turning it on would be a bug or a choice for this architecture's usage pattern, and what documentation requirement Module 5's protocol would impose either way.
+\end{exercise}
+
+\subsection*{Applied milestones}
+
+\begin{exercise}[Applied milestone --- optional, computational]\label{ex:milestone}
+\prioWorth
+\emph{The syllabus's two practical milestones, merged; the chapter's one computational exercise, per house policy.}
+(i) Implement a GRU cell from scratch in PyTorch (the four lines of \eqref{eq:gru} as tensor ops); validate forward outputs against \texttt{torch.nn.GRU} with copied weights, and gradient agreement under \texttt{autograd} on a toy sequence.
+(ii) Re-read \texttt{OP model/nec/nec\_hybrid\_explained.py} with the capstone's shape table in hand: verify every shape in the table by instrumenting a forward pass with random inputs, confirm the \texttt{C\_L}/\texttt{C\_F} default-dimension mismatch (defect 8) by triggering it, and write a three-line shape assertion block that would have caught it.
+\end{exercise}
+
+% =====================================================================
+\section*{Source map and what comes next}
+\addcontentsline{toc}{section}{Source map and what comes next}
+% =====================================================================
+
+\begin{center}
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+Section & Primary source(s) & Feeds directly into \\
+\midrule
+\ref{sec:setup} Encoders vs.\ seq2seq & GF \S10.1--10.2, \S10.4 (contrast) & NEC data interface \\
+\ref{sec:bptt} BPTT, truncation & GF \S10.2.2 + Module 6 \S6.4 & encoder training mechanics \\
+\ref{sec:vanish} Vanishing/exploding & GF \S10.7 + Fnd.\ C motif & window/horizon choices; clipping (6.6) \\
+\ref{sec:gates} GRU, LSTM & GF \S10.10; Olah \S1--5 & the corrected encoder \\
+\ref{sec:overfit} Hidden states, overfitting & synthesis + Module 5 & encoder sizing; honesty tests \\
+\ref{sec:capstone} NEC code reading & the code + whole-book ledger & the corrected model's spec \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\medskip
+Part III is complete. Part IV is the thesis's core: Math Foundations D (information theory deepened into variational analysis --- the ELBO three ways, forward vs.\ reverse KL) and Module 8 (mixtures, EM, and variational inference), where the responsibilities of Foundations B \S B.8, the weighted least squares of Module 4, and the gate gradients carried since (B.8.6) finally assemble into the algorithm the corrected NEC trains by. Every prerequisite it lists is now behind you.
+
+\end{document}

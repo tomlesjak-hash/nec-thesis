@@ -1,0 +1,409 @@
+% =====================================================================
+%  Foundations for a Quant Research Pipeline
+%  Chapter: Module 6 — Neural Networks and Optimization
+%  Companion textbook to NEC_thesis_syllabus.md
+%  Sources synthesized: Prince (UDL) Ch 3–8; Goodfellow Ch 7–8 (reference)
+% =====================================================================
+\documentclass[11pt]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{mathpazo}
+\usepackage{microtype}
+\usepackage[margin=1.05in]{geometry}
+\usepackage{amsmath,amssymb,amsthm,mathtools,bm}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{tcolorbox}
+\tcbuselibrary{breakable}
+\usepackage{booktabs}
+\usepackage[colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,urlcolor=blue!50!black]{hyperref}
+
+\linespread{1.05}
+\setlength{\parskip}{0.35em}
+
+% ---------- colors ----------
+\definecolor{necblue}{RGB}{20,45,90}
+\definecolor{finmaroon}{RGB}{110,30,30}
+\definecolor{boxbg}{RGB}{245,247,250}
+\definecolor{finbg}{RGB}{250,246,243}
+
+% ---------- module-6 numbering ----------
+\renewcommand{\thesection}{6.\arabic{section}}
+\numberwithin{equation}{section}
+
+% ---------- theorem environments ----------
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{corollary}[theorem]{Corollary}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{example}[theorem]{Example}
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+
+\newcounter{exercise}
+\renewcommand{\theexercise}{6.\arabic{exercise}}
+\newenvironment{exercise}[1][]{\refstepcounter{exercise}\par\medskip
+  \noindent\textbf{Exercise \theexercise}\if\relax\detokenize{#1}\relax\else\ \textnormal{[#1]}\fi\textbf{.}\ \itshape}{\par\medskip}
+
+% ---------- exercise importance badges (priority for the NEC/MoE thesis track) ----------
+\definecolor{priogray}{RGB}{120,120,120}
+\newcommand{\prioCore}{{\normalfont\small\textbf{\textcolor{necblue}{[\,\ensuremath{\bigstar\bigstar\bigstar}\ Core\,]}}}\hspace{0.5em}}
+\newcommand{\prioWorth}{{\normalfont\small\textbf{\textcolor{finmaroon}{[\,\ensuremath{\bigstar\bigstar}\ Worth it\,]}}}\hspace{0.5em}}
+\newcommand{\prioLow}{{\normalfont\small\textcolor{priogray}{[\,\ensuremath{\bigstar}\ Low priority\,]}}\hspace{0.5em}}
+\newcommand{\prioOpt}{{\normalfont\small\textcolor{priogray}{[\,\ensuremath{\circ}\ Optional\,]}}\hspace{0.5em}}
+\newcommand{\corebadge}{}% superseded by the four \prio badges above
+
+% ---------- boxes ----------
+\newtcolorbox{necbox}{breakable,colback=boxbg,colframe=necblue,
+  boxrule=0.8pt,arc=1.5mm,left=2mm,right=2mm,top=1.5mm,bottom=1.5mm,
+  title={\sffamily\bfseries NEC connection},fonttitle=\small}
+\newtcolorbox{finbox}{breakable,colback=finbg,colframe=finmaroon,
+  boxrule=0.8pt,arc=1.5mm,left=2mm,right=2mm,top=1.5mm,bottom=1.5mm,
+  title={\sffamily\bfseries Finance reality check},fonttitle=\small}
+
+% ---------- operators ----------
+\DeclareMathOperator{\E}{\mathbb{E}}
+\DeclareMathOperator{\Var}{Var}
+\DeclareMathOperator{\Cov}{Cov}
+\DeclareMathOperator{\tr}{tr}
+\DeclareMathOperator{\diag}{diag}
+\DeclareMathOperator{\ReLU}{ReLU}
+\DeclareMathOperator*{\argmin}{arg\,min}
+\DeclareMathOperator*{\argmax}{arg\,max}
+\newcommand{\Normal}{\mathcal{N}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\x}{\bm{x}}
+\newcommand{\y}{\bm{y}}
+\newcommand{\T}{\top}
+\newcommand{\bh}{\bm{h}}
+\newcommand{\bW}{\bm{W}}
+\newcommand{\bb}{\bm{b}}
+\newcommand{\bdelta}{\bm{\delta}}
+
+\title{\vspace{-1.2em}{\large\sffamily Foundations for a Quant Research Pipeline}\\[0.4em]
+\textbf{Module 6:\\ Neural Networks and Optimization}\\[0.3em]
+{\large A single merged treatment of Prince (UDL) Ch.\ 3--8,\\ with Goodfellow Ch.\ 7--8 as reference}}
+\author{Prepared for Tom Koreslesjak \;\textperiodcentered\; companion to \texttt{NEC\_thesis\_syllabus.md}}
+\date{June 2026}
+
+\begin{document}
+\maketitle
+\vspace{-1.5em}
+
+\begin{abstract}
+\noindent This chapter builds the networks that everything downstream routes between: what a multilayer perceptron actually computes (a piecewise-linear function with astonishingly many pieces), why depth pays, how loss functions encode probabilistic commitments (and which commitments heavy-tailed targets break), backpropagation completed from the nine-tenths-derived state Foundations C left it in, the initialization derivations (Xavier, He) whose framework is already in place, and the practice layer --- normalization, dropout, early stopping, clipping --- each tied to a principle rather than presented as ritual. The destination: you can derive backprop, Xavier/He, and the batch-norm gradient from scratch, and you can build, train, and \emph{debug} the MLP experts of the corrected NEC without copying a training loop on faith.
+\end{abstract}
+
+\tableofcontents
+
+\subsection*{How this chapter was assembled (and what was cut)}
+
+Prince is the spine; Goodfellow is consulted, not read. This module is where the de-duplication ledger earns its keep, because the syllabus assigns here several items already done elsewhere in this book:
+
+\begin{itemize}[leftmargin=2em,itemsep=0.15em]
+\item \emph{Done in Foundations C, cited not repeated:} SGD on the quadratic with its convergence rate and noise ball; momentum as a damped ODE; Adam with bias correction (Exercise C.3 discharged the syllabus exercise listed under this module); the matrix calculus and VJP cost-accounting behind backprop; the variance-propagation framework for initialization. Prince Ch.\ 6's optimizer content is therefore compressed to cross-references plus what is new (schedules in practice, warmup, clipping).
+\item \emph{Done in Module 4:} the softmax--cross-entropy gradient $\hat p - y$, its Hessian, and the through-one-linear-layer assembly (Exercise 4.5(c)) --- the syllabus's ``CE + softmax through a linear layer'' exercise here is upgraded rather than repeated (Exercise~\ref{ex:cethrough}).
+\item \emph{Done in Module 5:} model assessment. Prince Ch.\ 8 is consumed only for what is genuinely new to us --- double descent --- with everything else cross-referenced.
+\item \emph{Prince Ch.\ 1--2:} cut to one sentence each; supervised learning and the loss-as-NLL principle are Foundations B \S B.4 and \S B.6.
+\item \emph{Goodfellow Ch.\ 7 extras:} adversarial training and data augmentation get one honest paragraph (\S\ref{sec:reg}); neither is load-bearing for a tabular/sequence financial pipeline.
+\item \emph{Universal-approximation theory:} statement and meaning only; the constructive proofs add no operative skill here.
+\end{itemize}
+
+\textbf{Audit finding (assigned problems that do not exist).} The syllabus assigns ``Goodfellow Ch.\ 6, Exercises 6.1 and 6.2.'' Goodfellow, Bengio \& Courville contains \emph{no end-of-chapter exercises} --- verified against the local copy. Exercise~\ref{ex:gfsub} substitutes two problems covering the Ch.\ 6 material those phantom exercises presumably targeted (linear collapse of activation-free depth, and the XOR construction), flagged as substitutions.
+
+\subsection*{Notation}
+
+Layers $\ell = 1, \dots, L$: pre-activations $\bm f_\ell = \bW_\ell \bh_{\ell-1} + \bb_\ell$, activations $\bh_\ell = a[\bm f_\ell]$ elementwise, $\bh_0 = \x$, network output $f(\x) = \bm f_L$ (no activation on the output layer unless stated). $a'[\cdot]$ is the elementwise derivative; for $\ReLU(z) = \max(z, 0)$, $a'[z] = \mathbf{1}[z > 0]$. Sensitivities $\bdelta_\ell = \nabla_{\bm f_\ell} \mathcal{L}$. Widths $n_\ell$; $\odot$ is elementwise product. Prince's $\phi, \theta, \psi$ parameter notation is translated into this matrix notation throughout, including in the restated exercises.
+
+% =====================================================================
+\section{Shallow networks: what one hidden layer computes}\label{sec:shallow}
+% =====================================================================
+
+A shallow network with $m$ hidden ReLU units computes
+\begin{equation}
+f(\x) = \phi_0 + \sum_{k=1}^{m} \phi_k\, \ReLU\big( \bm\theta_k^\T \x + \theta_{k0} \big):
+\label{eq:shallow}
+\end{equation}
+a linear combination of \emph{hinge functions}, each flat on one side of its hyperplane $\bm\theta_k^\T\x + \theta_{k0} = 0$ and linear on the other. The geometry to internalize: the $m$ hyperplanes partition input space into convex cells; within each cell every ReLU is frozen (active or clipped), so $f$ is \emph{linear on each cell} --- the network is a continuous piecewise-linear function, and ``learning'' is choosing where the creases go and what slopes to use between them. In one dimension, $m$ hidden units buy up to $m$ joints and $m+1$ linear pieces (Prince's figure 3.3; Exercise~\ref{ex:prince3} works the bookkeeping); in $p$ dimensions the cell count grows combinatorially --- up to $\sum_{j=0}^{p}\binom{m}{j}$ regions, far more than $m$ --- which is the first hint that these models are more expressive than their parameter count suggests.
+
+Two degenerate cases say what the nonlinearity is \emph{for} (Exercise~\ref{ex:prince3}, after Prince 3.1): if $a$ is linear, $a[z] = \psi_0 + \psi_1 z$, the whole of \eqref{eq:shallow} collapses to a single affine function of $\x$ --- composition of affine maps is affine --- so the network, however wide, is linear regression in disguise; remove the activation entirely and the same collapse occurs layer-through-layer at any depth. \emph{All} of a network's expressive power beyond Module 4 lives in the kinks. The classical guarantee that the kinks suffice: the \emph{universal approximation theorem} --- a shallow network with enough hidden units can approximate any continuous function on a compact set to any accuracy. Read it as a license, not a strategy: it promises existence, says nothing about how many units, whether gradient descent finds them, or whether the fit generalizes --- the bias--variance budget of Foundations B is not repealed, least of all at financial signal-to-noise.
+
+% =====================================================================
+\section{Deep networks: why composition pays}\label{sec:deep}
+% =====================================================================
+
+Stack the construction: $\bh_\ell = a[\bW_\ell \bh_{\ell-1} + \bb_\ell]$. The output is still continuous piecewise-linear (compositions of piecewise-linear maps are piecewise-linear), so depth buys nothing in \emph{kind}. What it buys is \emph{economy}: each layer's creases are drawn in the coordinates produced by the previous layer, so later layers fold earlier ones --- a unit at depth two creates a crease that, pulled back through layer one's folds, appears \emph{multiple times} in input space. Repeated folding multiplies regions \emph{multiplicatively} per layer rather than additively per unit: deep networks can carve exponentially (in depth) many linear regions out of the same parameter budget that buys a shallow network polynomially many. That is the honest, non-mystical version of ``depth learns hierarchical features'': early layers build reusable coordinates, later layers spend them.
+
+The practical counterweights, both already in your toolkit: deeper compositions are harder to \emph{optimize} (Foundations C's variance-propagation geometric applies forward to signals and backward to gradients --- depth is where initialization, completed in \S\ref{sec:initderiv}, and normalization, \S\ref{sec:bn}, stop being pedantry), and at financial SNR the bias--variance budget caps useful capacity early. The NEC's components are, by deliberate design, \emph{shallow by deep-learning standards} --- two-to-four-layer MLP experts, a modest recurrent encoder --- and this section is the argument that this is engineering judgment, not timidity: region-counting expressiveness is the resource you have in surplus; sample efficiency is the one you are starving for.
+
+% =====================================================================
+\section{Loss functions: probabilistic commitments, revisited for fat tails}\label{sec:loss}
+% =====================================================================
+
+Foundations B \S B.4 established the dictionary --- training loss $=$ negative log-likelihood of an observation model --- and Module 4 exercised it for classification. Prince Ch.\ 5's contribution is to make the dictionary \emph{generative}: to design a loss, choose a distribution over outputs, let the network predict its parameters, take the NLL. Three entries matter for this pipeline.
+
+\emph{Squared loss $=$ fixed-variance Gaussian.} $\mathcal{L}_i = (y_i - f(\x_i))^2$ asserts $y \mid \x \sim \Normal(f(\x), \sigma^2)$ with $\sigma$ constant. Both commitments are wrong for returns: tails are fat (Foundations B \S B.7) and variance is regime-dependent --- the entire premise of the thesis.
+
+\emph{Heteroskedastic Gaussian.} Let the network output two heads, mean $\mu(\x)$ and variance $\sigma^2(\x)$ (positivity via $\exp$ or softplus), with
+\begin{equation}
+\mathcal{L}_i = \frac{\big(y_i - \mu(\x_i)\big)^2}{2\sigma^2(\x_i)} + \tfrac12 \log \sigma^2(\x_i) .
+\label{eq:hetero}
+\end{equation}
+The first term is squared error \emph{deflated by predicted risk}; the second prevents the cheap escape $\sigma \to \infty$. Within a mixture, this is exactly a Gaussian expert with learned per-sample variance --- and \eqref{eq:hetero} is what each NEC expert's loss looks like once experts carry their own $\sigma_k$ (the within-expert term of the mixture NLL (B.8.3)). A subtlety worth respecting: jointly training $\mu$ and $\sigma$ can let the variance head ``give up'' on hard samples early (predict huge $\sigma$, kill the gradient on $\mu$); warm-starting with frozen $\sigma$ is the standard fix.
+
+\emph{Robust losses.} The Huber loss (quadratic near zero, linear in the tails) and the Student-$t$ NLL (Foundations B, eq.\ B.7.1, as a loss) both cap the influence of extreme residuals --- the gradient of squared loss grows linearly in the residual, so one $-40\%$ event dominates a batch gradient; Huber's gradient saturates, and the $t$-NLL's actually \emph{decays} for extreme residuals (redescending influence). The decision for the thesis is not aesthetic: squared loss on raw returns delegates your gradient budget to tail events; the alternatives are rank-transformed targets (the OP pipeline's choice --- then squared loss is fine, the target is bounded), winsorized targets, or a robust likelihood. Choose one, state it, and keep it fixed across model comparisons --- Module 5's protocol applies to losses too.
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[Prince Probs.\ 5.1--5.2, extended]\label{ex:prince5}
+\prioCore
+(a) For the logistic sigmoid $\sigma(z) = 1/(1 + e^{-z})$, verify $\sigma(-\infty) = 0$, $\sigma(0) = \tfrac12$, $\sigma(\infty) = 1$, and additionally prove $\sigma(-z) = 1 - \sigma(z)$ and that $\sigma$ is strictly increasing.
+(b) For the binary cross-entropy of one pair, $\mathcal{L} = -(1-y)\log(1 - \hat p) - y \log \hat p$ with $\hat p = \sigma(f(\x))$: sketch (or characterize analytically --- monotonicity, asymptotes, value at $\hat p = \tfrac12$) the loss as a function of $\hat p \in [0,1]$ for $y = 0$ and for $y = 1$. Where does the loss diverge, and why is that divergence harmless once the gradient is taken with respect to $f$ rather than $\hat p$? (You proved the bounded-gradient fact in Module 4, eq.\ 4.8.3 --- cite the mechanism.)
+(c) Heteroskedastic head check: for the loss \eqref{eq:hetero}, derive $\partial \mathcal{L}/\partial \sigma^2$ and show the optimum at fixed $\mu$ is $\sigma^2 = (y - \mu)^2$ --- the variance head wants to predict the squared residual. What failure mode does this enable early in training, and what is the standard fix (\S\ref{sec:loss})?
+\end{exercise}
+
+
+% =====================================================================
+\section{Backpropagation, completed}\label{sec:backprop}
+% =====================================================================
+
+Foundations C, Exercise C.4(c), derived the recursion's skeleton on a two-layer bias-free network. Here is the full algorithm, with biases, in the notation every implementation uses. Forward: $\bm f_\ell = \bW_\ell \bh_{\ell - 1} + \bb_\ell$, $\bh_\ell = a[\bm f_\ell]$, then $\mathcal{L}(\bm f_L, y)$. Backward, from $\bdelta_L = \nabla_{\bm f_L}\mathcal{L}$ (for squared loss, $2(\bm f_L - y)$; for fused softmax--CE, $\hat{\bm p} - \bm y$ by Module 4 \S4.10):
+\begin{equation}
+\boxed{\;
+\bdelta_{\ell-1} \;=\; a'[\bm f_{\ell-1}] \,\odot\, \big( \bW_\ell^\T\, \bdelta_\ell \big),
+\qquad
+\nabla_{\bW_\ell} \mathcal{L} \;=\; \bdelta_\ell\, \bh_{\ell-1}^\T,
+\qquad
+\nabla_{\bb_\ell} \mathcal{L} \;=\; \bdelta_\ell .
+\;}
+\label{eq:backprop}
+\end{equation}
+Three observations carry all the understanding. (i) Each line is a Foundations C identity: the weight gradient is the outer product of Example C.6.1 (sensitivity times input), the sensitivity update is a VJP through the linear map and the elementwise activation, and the bias gradient is the $\x = 1$ special case. (ii) The cost analysis is Exercise C.7: one backward pass, same order of cost as the forward pass, in exchange for storing every $\bh_\ell$ --- which is why memory, not compute, is often the binding constraint, and why Module 7 truncates through time. (iii) For ReLU, $a'$ is a 0/1 mask: backprop routes gradient only through units that were active forward --- creases block gradient exactly where they block signal, the source of both sparsity and the ``dead unit'' failure mode (a unit whose pre-activation is negative for every training input receives zero gradient forever; He initialization and sane learning rates exist substantially to prevent this).
+
+Exercise~\ref{ex:backprop} (the syllabus's centerpiece) re-derives \eqref{eq:backprop} for an explicit two-layer network with squared loss and proves the general case by induction; Exercise~\ref{ex:prince7} (Prince 7.1--7.2) forces the same content through brute-force scalar differentiation once --- the pedagogical point being that you should do it by hand exactly once, watch the shared subexpressions multiply, and understand that backprop is nothing but their systematic reuse. The practical companion is \emph{gradient checking}: compare analytic gradients against centered finite differences $(\mathcal{L}(\theta + \epsilon) - \mathcal{L}(\theta - \epsilon))/2\epsilon$ on a tiny network; the applied milestone (Exercise~\ref{ex:milestone}) does this against \texttt{autograd}.
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[Syllabus: backprop for the two-layer MLP, then induction]\label{ex:backprop}
+\prioCore
+Let $\hat y = \bW_2\, \sigma(\bW_1 \x + \bb_1) + \bb_2$ with elementwise $\sigma$, and squared loss $\mathcal{L} = \|\y - \hat\y\|^2$.
+(a) Using the differential method (Foundations C \S C.6), derive $\nabla_{\bW_2}\mathcal{L}$, $\nabla_{\bb_2}\mathcal{L}$, $\nabla_{\bW_1}\mathcal{L}$, $\nabla_{\bb_1}\mathcal{L}$, expressing each as products of forward-pass quantities ($\x$, $\bm f_1$, $\bh_1$) and sensitivities.
+(b) Prove the general recursion \eqref{eq:backprop} by induction on depth: assume it holds for the sub-network above layer $\ell$, and show the inductive step is exactly one application of the fundamental identity $\nabla_{\bW}\, g(\bW\bh) = \bdelta\,\bh^\T$ plus one VJP.
+(c) List which quantities must be retained from the forward pass for the backward pass to run, and confirm the memory accounting of Foundations C, Exercise C.7(b).
+\end{exercise}
+
+
+% =====================================================================
+\section{Initialization: the derivations}\label{sec:initderiv}
+% =====================================================================
+
+Foundations C \S C.7 established the framework: per-layer variance gain $n\,\sigma_W^2$ must equal one, forward and backward, or signals and gradients scale geometrically with depth. What remained was the activation bookkeeping, assigned by the syllabus to this module and now dischargeable in two steps.
+
+\emph{Xavier/Glorot} (Exercise~\ref{ex:xavier}): for activations roughly linear around zero ($\tanh$ near the origin), forward preservation requires $\sigma_W^2 = 1/n_{\mathrm{in}}$ and backward preservation $\sigma_W^2 = 1/n_{\mathrm{out}}$; irreconcilable unless the layer is square, so Glorot's compromise takes the harmonic mean: $\sigma_W^2 = 2/(n_{\mathrm{in}} + n_{\mathrm{out}})$.
+
+\emph{He} (Exercise~\ref{ex:he}): ReLU is not linear around zero --- it zeroes the negative half. For a symmetric zero-mean pre-activation $z \sim \Normal(0, s^2)$, the post-ReLU second moment is $\E[\ReLU(z)^2] = \tfrac12 \E[z^2] = \tfrac12 s^2$ (the half-Gaussian moment --- a two-line computation with Foundations B's Gaussian integrals, and the exercise's heart). Each ReLU layer therefore halves the variance that the next linear layer propagates, and the repair is to double the weight variance: $\sigma_W^2 = 2/n_{\mathrm{in}}$. The factor of 2 in every \texttt{kaiming\_normal\_} call is this computation and nothing else.
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[Syllabus: Xavier/Glorot]\label{ex:xavier}
+\prioCore
+Layer $\bh = \bW\x$, weights i.i.d.\ zero-mean variance $\sigma_W^2$, inputs zero-mean variance $\sigma_x^2$, independent; activation approximately identity near zero (the $\tanh$ regime).
+(a) Forward: from the Foundations B variance algebra, require $\Var(h_i) = \sigma_x^2$ and derive $\sigma_W^2 = 1/n_{\mathrm{in}}$.
+(b) Backward: apply the same argument to the sensitivity recursion $\bdelta_{\mathrm{in}} = \bW^\T \bdelta_{\mathrm{out}}$ (mask $\approx \bm 1$ in this regime) and derive $\sigma_W^2 = 1/n_{\mathrm{out}}$.
+(c) Show the two conditions are incompatible unless $n_{\mathrm{in}} = n_{\mathrm{out}}$, and verify Glorot's compromise $\sigma_W^2 = 2/(n_{\mathrm{in}} + n_{\mathrm{out}})$ is the harmonic mean of the two requirements. What residual geometric drift does the compromise accept in a deep, strongly rectangular network?
+\end{exercise}
+
+\begin{exercise}[Syllabus: He initialization]\label{ex:he}
+\prioCore
+(a) For $z \sim \Normal(0, s^2)$, compute $\E[\ReLU(z)^2]$ by the half-Gaussian integral and show it equals $\tfrac12 s^2$. Compute also $\E[\ReLU(z)] = s/\sqrt{2\pi}$ and note that ReLU outputs are \emph{not} zero-mean --- state why the variance-propagation argument survives this (what does the next layer's zero-mean weight assumption do to the mean term?).
+(b) Conclude that with ReLU activations, forward variance preservation requires doubling Xavier's forward choice: $\sigma_W^2 = 2/n_{\mathrm{in}}$.
+(c) Sanity-check against Foundations C, Exercise C.5(a): with He init, what is the variance gain per layer of the 512-wide, 50-deep ReLU stack, and what would Xavier-forward give instead?
+\end{exercise}
+
+
+% =====================================================================
+\section{Training practice: schedules, clipping, and reading loss curves}\label{sec:practice}
+% =====================================================================
+
+The theory is Foundations C; this section is the residue of practice it did not cover. \emph{Warmup}: the first few hundred steps of Adam run on EMA estimates built from almost no data (even bias-corrected, $\hat{\bm v}$ is high-variance), and a freshly initialized network produces unusually large, unusually aligned gradients; ramping the learning rate from zero over a warmup window sidesteps both. \emph{Schedules}: any decay respecting the two-regime logic of C \S C.3 works; cosine-to-zero is the common convention; step decays are fine; what matters is that the floor \eqref{eq:noiseballref} shrinks when you need precision. \emph{Gradient clipping}: replace $\bm g$ by $\bm g \cdot \min(1, c/\|\bm g\|)$ (norm clipping --- direction-preserving; preferable to per-coordinate value clipping, which distorts direction). Two distinct justifications, both yours already: heavy-tailed \emph{data} produce heavy-tailed per-batch gradients through the loss (Foundations B \S B.7 --- one extreme return, one extreme residual, one outsized gradient), and recurrent compositions produce occasional exploding gradients mechanically (the $\rho^T$ amplification, formalized in Module 7). Clipping is a robustness device, not a hyperparameter to tune finely: set $c$ near the typical gradient norm and forget it.
+\begin{equation}
+\text{(noise-floor reference, from C):}\qquad \E\|\bm e_\infty\|^2 \propto \eta\,\sigma_{\bm g}^2/\lambda_{\min}.
+\label{eq:noiseballref}
+\end{equation}
+Reading loss curves is diagnosis with this chapter's vocabulary: divergence after a learning-rate change (stability ceiling, C \S C.2); a plateau that a decay step breaks (noise floor); training loss falling while purged-validation rank-IC degrades (variance term --- stop earlier or regularize harder); training loss stuck at initialization levels (dead ReLUs, broken init, or a wiring bug --- the overfit-one-batch test of \S\ref{sec:capstone} discriminates).
+
+% =====================================================================
+\section{Normalization layers: batch norm, layer norm, and a financial warning}\label{sec:bn}
+% =====================================================================
+
+\emph{Batch normalization} standardizes each unit's pre-activation across the minibatch, then restores expressiveness with learned scale and shift:
+\begin{equation}
+\mu = \frac1B \sum_{i=1}^B x_i,
+\qquad
+\sigma^2 = \frac1B \sum_{i=1}^B (x_i - \mu)^2,
+\qquad
+\hat x_i = \frac{x_i - \mu}{\sqrt{\sigma^2 + \epsilon}},
+\qquad
+y_i = \gamma\, \hat x_i + \beta ,
+\label{eq:bn}
+\end{equation}
+per unit, with $(\gamma, \beta)$ trained. Why it helps is less settled than how: the original ``internal covariate shift'' story has not survived scrutiny; the better-supported account is that BN smooths and re-conditions the optimization landscape (each layer sees inputs of controlled scale regardless of what upstream layers did --- runtime enforcement of the gain-one condition that initialization only arranges at $t = 0$), permitting larger learning rates. Two operational facts cause most BN bugs. \emph{Train/eval asymmetry}: at evaluation there is no batch, so BN uses running averages of $(\mu, \sigma^2)$ accumulated during training --- forgetting \texttt{model.eval()} is the classic silent error, and a distribution shift between training batches and deployment data makes the running statistics simply wrong. \emph{Cross-sample coupling}: \eqref{eq:bn} makes every sample's output depend on every other sample in its batch --- the property the gradient inherits, which is what makes Exercise~\ref{ex:bngrad} (the syllabus's batch-norm gradient) genuinely instructive: $\partial \mathcal{L}/\partial x_i$ picks up three terms, the direct path plus the paths through $\mu$ and $\sigma^2$, and the result couples all $B$ gradients.
+
+\begin{necbox}
+The cross-sample coupling is not a numerical curiosity in finance --- it is a leakage channel. If a minibatch mixes dates, BN's batch statistics let each sample's forward pass see \emph{other dates'} feature levels, including future ones; with date-blocked batches the statistics become date-summaries, which is better but still couples assets within a date (sometimes desirable --- it resembles cross-sectional standardization --- but then it must be \emph{consistent} between training and the strictly per-date evaluation pipeline). The clean resolution for this pipeline: \emph{layer normalization} --- normalize across each sample's own features, $\mu_i = \tfrac1n\sum_j x_{ij}$, no cross-sample terms, no running statistics, no train/eval asymmetry --- which is also the standard choice inside recurrent and attention models (Module 7's encoder) for exactly the no-batch-coupling reason. Default to LayerNorm everywhere in the NEC; admit BatchNorm only with date-blocked batches and a written argument that its statistics match the evaluation-time transform.
+\end{necbox}
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[Syllabus: the batch-norm gradient]\label{ex:bngrad}
+\prioCore
+For one unit with batch values $x_1, \dots, x_B$, statistics and outputs as in \eqref{eq:bn} (treat $\epsilon = 0$, fold $\gamma$ into the upstream gradient so $g_i = \partial\mathcal{L}/\partial \hat x_i$):
+(a) Identify the three paths by which $x_i$ influences $\mathcal{L}$ (directly through $\hat x_i$; through $\mu$; through $\sigma^2$), and write the total derivative accordingly.
+(b) Derive the closed form
+\[
+\frac{\partial \mathcal{L}}{\partial x_i}
+= \frac{1}{\sigma}\left( g_i \;-\; \frac1B \sum_{j=1}^B g_j \;-\; \hat x_i\, \frac1B \sum_{j=1}^B g_j\, \hat x_j \right).
+\]
+(c) Verify two structural checks: the batch of gradients sums to zero, and it is orthogonal to $(\hat x_1, \dots, \hat x_B)$ --- BN's gradient is the upstream gradient with its batch-mean and its $\hat{\bm x}$-component projected out. Explain why both \emph{must} hold (what invariances does \eqref{eq:bn} have?).
+(d) One sentence: connect the cross-sample terms to the leakage warning of \S\ref{sec:bn}.
+\end{exercise}
+
+
+% =====================================================================
+\section{The regularization toolkit}\label{sec:reg}
+% =====================================================================
+
+Every device below is a bias--variance trade (Foundations B, eq.\ B.5.1) with its own mechanism; the craft is knowing which mechanism, so the devices are combined rather than stacked superstitiously.
+
+\emph{Weight decay.} Fully understood already: MAP with a Gaussian prior (Module 4 \S4.5), implemented as AdamW's decoupled decay (Foundations C \S C.5), doubling as conditioning repair and as the gate's separation cure. Nothing to add but the reminder that it is the \emph{one} regularizer with a clean probabilistic semantics, hence the first knob to reach for.
+
+\emph{Early stopping.} Halt training when validation performance (for us: purged-validation rank-IC) stops improving. This is not an absence of regularization but a form of it: on the quadratic model problem, $t$ steps of gradient descent from zero shrink each eigenmode by $1 - (1 - \eta\lambda_j)^t$ --- a spectral filter that passes high-curvature directions and suppresses low-curvature ones, \emph{the same shape} as ridge's $\lambda_j^{\hat{}}$-shrinkage with the correspondence $\lambda_{\text{ridge}} \approx 1/(\eta t)$. Exercise~\ref{ex:earlystop} derives this correspondence exactly; its content is why ``train less'' and ``penalize more'' are interchangeable first-order responses to overfitting, and why early stopping patience belongs in the hyperparameter registry of Module 5's protocol (it \emph{is} a tuned complexity parameter).
+
+\emph{Dropout.} During training, zero each hidden unit independently with probability $q$ and scale survivors by $1/(1-q)$ (inverted dropout, so evaluation runs the unmodified network). Three readings, in decreasing solidity: it is multiplicative noise injection that prevents co-adaptation (units cannot rely on specific partners that may vanish); it approximates training an exponential ensemble of subnetworks with shared weights, evaluated at test time by weight scaling; and for linear regression, dropout on inputs is \emph{exactly} equivalent to a data-dependent ridge penalty --- the cleanest available statement that noise is regularization. On small tabular financial models, modest dropout ($q \approx 0.1$--$0.3$) on hidden layers is a workhorse; on the gate, prefer weight decay (dropout noise in routing destabilizes the mixture's responsibilities).
+
+\emph{Augmentation and adversarial training} (Goodfellow Ch.\ 7, one honest paragraph). Augmentation manufactures invariances by transforming inputs label-free --- transformative in vision, weak in finance because the invariances of returns are unknown (what is the ``rotated'' version of a momentum signal?); the nearest financial analogues are feature noising and resampled (block-bootstrap, Foundations B \S B.4.5) training windows, both defensible, neither standard. Adversarial training optimizes against worst-case perturbations; its pipeline relevance is conceptual --- a reminder that models fit at one data distribution fail off it, which finance operationalizes as regime shift rather than pixel attacks.
+
+\emph{Double descent} (Prince Ch.\ 8's genuinely new item). Heavily overparameterized networks can interpolate the training data and \emph{still} generalize, with test error descending a second time past the classical U-curve's interpolation peak --- a real phenomenon, theoretically linked to implicit regularization of gradient methods in overparameterized regimes. Treat it as a flag planted for intellectual honesty, not an invitation: the regime requires clean labels and abundant signal, and a return panel at IC $\approx 0.03$ is the opposite of both. The NEC lives on the classical side of the curve, where Foundations B's budget arithmetic governs and Module 5's validation discipline decides.
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[Supplementary: early stopping is spectral ridge]\label{ex:earlystop}
+\prioCore
+Gradient descent from $\bm\beta_0 = \bm 0$ on the quadratic model problem (Foundations C \S C.2), step $\eta < 1/\lambda_{\max}$.
+(a) Show in the eigenbasis that after $t$ steps, $\tilde\beta_{j,t} = \big(1 - (1 - \eta\lambda_j)^t\big)\,\tilde\beta_j^\ast$: a shrinkage factor per mode, increasing in $\lambda_j$ and in $t$.
+(b) Place it beside ridge's factor $\lambda_j/(\lambda_j + \lambda_{\mathrm{ridge}})$ (Foundations A / Module 4): show both filters pass high-curvature directions and suppress low-curvature ones, and by matching either the small-$\lambda_j$ slopes or the half-shrinkage points, derive the correspondence $\lambda_{\mathrm{ridge}} \approx 1/(\eta\, t)$.
+(c) Conclusions, one sentence each: why ``longer training'' moves along the same complexity axis as ``weaker penalty''; and why early-stopping patience must therefore be logged in Module 5's trial registry as a hyperparameter.
+\end{exercise}
+
+
+% =====================================================================
+\section{Capstone: building and debugging the NEC experts}\label{sec:capstone}
+% =====================================================================
+
+The corrected NEC's experts are MLPs of the form now fully specified: two-to-four layers, ReLU, He init, LayerNorm, modest dropout, AdamW with warmup-then-decay, norm clipping, loss from \S\ref{sec:loss} (squared on rank-transformed targets, or heteroskedastic Gaussian once per-expert variances enter), trained under the mixture objective whose gradients are (B.8.5)--(B.8.6) and judged by Module 5's protocol. What this section adds is the \emph{debugging liturgy} --- ordered, cheap, and diagnostic:
+
+\begin{enumerate}[leftmargin=2em,itemsep=0.15em]
+\item \emph{Shape audit.} Print every tensor shape through one forward pass; the matrix-calculus shape discipline of Foundations C \S C.6 catches transposition bugs before any training run.
+\item \emph{Gradient check.} Centered finite differences vs.\ analytic gradients on a tiny copy of the network (Exercise~\ref{ex:milestone}); run once after any hand-written loss or layer.
+\item \emph{Overfit one batch.} A correct model-loss-optimizer triple must drive one minibatch's loss to $\approx 0$; failure localizes the bug to wiring, not data or capacity. (Passing says nothing about generalization --- this is a plumbing test.)
+\item \emph{Initialization sanity.} At $t = 0$: loss should equal its theoretical chance value (e.g.\ $\log K$ for a $K$-class CE --- a uniform gate; Foundations B \S B.6), activations should have unit-scale variance layer through layer (\S\ref{sec:initderiv}); a factor-of-ten anomaly at $t=0$ is an init or normalization bug.
+\item \emph{Loss-curve reading.} The grammar of \S\ref{sec:practice}; for the mixture, add the gate dashboards --- entropy, utilization, responsibilities --- from Modules 4 and B, because expert-side bugs masquerade as gate collapse and vice versa.
+\item \emph{Ablate toward the trivial.} When the full mixture misbehaves, fall back: single expert (no gate), then linear expert, then ridge --- the Module 4 baseline. The first rung of the ladder that works brackets the fault.
+\end{enumerate}
+
+\medskip
+\noindent\textbf{Checkpoint (from the syllabus, with the ledger applied).} Closed book: derive backprop \eqref{eq:backprop} for two layers and by induction for $L$ (Exercise~\ref{ex:backprop}); derive Xavier and He, including the half-Gaussian factor (Exercises~\ref{ex:xavier}--\ref{ex:he}); derive the batch-norm gradient with all three coupling terms (Exercise~\ref{ex:bngrad}); and --- discharged in Foundations C, recite rather than re-derive --- SGD's convergence and noise ball, momentum's ODE, Adam's bias correction. Practically: you can build, train, and debug a small PyTorch model via the liturgy above without copying a training loop blindly. If all of that is comfortable, Module 6 has done its job, and the sequence encoder of Module 7 is the only architectural piece still missing.
+
+% =====================================================================
+\section{Exercises}\label{sec:exercises}
+% =====================================================================
+
+\noindent\textbf{Importance labels.} Each exercise carries a priority badge for the NEC/MoE thesis track, reflecting how load-bearing it is --- \emph{not} how hard it is. \prioCore are the chapter's must-derive spine: the loss heads your experts will actually train under (\ref{ex:prince5} --- its part (c) is the per-expert variance head and its failure mode), backpropagation (\ref{ex:backprop}), the two initializations your ReLU experts and encoder depend on, Xavier (\ref{ex:xavier}) and He (\ref{ex:he}), the batch-norm gradient (\ref{ex:bngrad}) --- the hardest exercise here, kept Core because its cross-sample coupling \emph{is} the leakage trap of \S\ref{sec:bn} and is the reason the NEC defaults to LayerNorm --- and early-stopping-as-spectral-ridge (\ref{ex:earlystop}), Core because patience is a complexity dial the Module 5 trial registry must log. \prioWorth are high value a notch below, including the do-it-once brute-force backprop (\ref{ex:prince7}) and the applied PyTorch milestone (\ref{ex:milestone}), worth doing when you start implementing. \prioLow is foundational-but-familiar (\ref{ex:gfsub}: affine collapse and XOR). The optimization derivations the syllabus also lists here --- SGD, momentum, Adam --- were done once in Foundations C and are recited, not repeated.
+
+Questions only, as established. All assigned Prince problems appear, restated in this book's notation and made self-contained (figure references replaced by explicit constructions). The assigned ``Goodfellow Ch.\ 6 Exercises 6.1--6.2'' do not exist in that book (see preface); Exercise~\ref{ex:gfsub} substitutes. The syllabus's SGD-quadratic, momentum-ODE, and Adam exercises for this module were discharged in Foundations C (Exercises C.1--C.3 and C.6) and are not repeated. \textbf{Core exercises (\prioCore) sit inline in the chapter body as checkpoint exercises, at the end of the section they test}; this section collects the supplementary exercises only.
+
+\subsection*{On shallow and deep networks (Sections~\ref{sec:shallow}--\ref{sec:deep})}
+
+\begin{exercise}[Prince Probs.\ 3.1--3.2, extended with 3.3's slopes]\label{ex:prince3}
+\prioWorth
+Take the one-dimensional, three-hidden-unit ReLU network
+$y = \phi_0 + \sum_{k=1}^{3} \phi_k \ReLU(\theta_{k0} + \theta_{k1} x)$,
+with parameters chosen so the three joint locations $x_k = -\theta_{k0}/\theta_{k1}$ are distinct, creating four linear regions.
+(a) What mapping results if the activation is linear, $a[z] = \psi_0 + \psi_1 z$? What if it is removed, $a[z] = z$? Prove the collapse in both cases.
+(b) For each of the four regions, identify which hidden units are active (pass their input) and which are clipped (output zero), assuming each $\theta_{k1} > 0$.
+(c) Derive the joint positions and the slope of $y$ in each region in terms of the parameters, and verify the slopes change by $\phi_k \theta_{k1}$ at joint $k$ --- each unit contributes its ``hinge'' exactly once.
+\end{exercise}
+
+\begin{exercise}[Substitution for the nonexistent Goodfellow Ch.\ 6 exercises]\label{ex:gfsub}
+\prioLow
+(a) Prove the depth-collapse theorem behind Exercise~\ref{ex:prince3}(a) in general: a network of $L$ layers with identity (or any affine) activation computes a single affine map, for any widths. Conclude in one sentence why ``deep linear networks'' nonetheless remain interesting to optimization theorists though not to function approximators.
+(b) The XOR function on $\{0,1\}^2$ (output $1$ iff inputs differ): prove no affine classifier $\mathrm{sign}(w_1 x_1 + w_2 x_2 + b)$ computes it, then construct an explicit two-hidden-unit ReLU network that does, verifying all four input cases. (This is the canonical Goodfellow \S6.1 worked example, recast as a problem.)
+\end{exercise}
+
+\subsection*{On backpropagation (Section~\ref{sec:backprop})}
+
+\begin{exercise}[Prince Probs.\ 7.1--7.2: backprop by brute force, once]\label{ex:prince7}
+\prioWorth
+Take the scalar two-layer, two-units-per-layer network
+\[
+y = \phi_0 + \phi_1\, a\big[\psi_{01} + \psi_{11} a[\theta_{01} + \theta_{11}x] + \psi_{21} a[\theta_{02} + \theta_{12}x]\big]
++ \phi_2\, a\big[\psi_{02} + \psi_{12} a[\theta_{01} + \theta_{11}x] + \psi_{22} a[\theta_{02} + \theta_{12}x]\big],
+\]
+with $a = \ReLU$, so $a'[z] = \mathbf{1}[z > 0]$.
+(a) Compute $\partial y/\partial \phi_\bullet$, $\partial y/\partial \psi_{\bullet\bullet}$, $\partial y/\partial \theta_{\bullet\bullet}$ for all 13 parameters \emph{directly}, without the backprop algorithm. Mark every subexpression you compute more than once.
+(b) For a depth-3 chain $f_0 \to h_1 \to f_1 \to h_2 \to f_2 \to h_3 \to f_3 \to \ell$ written in our notation, give explicit expressions for each factor type appearing in the chain-rule products: $\partial \ell/\partial \bm f_3$, $\partial \bm h_\ell / \partial \bm f_{\ell-1}$ (a weight matrix --- which one, transposed or not?), and $\partial \bm f_\ell/\partial \bm h_\ell$ (a diagonal mask --- of what?). Reconcile with the boxed recursion \eqref{eq:backprop}.
+(c) One paragraph: state precisely what backpropagation reuses that your part-(a) computation recomputed, and how the cost ratio scales with depth and width (Foundations C, Exercise C.7).
+\end{exercise}
+
+\begin{exercise}[Syllabus, upgraded: cross-entropy through the last two layers]\label{ex:cethrough}
+\prioWorth
+The fused softmax--CE block hands backprop the starting sensitivity $\bdelta_L = \hat{\bm p} - \bm y$ (Module 4 \S4.10; do not re-derive).
+(a) Push it through the final linear layer: recover $\nabla_{\bW_L} = (\hat{\bm p} - \bm y)\,\bh_{L-1}^\T$ --- and note this \emph{is} Module 4's Exercise 4.5(c), now seen as the first step of \eqref{eq:backprop}.
+(b) Continue one layer deeper through a ReLU hidden layer: derive $\nabla_{\bW_{L-1}}\mathcal{L}$ explicitly, and identify where the 0/1 mask enters.
+(c) Explain in two sentences why implementations expose ``cross-entropy-with-logits'' as a single op: which two numerically dangerous intermediates does the fusion never materialize (Module 4 \S4.10; Foundations B \S B.6.3)?
+\end{exercise}
+
+\subsection*{Applied milestone (Section~\ref{sec:capstone})}
+
+\begin{exercise}[Applied milestone --- optional, computational]\label{ex:milestone}
+\prioWorth
+\emph{The syllabus's practical milestone; the one computational exercise of the chapter, consistent with house policy.} Implement the two-layer MLP of Exercise~\ref{ex:backprop} in PyTorch. (i) Verify your hand-derived gradients against \texttt{torch.autograd} on a small random input (centered finite differences as a third check). (ii) Run the debugging liturgy of \S\ref{sec:capstone} on it: shape audit, overfit-one-batch, $t = 0$ loss against the chance value. (iii) Break it deliberately --- a forgotten \texttt{model.eval()} with a BatchNorm layer inserted --- and observe which diagnostic catches it.
+\end{exercise}
+
+% =====================================================================
+\section*{Source map and what comes next}
+\addcontentsline{toc}{section}{Source map and what comes next}
+% =====================================================================
+
+\begin{center}
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+Section & Primary source(s) & Feeds directly into \\
+\midrule
+\ref{sec:shallow} Shallow nets, regions & Prince Ch.\ 3 & expert architecture intuition \\
+\ref{sec:deep} Depth and folding & Prince Ch.\ 4 & why NEC components stay shallow \\
+\ref{sec:loss} Losses as likelihoods & Prince Ch.\ 5 + Fnd.\ B \S B.7 & expert losses; mixture NLL (Module 8) \\
+\ref{sec:backprop} Backprop completed & Prince Ch.\ 7 + Fnd.\ C & BPTT (Module 7) \\
+\ref{sec:initderiv} Xavier and He & Prince Ch.\ 7 + Fnd.\ C \S C.7 & every \texttt{init} call in the code \\
+\ref{sec:practice} Schedules, clipping & Prince Ch.\ 6 + GF \S8.1--8.3 & the NEC training loop \\
+\ref{sec:bn} BatchNorm vs LayerNorm & Prince Ch.\ 7 / GF \S8 + own & encoder normalization (Module 7) \\
+\ref{sec:reg} Regularization toolkit & Prince Ch.\ 8, GF Ch.\ 7 & hyperparameter registry (Module 5) \\
+\ref{sec:capstone} Debugging liturgy & synthesis & every experiment from here on \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\medskip
+One architectural piece remains before the thesis's core: the sequence encoder. Module 7 derives backpropagation \emph{through time} as \eqref{eq:backprop} unrolled along a sequence, proves the vanishing/exploding-gradient theorem as the third appearance of this book's geometric-amplification motif (after GD modes and depth-variance), and dissects the GRU and LSTM gates as engineered solutions --- ending with a line-by-line mathematical reading of the LSTM encoder \texttt{C\_L} and classifier head \texttt{C\_F} in the existing NEC code, the components the corrected model will inherit or replace.
+
+\end{document}

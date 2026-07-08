@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nec-moe"
+version = "0.1.0"
+description = "Corrected NEC baseline: regime-conditional mixture-of-experts for cross-sectional return prediction (thesis baseline)"
+requires-python = ">=3.12"
+dependencies = ["torch>=2.0", "numpy>=1.24", "pandas>=2.0"]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+yahoo = ["yfinance>=0.2"]  # Stage-B prototyping fallback source (unofficial)
+
+[tool.setuptools]
+packages = ["nec_moe"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

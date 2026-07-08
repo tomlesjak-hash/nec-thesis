@@ -1,0 +1,420 @@
+% =====================================================================
+%  Foundations for a Quant Research Pipeline
+%  Chapter: Math Foundations D — Information Theory and Variational Analysis
+%  Companion textbook to NEC_thesis_syllabus.md
+%  Sources synthesized: MacKay Ch 2, 4; Bishop §1.6, §10.1;
+%  Murphy PML §8.4, §10.1; Matrix Cookbook §8 (forward reference)
+% =====================================================================
+\documentclass[11pt]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{mathpazo}
+\usepackage{microtype}
+\usepackage[margin=1.05in]{geometry}
+\usepackage{amsmath,amssymb,amsthm,mathtools,bm}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{tcolorbox}
+\tcbuselibrary{breakable}
+\usepackage{booktabs}
+\usepackage[colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,urlcolor=blue!50!black]{hyperref}
+
+\linespread{1.05}
+\setlength{\parskip}{0.35em}
+
+% ---------- colors ----------
+\definecolor{necblue}{RGB}{20,45,90}
+\definecolor{finmaroon}{RGB}{110,30,30}
+\definecolor{boxbg}{RGB}{245,247,250}
+\definecolor{finbg}{RGB}{250,246,243}
+
+% ---------- chapter-D numbering ----------
+\renewcommand{\thesection}{D.\arabic{section}}
+\numberwithin{equation}{section}
+
+% ---------- theorem environments ----------
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{corollary}[theorem]{Corollary}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{example}[theorem]{Example}
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+
+\newcounter{exercise}
+\renewcommand{\theexercise}{D.\arabic{exercise}}
+\newenvironment{exercise}[1][]{\refstepcounter{exercise}\par\medskip
+  \noindent\textbf{Exercise \theexercise}\if\relax\detokenize{#1}\relax\else\ \textnormal{[#1]}\fi\textbf{.}\ \itshape}{\par\medskip}
+% ---------- exercise importance badges (priority for the NEC/MoE thesis track) ----------
+\definecolor{priogray}{RGB}{120,120,120}
+\newcommand{\prioCore}{{\normalfont\small\textbf{\textcolor{necblue}{[\,\ensuremath{\bigstar\bigstar\bigstar}\ Core\,]}}}\hspace{0.5em}}
+\newcommand{\prioWorth}{{\normalfont\small\textbf{\textcolor{finmaroon}{[\,\ensuremath{\bigstar\bigstar}\ Worth it\,]}}}\hspace{0.5em}}
+\newcommand{\prioLow}{{\normalfont\small\textcolor{priogray}{[\,\ensuremath{\bigstar}\ Low priority\,]}}\hspace{0.5em}}
+\newcommand{\prioOpt}{{\normalfont\small\textcolor{priogray}{[\,\ensuremath{\circ}\ Optional\,]}}\hspace{0.5em}}
+\newcommand{\corebadge}{}% superseded by the four \prio badges above
+
+% ---------- boxes ----------
+\newtcolorbox{necbox}{breakable,colback=boxbg,colframe=necblue,
+  boxrule=0.8pt,arc=1.5mm,left=2mm,right=2mm,top=1.5mm,bottom=1.5mm,
+  title={\sffamily\bfseries NEC connection},fonttitle=\small}
+\newtcolorbox{finbox}{breakable,colback=finbg,colframe=finmaroon,
+  boxrule=0.8pt,arc=1.5mm,left=2mm,right=2mm,top=1.5mm,bottom=1.5mm,
+  title={\sffamily\bfseries Finance reality check},fonttitle=\small}
+
+% ---------- operators ----------
+\DeclareMathOperator{\E}{\mathbb{E}}
+\DeclareMathOperator{\Var}{Var}
+\DeclareMathOperator{\Cov}{Cov}
+\DeclareMathOperator{\diag}{diag}
+\DeclareMathOperator*{\argmin}{arg\,min}
+\DeclareMathOperator*{\argmax}{arg\,max}
+\newcommand{\KL}[2]{\mathrm{KL}\!\left(#1 \,\middle\|\, #2\right)}
+\newcommand{\Normal}{\mathcal{N}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\x}{\bm{x}}
+\newcommand{\T}{\top}
+\newcommand{\bmu}{\bm{\mu}}
+\newcommand{\bSigma}{\bm{\Sigma}}
+\newcommand{\ELBO}{\mathcal{L}}
+\newcommand{\Hent}{\mathrm{H}}
+
+\title{\vspace{-1.2em}{\large\sffamily Foundations for a Quant Research Pipeline}\\[0.4em]
+\textbf{Math Foundations D:\\ Information Theory and Variational Analysis}\\[0.3em]
+{\large A single merged treatment of MacKay Ch.\ 2 and 4, Bishop \S1.6 and \S10.1,\\ and Murphy \S8.4 and \S10.1 --- built strictly on top of Foundations B \S B.6}}
+\author{Prepared for Tom Koreslesjak \;\textperiodcentered\; companion to \texttt{NEC\_thesis\_syllabus.md}}
+\date{June 2026}
+
+\begin{document}
+\maketitle
+\vspace{-1.5em}
+
+\begin{abstract}
+\noindent Foundations B bought the basic information-theoretic toolkit: entropy, KL divergence, Gibbs' inequality, mutual information, log-sum-exp. This chapter completes it into the variational machinery that Module 8's EM derivation consumes cold: the chain rules of entropy and mutual information and the data-processing inequality (which bounds, among other things, how informative any regime gate can possibly be); the geometry of KL --- why its asymmetry is structure, not blemish, and what fitting in each direction does to an approximation; the evidence lower bound derived three ways, the third of which is the Helmholtz free energy and the variational principle you have used since quantum mechanics; mean-field theory and the exponential-family algebra that makes its updates close; and a preview of the two ways to differentiate through randomness --- score function and reparameterization --- which is the mathematics under every routing trick in Module 10. Nothing from Foundations B is re-derived; everything here extends it.
+\end{abstract}
+
+\tableofcontents
+
+\subsection*{How this chapter was assembled (and what was cut)}
+
+The assigned MacKay and Murphy texts are not in the local library (both are free online, per the syllabus); this chapter is written to be self-contained against that absence, synthesizing their assigned content with the local Bishop. The de-duplication ledger against Foundations B \S B.6 and its exercises is the organizing constraint: entropy, differential entropy, Gibbs' inequality (Ex.\ B.5), KL between Gaussians (Ex.\ B.16), univariate maximum entropy (Ex.\ B.15), cross-entropy-equals-KL-plus-entropy, and the MLE-as-KL-projection identity are all \emph{owned} and only cited. Cuts:
+
+\begin{itemize}[leftmargin=2em,itemsep=0.15em]
+\item \emph{MacKay Ch.\ 2 as such.} Its content (probability, Bayes, basic entropy) is Foundations B; nothing survives but cross-references.
+\item \emph{MacKay Ch.\ 4's proof machinery.} The source coding theorem is stated and its Asymptotic Equipartition Property is \emph{sketched} --- it is one application of the LLN you already own --- but typicality bookkeeping and code constructions (Huffman, arithmetic coding) are not load-bearing for a quant pipeline and are cut with a pointer.
+\item \emph{Bregman divergences in general.} One subsection establishes KL as a Bregman divergence and extracts the single property we will use (means minimize expected Bregman divergence); the general theory is left alone.
+\item \emph{Conjugate-prior machinery.} Cut from Foundations B and still cut here; exponential families enter only as the reason mean-field updates have closed forms, with the categorical and Gaussian as the two examples Module 8 needs. The Matrix Cookbook \S8 Gaussian-moment formulas are flagged as the reference for Module 8's mean-field-Gaussian computations, per the syllabus.
+\item \emph{Reparameterization at depth.} \S\ref{sec:gradest} is a preview by design (the syllabus's word); Gumbel-Softmax and routing estimators belong to Module 10.
+\end{itemize}
+
+\subsection*{Notation}
+
+As established. Latents are $Z$ (continuous or discrete; for mixtures, the expert label $z \in \{1,\dots,K\}$), observations $X$, variational distributions $q(Z)$, model parameters $\theta$. $\Hent(\cdot)$ is entropy (differential where the argument is continuous), $\Hent(X \mid Y)$ conditional entropy, $I(X;Y)$ mutual information. All Foundations B conventions (logs natural, $\KL{\cdot}{\cdot}$) carry over; cross-references (B.$\cdot$), (C.$\cdot$), (4--7.$\cdot$) follow the ledger.
+
+% =====================================================================
+\section{Information measures, completed}\label{sec:info}
+% =====================================================================
+
+Foundations B defined $\Hent(X)$, $\KL{p}{q}$, and $I(X;Y) = \KL{p(x,y)}{p(x)p(y)}$ and proved the inequalities that power them. What it did not build is the \emph{calculus} of these quantities --- how they decompose over several variables. Three definitions complete the family. The \emph{joint entropy} $\Hent(X, Y)$ is the entropy of the pair. The \emph{conditional entropy} is the expected residual surprise once $Y$ is known:
+\begin{equation}
+\Hent(X \mid Y) \;=\; \E_{y}\big[ \Hent(X \mid Y = y) \big]
+\;=\; -\sum_{x,y} p(x,y) \log p(x \mid y).
+\label{eq:condent}
+\end{equation}
+The \emph{conditional mutual information} $I(X; Z \mid Y)$ is mutual information computed under $p(\cdot \mid y)$, averaged over $y$. From the product rule (B.1.2), one line each gives the \emph{chain rules}:
+\begin{equation}
+\Hent(X, Y) = \Hent(Y) + \Hent(X \mid Y),
+\qquad
+I(X;\, Y, Z) = I(X; Y) + I(X; Z \mid Y),
+\label{eq:chainrules}
+\end{equation}
+(the second is Exercise~\ref{ex:chain}): total information about $X$ in the pair $(Y, Z)$ splits into what $Y$ carries plus what $Z$ adds \emph{given} $Y$ --- the bookkeeping identity behind every ``does this feature add anything?'' question. Conditioning reduces entropy on average ($\Hent(X \mid Y) \le \Hent(X)$, with equality iff independent --- Gibbs again), and the identities $I(X;Y) = \Hent(X) - \Hent(X \mid Y) = \Hent(X) + \Hent(Y) - \Hent(X,Y)$ position mutual information as the overlap in an entropy Venn diagram.
+
+The payoff theorem of this calculus:
+
+\begin{theorem}[Data-processing inequality]\label{thm:dpi}
+If $X \to Y \to Z$ is a Markov chain ($Z$ depends on $X$ only through $Y$, i.e.\ $p(z \mid x, y) = p(z \mid y)$), then
+$I(X; Z) \;\le\; I(X; Y)$.
+\end{theorem}
+
+The proof is the MI chain rule applied twice to $I(X; Y, Z)$ plus one observation about which conditional MI vanishes under Markovity --- Exercise~\ref{ex:chain} walks it. The reading: \emph{no processing of $Y$, deterministic or random, clever or learned, can increase the information it carries about $X$}. Post-processing can discard, repackage, or denoise; it cannot manufacture.
+
+\begin{necbox}
+The NEC's inference path is a Markov chain by construction:
+\[
+\text{future return} \;\leftrightarrow\; \text{feature window} \;\to\; \bm h_T \;\to\; \bm\pi(\x) \;\to\; z .
+\]
+Theorem~\ref{thm:dpi} therefore stacks hard ceilings: $I(\text{return};\, z) \le I(\text{return};\, \bm\pi) \le I(\text{return};\, \bm h_T) \le I(\text{return};\, \text{window})$. Two consequences for the thesis. First, a sober expectation: the gate cannot know more about next month than the features it reads --- regime detection is information \emph{routing}, never information creation; any claimed gate edge must be located in the window's information and merely \emph{concentrated} by the encoder. Second, a diagnostic ordering: if the Module-5-style probe $I(z;\, \text{VIX bucket})$ is high while $I(z;\, \text{future returns})$ is nil, the gate has learned a publicly visible state variable without predictive content --- interpretable and useless, a distinction the DPI chain lets you state quantitatively.
+\end{necbox}
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[Syllabus: chain rule of MI and data processing]\label{ex:chain}
+\prioCore
+(a) From the definitions and the product rule, prove the entropy chain rule $\Hent(X,Y) = \Hent(Y) + \Hent(X \mid Y)$ and then the MI chain rule $I(X; Y, Z) = I(X; Y) + I(X; Z \mid Y)$.
+(b) Prove the data-processing inequality (Theorem~\ref{thm:dpi}): expand $I(X; Y, Z)$ both ways with the chain rule, show Markovity forces $I(X; Z \mid Y) = 0$, and use non-negativity of conditional MI to conclude $I(X;Z) \le I(X;Y)$. Identify the equality condition.
+(c) Apply to the NEC chain (window $\to \bm h_T \to z$): state the resulting inequality string, and explain in two sentences why ``the gate found a regime variable with high $I(z; \mathrm{VIX})$'' is compatible with the gate being predictively worthless --- which mutual information does the thesis actually need to be nonzero?
+\end{exercise}
+
+
+% =====================================================================
+\section{Entropy as compression: the source coding theorem}\label{sec:coding}
+% =====================================================================
+
+MacKay's Ch.\ 4 assignment earns its place by giving entropy an \emph{operational} meaning, in one page. Assign outcome $x$ a codeword of length $\ell(x)$ bits; decodability forces the Kraft inequality $\sum_x 2^{-\ell(x)} \le 1$; the expected length $\E[\ell]$ is then minimized by $\ell(x) = -\log_2 p(x)$, achieving $\E[\ell] = \Hent(X)$ (in bits), and \emph{no} decodable code does better:
+
+\begin{theorem}[Source coding, stated]\label{thm:coding}
+Optimal lossless compression of i.i.d.\ draws from $p$ requires $\Hent(p)$ bits per symbol asymptotically; compressing with the wrong model $q$ costs $\Hent(p) + \KL{p}{q}$ bits per symbol.
+\end{theorem}
+
+The asymptotic mechanism is the \emph{Asymptotic Equipartition Property}, and it is nothing but the LLN you proved in Foundations B applied to the random variable $-\log p(X)$: for i.i.d.\ draws, $-\tfrac1n \log p(X_1, \dots, X_n) = \tfrac1n \sum_i \big(-\log p(X_i)\big) \to \Hent(p)$, so long sequences concentrate on a ``typical set'' of $\approx 2^{n\Hent}$ members, each with probability $\approx 2^{-n\Hent}$ --- enumerate the typical set and you have the code (Exercise~\ref{ex:aep} fills in the sketch). The second clause of the theorem is the operational face of a Foundations B identity: cross-entropy $= \Hent + \mathrm{KL}$ (B.6.4). \emph{Negative log-likelihood is a compression score}: a model that assigns your out-of-sample return panel a shorter description has, in a precise sense, found more of its structure --- the cleanest available intuition for why held-out NLL is a legitimate model-comparison metric alongside Module 5's task metrics, and the entire content of ``MDL'' that this book needs (the rest of ESL \S7.8 stays cut).
+
+% =====================================================================
+\section{The geometry of KL: Bregman structure and asymmetry}\label{sec:klgeom}
+% =====================================================================
+
+Why is KL asymmetric, and is that a defect? The structural answer: KL is a \emph{Bregman divergence} --- the gap between a convex function and its tangent plane. For convex $F$, define $D_F(\bm u, \bm v) = F(\bm u) - F(\bm v) - \langle \nabla F(\bm v), \bm u - \bm v \rangle \ge 0$. Taking $F$ to be \emph{negative entropy} $F(\bm p) = \sum_x p_x \log p_x$ on the simplex yields exactly $D_F(\bm p, \bm q) = \KL{\bm p}{\bm q}$ (Exercise~\ref{ex:bregman}); squared Euclidean distance is the same construction with $F = \tfrac12\|\cdot\|^2$ --- the one $F$ whose Bregman divergence happens to be symmetric. Asymmetry is thus generic; Euclidean intuition is the exception, not the rule.
+
+One Bregman property does real work later:
+
+\begin{proposition}[Means minimize expected Bregman divergence]\label{prop:bregmean}
+For any Bregman divergence and any random $\bm U$:
+$\argmin_{\bm c}\, \E\big[ D_F(\bm U, \bm c) \big] = \E[\bm U]$.
+\end{proposition}
+
+(Exercise~\ref{ex:bregman} proves it --- the same add-and-subtract pattern as Theorem B.2.4.) This is why \emph{averaging} is the right aggregation under KL-flavored objectives: when Module 8's M-step updates a Gaussian expert's mean as a responsibility-weighted average of its samples, Proposition~\ref{prop:bregmean} is the abstract reason that humble weighted mean is exactly optimal and not merely convenient.
+
+% =====================================================================
+\section{Forward and reverse KL: two ways to be wrong}\label{sec:fwdrev}
+% =====================================================================
+
+Approximate an intractable $p$ by a tractable $q \in \mathcal{Q}$. Two objectives, two characters:
+
+\emph{Forward KL}, $\min_q \KL{p}{q} = \E_p[\log p/q]$: the expectation runs over $p$, so $q$ is punished \emph{wherever $p$ has mass and $q$ does not} ($p > 0, q \to 0$ blows up the integrand). Forward fitting is \emph{zero-avoiding, mass-covering}: stretch to cover every mode, accept blur. For an exponential-family $\mathcal{Q}$ (\S\ref{sec:meanfield}), the forward optimum is \emph{moment matching} --- match $\E[T(x)]$ between $p$ and $q$ --- derived in Exercise~\ref{ex:fwdrev} from the $\nabla_\eta A = \E[T]$ identity below.
+
+\emph{Reverse KL}, $\min_q \KL{q}{p} = \E_q[\log q/p]$: the expectation runs over $q$, so $q$ is punished wherever \emph{it} puts mass that $p$ lacks, and pays nothing for ignoring regions it never visits. Reverse fitting is \emph{zero-forcing, mode-seeking}: lock onto one mode, report confidently, underdisperse. The two-mode worked example is Exercise~\ref{ex:fwdrev}: a single Gaussian fit to a well-separated bimodal target straddles both modes under forward KL (matching the inflated overall variance) and collapses onto one mode under reverse KL.
+
+Variational inference uses \emph{reverse} KL, and the reason is bluntly computational: reverse KL is an expectation \emph{under $q$}, the distribution you chose to be tractable, so it can be evaluated and optimized; forward KL is an expectation under the very $p$ you cannot integrate. The price is inherited by everything downstream: \emph{variational posteriors are systematically too confident} --- they ignore modes and understate variance --- and you should read every VI output in Module 8 with that bias in mind. (Where have you seen mode-seeking before? Gate collapse: a mixture that locks onto one expert is making the reverse-KL error in model space --- the echo is not a coincidence, and the entropy diagnostics of (B \S B.6) are the same medicine.)
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[Syllabus: forward vs.\ reverse KL]\label{ex:fwdrev}
+\prioCore
+Let $p$ be the two-component mixture $\tfrac12\Normal(-m, 1) + \tfrac12\Normal(m, 1)$ with $m \gg 1$, and let $\mathcal{Q} = \{\Normal(\mu, \sigma^2)\}$.
+(a) Forward KL: using \eqref{eq:Aprime}, prove that for any exponential-family $\mathcal{Q}$, $\argmin_q \KL{p}{q}$ matches expected sufficient statistics, $\E_q[\bm T] = \E_p[\bm T]$; conclude the forward fit here is $\mu = 0$, $\sigma^2 = 1 + m^2$ --- a single broad Gaussian straddling both modes, dense in the trough where $p \approx 0$.
+(b) Reverse KL: write $\KL{q}{p}$ for $q$ centered near one mode and for $q$ straddling ($\mu = 0$); show the straddling choice pays an entropy-of-the-trough penalty that grows with $m$ (the zero-forcing term $\E_q[-\log p]$ evaluated where $p$ is exponentially small), so for large $m$ the reverse optimum locks onto a single mode with $\sigma^2 \approx 1$. (Asymptotic dominance, not exact optimization, is the point.)
+(c) State the general morals --- mass-covering vs.\ mode-seeking, overdispersion vs.\ underdispersion --- and explain in two sentences why VI's choice of reverse KL is computational rather than statistical, and what that implies about trusting variational error bars in Module 8.
+\end{exercise}
+
+
+% =====================================================================
+\section{The evidence lower bound, three ways}\label{sec:elbo}
+% =====================================================================
+
+The problem all of Part IV revolves around: a latent-variable model defines $p(X, Z \mid \theta)$, but learning needs the \emph{evidence} $\log p(X \mid \theta) = \log \int p(X, Z \mid \theta)\, dZ$ --- a log of an integral (or sum over $K^N$ label assignments), which is exactly the log-outside-the-sum obstruction met in (B.8.3). The variational move: introduce \emph{any} distribution $q(Z)$ and bound. Three derivations, each contributing a different insight; the syllabus checkpoint demands all three.
+
+\emph{Way 1: Jensen.} Multiply and divide, then push the log through with Jensen's inequality (Ex.\ B.5, concave direction):
+\begin{equation}
+\log p(X \mid \theta)
+= \log \E_{q}\!\left[ \frac{p(X, Z \mid \theta)}{q(Z)} \right]
+\;\ge\; \E_{q}\!\left[ \log \frac{p(X, Z \mid \theta)}{q(Z)} \right]
+\;=\vcentcolon\; \ELBO(q, \theta).
+\label{eq:elbojensen}
+\end{equation}
+Fast, but it leaves the size of the gap invisible --- Jensen says ``$\ge$'' and falls silent.
+
+\emph{Way 2: exact decomposition.} No inequality at all --- an identity (Exercise~\ref{ex:elbo} derives it in four lines from the product rule):
+\begin{equation}
+\log p(X \mid \theta) \;=\; \ELBO(q, \theta) \;+\; \KL{q(Z)}{\,p(Z \mid X, \theta)} .
+\label{eq:elbodecomp}
+\end{equation}
+Now everything is visible: the bound's gap \emph{is} the KL from $q$ to the true posterior; the bound is tight iff $q$ equals the posterior; and maximizing $\ELBO$ over $q$ is \emph{reverse-KL posterior approximation} (\S\ref{sec:fwdrev}) --- VI's mode-seeking character enters here, at the root.
+
+\emph{Way 3: free energy.} Expand $\ELBO$ the other way:
+\begin{equation}
+\ELBO(q, \theta)
+= \E_q\big[ \log p(X, Z \mid \theta) \big] + \Hent(q)
+\;=\; -\Big( \underbrace{\E_q[E(Z)]}_{\text{energy}} - \underbrace{\Hent(q)}_{\text{entropy}} \Big)
+\;=\; -F(q, \theta),
+\label{eq:elbofree}
+\end{equation}
+with energy $E(Z) = -\log p(X, Z \mid \theta)$ and temperature 1: \emph{the ELBO is the negative Helmholtz free energy of a trial distribution $q$}, and maximizing it is the variational principle of statistical mechanics --- minimize $\langle E\rangle - TS$ over trial states --- which you have used since the variational method in quantum mechanics (trial wavefunctions bounding ground-state energy; the Bogoliubov inequality is literally this chapter's \eqref{eq:elbodecomp}). The unconstrained minimizer of free energy is the Gibbs distribution $q \propto e^{-E} = p(X, Z)/\text{const} = p(Z \mid X)$ --- Way 3's restatement of Way 2's tightness condition --- and \emph{restricting the trial family} (mean-field, next) is exactly the physicist's move of restricting trial wavefunctions: you get tractability, you lose exactness, and the loss is measurable as leftover KL.
+
+The algorithmic payoff, stated now and executed in Module 8: with \eqref{eq:elbodecomp} in hand, maximum likelihood becomes \emph{coordinate ascent on $\ELBO(q, \theta)$} ---
+\begin{equation}
+\text{E-step: } q \leftarrow p(Z \mid X, \theta) \;\;\text{(close the KL gap)};
+\qquad
+\text{M-step: } \theta \leftarrow \argmax_\theta\, \E_q[\log p(X, Z \mid \theta)]
+\;\;\text{(raise the floor)} .
+\label{eq:empreview}
+\end{equation}
+Each step increases $\ELBO$; after each E-step $\ELBO$ \emph{equals} the log-likelihood, so the likelihood itself never decreases --- EM's monotonicity, proven before EM has even been formally introduced. For the mixture, the E-step is the responsibilities (B.8.4) and the M-step is responsibility-weighted fitting (Module 4's weighted least squares, Bishop Ex.\ 3.3) --- the assembly Module 8 completes.
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[Syllabus: the ELBO decomposition]\label{ex:elbo}
+\prioCore
+(a) Prove the exact identity \eqref{eq:elbodecomp} for arbitrary $q$: start from $\log p(X) = \log p(X, Z) - \log p(Z \mid X)$, take $\E_q$, and add--subtract $\E_q[\log q]$.
+(b) Re-derive the bound via Jensen \eqref{eq:elbojensen} and show the two routes agree by identifying Jensen's invisible gap with the KL term of (a) --- where in Jensen's proof (Foundations B, Ex.\ B.5) does the gap hide?
+(c) Verify the free-energy form \eqref{eq:elbofree} and the Gibbs-distribution claim: show the unconstrained maximizer of $\E_q[\log p(X,Z)] + \Hent(q)$ over all distributions $q$ is $q^\ast(Z) = p(Z \mid X)$, by writing the objective as $\log p(X) - \KL{q}{p(Z\mid X)}$.
+(d) Conclude EM's monotonicity from \eqref{eq:empreview} in three sentences: why does each E-step make the bound tight, why does each M-step increase the bound, and why does the chain of inequalities force the likelihood itself never to decrease?
+\end{exercise}
+
+
+% =====================================================================
+\section{Mean-field, and why exponential families make it tractable}\label{sec:meanfield}
+% =====================================================================
+
+When the exact posterior is itself intractable (it will be, for the HMM-flavored and Bayesian-mixture models of Part IV's later reaches), restrict the trial family to \emph{factorized} distributions --- mean-field, in name and in spirit:
+\begin{equation}
+q(Z) = \prod_{i} q_i(Z_i).
+\label{eq:meanfield}
+\end{equation}
+Coordinate ascent over the factors has a closed-form champion at each step. Isolate factor $j$ inside $\ELBO$: the terms involving $q_j$ assemble (Exercise~\ref{ex:meanfield} carries out the isolation) into a negative KL between $q_j$ and a tilted distribution, maximized by
+\begin{equation}
+q_j^\ast(Z_j) \;\propto\; \exp\!\Big( \E_{-j}\big[ \log p(X, Z) \big] \Big),
+\label{eq:cavity}
+\end{equation}
+the expectation taken over all \emph{other} factors --- Bishop's equation (10.9). A physicist reads \eqref{eq:cavity} instantly: each latent variable feels the \emph{average field} of the others --- log-domain averaging in place of the full coupled interaction --- the same approximation, and the same name, as mean-field magnetization. The iteration (update each factor against the others' current averages, sweep, repeat) monotonically increases $\ELBO$ and converges to a local optimum; what it \emph{cannot} represent is posterior correlation between factored blocks, and being reverse-KL it understates marginal variances on top (\S\ref{sec:fwdrev}). Mean-field is adequate when latents are weakly coupled given the data; it strains exactly where Part IV is headed --- consecutive regime labels are \emph{strongly} coupled by persistence, which is why HMMs get structured (non-factorized over time) posteriors via forward--backward rather than naive mean-field.
+
+Why do updates like \eqref{eq:cavity} land in \emph{closed form} so often? Because the complete-data log-likelihoods of Part IV's models are built from \emph{exponential families}:
+\begin{equation}
+p(x \mid \bm\eta) = h(x)\, \exp\!\big( \bm\eta^\T \bm T(x) - A(\bm\eta) \big),
+\label{eq:expfam}
+\end{equation}
+with natural parameter $\bm\eta$, sufficient statistic $\bm T$, and log-normalizer $A$ --- Gaussian, Bernoulli, categorical, Poisson, gamma all instances (Foundations B's main cast). Two structural facts do all the work. First, the log-normalizer is a moment generator (differentiate $\int h\, e^{\bm\eta^\T \bm T} = e^{A}$):
+\begin{equation}
+\nabla_{\bm\eta} A(\bm\eta) = \E\big[\bm T(x)\big],
+\label{eq:Aprime}
+\end{equation}
+the same derivative-of-$\log Z$ move as (B.6.9) and Foundations C's free-energy gradient --- one identity, third costume. Second, $\log p$ is \emph{linear} in $\bm T(x)$, so the expectation in \eqref{eq:cavity} only ever needs \emph{expected sufficient statistics} of the other factors --- means, covariances, responsibilities --- never full distributions. That is the entire secret of tractable VI: exponential-family models turn functional optimization into moment bookkeeping. (The Gaussian-moment formulas this bookkeeping consumes for Gaussian components are Matrix Cookbook \S8 --- the syllabus's skim-now-return-in-Module-8 reference.) Conjugacy is this same linearity read prior-side, and stays cut per the ledger.
+
+
+\subsection*{Checkpoint exercise}
+
+\begin{exercise}[Syllabus: the mean-field update]\label{ex:meanfield}
+\prioCore
+For factorized $q(Z) = \prod_i q_i(Z_i)$:
+(a) Isolate one factor: write $\ELBO(q)$ as a functional of $q_j$ with the other factors fixed, and show the $q_j$-dependent part is
+$\E_{q_j}\big[ \E_{-j}[\log p(X, Z)] \big] + \Hent(q_j) + \text{const}$.
+(b) Recognize this as $-\KL{q_j}{\tilde p_j} + \text{const}$ for the tilted distribution $\tilde p_j \propto \exp(\E_{-j}[\log p(X,Z)])$, and conclude the optimal factor is \eqref{eq:cavity} --- Bishop's (10.9) --- with the normalization absorbed.
+(c) Explain why iterating over factors monotonically increases the ELBO, and why the fixed point need not be the global optimum.
+(d) One paragraph: for two latents that are strongly correlated in the true posterior (consecutive regime labels under persistence), describe what the factorized optimum does to that correlation and to the marginal variances, citing \S\ref{sec:fwdrev}.
+\end{exercise}
+
+
+% =====================================================================
+\section{Differentiating through randomness: score function vs.\ reparameterization}\label{sec:gradest}
+% =====================================================================
+
+A preview the syllabus orders for Module 10, but whose core is three lines each and belongs with the variational toolkit. The problem: optimize $\phi$ in $\mathcal{J}(\phi) = \E_{z \sim q_\phi}[f(z)]$ --- gradients of an expectation \emph{whose distribution carries the parameter}. Two estimators:
+
+\emph{Score function (REINFORCE).} Differentiate the integral, multiply and divide by $q_\phi$:
+\begin{equation}
+\nabla_\phi\, \mathcal{J}
+= \int f(z)\, \nabla_\phi q_\phi(z)\, dz
+= \E_{q_\phi}\!\big[ f(z)\, \nabla_\phi \log q_\phi(z) \big],
+\label{eq:score}
+\end{equation}
+the log-derivative trick. Universally applicable --- $f$ need not be differentiable, $z$ may be \emph{discrete} --- but the estimator's variance is notoriously large: it learns only from the correlation between scores and returns, knowing nothing of $f$'s slope (baselines $f(z) \to f(z) - b$ reduce variance without bias; one sentence suffices here).
+
+\emph{Reparameterization.} If sampling can be rewritten as a deterministic, differentiable map of parameter-free noise --- Gaussian: $z = \mu + \sigma \varepsilon$, $\varepsilon \sim \Normal(0,1)$ --- then
+\begin{equation}
+\nabla_\phi\, \mathcal{J} = \E_{\varepsilon}\big[ \nabla_\phi\, f\big(g(\phi, \varepsilon)\big) \big],
+\label{eq:reparam}
+\end{equation}
+the gradient flows \emph{through} $f$, exploiting its slope; variance is typically far smaller (Exercise~\ref{ex:gradest} quantifies the gap on a worked example). The catch that defines Module 10's agenda: a \emph{categorical} $z$ --- an expert label --- admits no differentiable $g$; there is no smooth path from noise to a discrete choice. Soft routing (B.8) sidesteps the problem by never sampling; hard or top-$k$ routing must either accept score-function variance or relax the discreteness (Gumbel-Softmax: a temperature-controlled continuous relaxation --- (B.6)'s softmax temperature, returning one final time). That sentence is the entire conceptual map of stochastic routing; Module 10 fills in the engineering.
+
+% =====================================================================
+\section{Capstone: the mixture's free energy, and the road into Module 8}\label{sec:capstone}
+% =====================================================================
+
+Assemble the chapter on the thesis's own model. The NEC mixture defines, per sample, $p(y, z \mid \x) = \pi_z(\x)\, p_z(y \mid \x)$ with categorical latent $z$. Take a per-sample variational distribution $\bm r = (r_1, \dots, r_K)$ over $z$ and write the free-energy decomposition \eqref{eq:elbodecomp}:
+\begin{equation}
+\log p(y \mid \x)
+= \underbrace{\sum_k r_k \log \frac{\pi_k(\x)\, p_k(y \mid \x)}{r_k}}_{\ELBO(\bm r)}
+\;+\; \KL{\bm r}{\,\bm r^{\ast}},
+\qquad
+r^{\ast}_k = \frac{\pi_k(\x) p_k(y \mid \x)}{\sum_j \pi_j(\x) p_j(y \mid \x)} .
+\label{eq:mixelbo}
+\end{equation}
+Everything this book has carried converges on this display. The optimal $\bm r^\ast$ is Bayes' rule --- the responsibilities of (B.8.4), now recognized as the \emph{E-step}, the KL-gap-closing move of \eqref{eq:empreview}. At $\bm r = \bm r^\ast$ the bound is tight, so gradients of the ELBO at the optimal $\bm r$ \emph{equal} gradients of the true mixture log-likelihood --- which is the structural reason the direct NLL gradients (B.8.5)--(B.8.6) and the EM viewpoint describe the same learning signal: backprop on the mixture NLL is EM with infinitesimal M-steps. The M-step at fixed $\bm r$ splits into independent, responsibility-weighted problems: for the gate, cross-entropy toward soft labels $\bm r$ (Module 4 \S4.10, Exercise 4.5(b)); for Gaussian experts, weighted least squares (Module 4, Ex.\ 4.9; Proposition~\ref{prop:bregmean} explaining why weighted \emph{means} are exactly right). And the chapter's warnings attach: the per-sample posterior over a discrete latent is the one object VI never needs to approximate here (it is a $K$-vector, computed exactly), but the moment Part IV adds \emph{temporal coupling} between regime labels --- Markov persistence, the Hamilton baseline --- exact posteriors become chains, mean-field becomes tempting and underdispersed, and forward--backward becomes the structured alternative. You now possess every concept that discussion will use.
+
+\medskip
+\noindent\textbf{Checkpoint (from the syllabus).} Closed book: derive the ELBO three ways --- Jensen \eqref{eq:elbojensen}, exact KL decomposition \eqref{eq:elbodecomp}, free energy \eqref{eq:elbofree} --- and state what each derivation uniquely reveals (existence; the gap's identity; the physics). Explain when forward vs.\ reverse KL is appropriate and what reverse-KL fitting systematically does to uncertainty. Motivate mean-field: why factorization buys closed forms (exponential families, \eqref{eq:Aprime}), and where it fails (coupled latents, underdispersion). If all three are comfortable, you are equipped to follow Module 8's variational EM derivation cold --- the syllabus's exact promise.
+
+% =====================================================================
+\section{Exercises}\label{sec:exercises}
+% =====================================================================
+
+\noindent\textbf{Importance labels.} Each exercise carries a priority badge for the NEC/MoE thesis track, reflecting how load-bearing it is --- \emph{not} how hard it is. \prioCore mark the variational spine Module 8 consumes cold: the information calculus and its DPI ceilings on any gate (\ref{ex:chain}), the direction-of-KL character of every variational fit (\ref{ex:fwdrev}), the ELBO decomposition with EM's monotonicity falling out (\ref{ex:elbo}), and the mean-field update (\ref{ex:meanfield}). \prioWorth are a notch below: the Bregman reading of KL whose mean-optimality Module 8's M-step inherits (\ref{ex:bregman}), the multivariate maximum-entropy theorem (\ref{ex:maxent} --- kept at the same tier as its univariate parent B.15), and the gradient-estimator comparison previewing Module 10 (\ref{ex:gradest}). \prioLow is the AEP bookkeeping (\ref{ex:aep}), a one-time operational insight, not a reused tool.
+
+Questions only, as established. All five syllabus exercises appear; three supplementary exercises complete loops the chapter opened. \textbf{Core exercises (\prioCore) sit inline in the chapter body as checkpoint exercises, at the end of the section they test}; this section collects the supplementary exercises only. De-dup ledger: Jensen, Gibbs, univariate max-ent, and KL-between-Gaussians are Foundations B Exercises B.5, B.15, and B.16 and are \emph{used}, not re-proven.
+
+\subsection*{On compression and KL geometry (Sections~\ref{sec:coding}--\ref{sec:klgeom})}
+
+\begin{exercise}[Supplementary: AEP and NLL-as-compression]\label{ex:aep}
+\prioLow
+(a) For i.i.d.\ $X_1, \dots, X_n \sim p$ (finite alphabet), apply the weak LLN (Foundations B \S B.4.4) to $-\log p(X_i)$ to prove $-\tfrac1n \log p(X_1,\dots,X_n) \to \Hent(p)$ in probability.
+(b) Define the typical set $A_\varepsilon^n = \{x_{1:n} : |-\tfrac1n \log p(x_{1:n}) - \Hent| \le \varepsilon\}$; show $P(A^n_\varepsilon) \to 1$ and bound its cardinality between $(1 - \delta)\,2^{n(\Hent - \varepsilon)}$ and $2^{n(\Hent + \varepsilon)}$. Sketch how enumerating $A^n_\varepsilon$ yields a code achieving $\approx \Hent$ bits per symbol.
+(c) Using (B.6.4), show that coding with model $q$ costs $\Hent(p) + \KL{p}{q}$, and state in one sentence what this makes held-out NLL measure when two candidate NEC variants are compared on the same panel.
+\end{exercise}
+
+\begin{exercise}[Supplementary: KL as a Bregman divergence]\label{ex:bregman}
+\prioWorth
+(a) For $F(\bm p) = \sum_x p_x \log p_x$ on the simplex, compute $\nabla F$ and verify $D_F(\bm p, \bm q) = \KL{\bm p}{\bm q}$ (carry the normalization constraint carefully --- either restrict to the simplex's tangent space or note the affine term cancels).
+(b) Prove Proposition~\ref{prop:bregmean}: for any Bregman divergence, $\E[D_F(\bm U, \bm c)]$ is minimized over $\bm c$ at $\bm c = \E[\bm U]$, by showing $\E[D_F(\bm U, \bm c)] - \E[D_F(\bm U, \E\bm U)] = D_F(\E\bm U, \bm c) \ge 0$.
+(c) Verify the two specializations: $F = \tfrac12\|\cdot\|^2$ recovers ``the mean minimizes expected squared distance'' (Theorem B.2.4's cousin), and $F = $ negative entropy makes the responsibility-weighted M-step means of Module 8 optimal rather than merely natural. One sentence on why symmetry of $D_F$ is the exception (what must $F$ be?).
+\end{exercise}
+
+\subsection*{On maximum entropy (Section~\ref{sec:meanfield})}
+
+\begin{exercise}[Syllabus: multivariate maximum entropy]\label{ex:maxent}
+\prioWorth
+Among all densities on $\R^p$ with mean $\bmu$ and covariance $\bSigma \succ 0$, prove the Gaussian $\Normal(\bmu, \bSigma)$ uniquely maximizes differential entropy, generalizing Foundations B Exercise B.15. \emph{(Route: for any competitor $p$, expand $0 \le \KL{p}{\Normal(\bmu,\bSigma)}$ and note that $\E_p[\log \Normal(\x \mid \bmu, \bSigma)]$ depends on $p$ only through its first two moments --- the quadratic-form expectation identity (B.1.10) does the work. Conclude $\Hent(p) \le \Hent(\Normal)$ with equality iff $p = \Normal$ a.e., and evaluate $\Hent(\Normal(\bmu,\bSigma)) = \tfrac12 \log\big((2\pi e)^p |\bSigma|\big)$ --- the determinant derivative identity of Foundations C \S C.6 is nearby but not needed.)}
+\end{exercise}
+
+\subsection*{On gradient estimators (Section~\ref{sec:gradest})}
+
+\begin{exercise}[Supplementary: score function vs.\ reparameterization, quantified]\label{ex:gradest}
+\prioWorth
+Let $q_\phi = \Normal(\mu, 1)$ with $\phi = \mu$, and $f(z) = z^2$, so $\mathcal{J}(\mu) = \E[z^2] = \mu^2 + 1$ and the true gradient is $2\mu$.
+(a) Derive the score-function estimator \eqref{eq:score} for this case: $\hat g_{\mathrm{SF}} = z^2 (z - \mu)$ for $z \sim \Normal(\mu, 1)$; verify unbiasedness directly. \emph{(Center first: write $z = \mu + \varepsilon$ with $\varepsilon \sim \Normal(0,1)$ and expand --- the odd-moment vanishing and $\E[\varepsilon^2] = 1$, $\E[\varepsilon^4] = 3$ from Foundations B \S B.7.3 do everything.)}
+(b) Derive the reparameterized estimator \eqref{eq:reparam}: $\hat g_{\mathrm{RP}} = 2(\mu + \varepsilon)$; verify unbiasedness trivially.
+(c) Compute both variances as functions of $\mu$ (the centered expansion of (a) reduces everything to moments of $\varepsilon$), and show $\Var(\hat g_{\mathrm{SF}})$ grows polynomially in $\mu$ while $\Var(\hat g_{\mathrm{RP}}) = 4$ --- constant. State the moral.
+(d) Now let $z$ be categorical over $K$ experts. Show the score-function estimator still exists (write it), explain precisely why no reparameterization \eqref{eq:reparam} can (what property of $g(\phi, \varepsilon)$ fails for discrete outputs?), and connect in one sentence each to: soft routing's avoidance of the problem (B.8), and Gumbel-Softmax's relaxation of it (Module 10's opening topic).
+\end{exercise}
+
+% =====================================================================
+\section*{Source map and what comes next}
+\addcontentsline{toc}{section}{Source map and what comes next}
+% =====================================================================
+
+\begin{center}
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+Section & Primary source(s) & Feeds directly into \\
+\midrule
+\ref{sec:info} Chain rules, DPI & MacKay Ch.\ 2 spirit + standard & gate-informativeness ceilings; diagnostics \\
+\ref{sec:coding} Source coding, AEP & MacKay Ch.\ 4 & held-out NLL as model comparison \\
+\ref{sec:klgeom} Bregman structure & standard & M-step optimality (Module 8) \\
+\ref{sec:fwdrev} Forward vs.\ reverse KL & Murphy \S10.1 spirit; Bishop \S10.1 & reading VI outputs honestly \\
+\ref{sec:elbo} ELBO three ways & Bishop \S10.1; Murphy \S8.4 & EM (Module 8), VAEs if ever needed \\
+\ref{sec:meanfield} Mean-field, exp.\ families & Bishop \S10.1--10.2 setup & variational mixture (Module 8); HMM contrast \\
+\ref{sec:gradest} Gradient estimators & preview by syllabus design & routing tricks (Module 10) \\
+\ref{sec:capstone} Mixture free energy & synthesis & Module 8's first page \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\medskip
+Module 8 now has nothing left to set up: the mixture's ELBO is written \eqref{eq:mixelbo}, its E-step is recognized as (B.8.4), its M-step decomposes into Module 4's weighted problems, and EM's monotonicity is already proven as Exercise~\ref{ex:elbo}(d). What Module 8 adds is the execution --- Gaussian mixtures in full, EM's local optima and initialization folklore, singular-covariance pathologies, the variational Bayesian mixture that prunes unused components, and ESL \S8.5's statistical framing --- followed by the model the thesis actually trains: the mixture of experts with a learned gate, where every formula has been waiting since Foundations B \S B.8.
+
+\end{document}

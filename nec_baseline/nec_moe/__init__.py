@@ -1,0 +1,190 @@
+"""Corrected NEC baseline: regime-conditional mixture-of-experts.
+
+Design spec: ``NEC_sources/NEC_baseline_design.md`` (project root). The gate is
+a shared expert-likelihood core plus a pluggable RegimePrior, so both candidate
+thesis variations — the routing-mechanism comparison and the HMM-gated NEC —
+are config choices over one skeleton.
+"""
+
+from .config import (
+    DataConfig,
+    EncoderConfig,
+    ExpertConfig,
+    GateConfig,
+    NECConfig,
+    PriorConfig,
+    TrainConfig,
+)
+from .alignment import (
+    ExpertAlignment,
+    RegimeAlignmentReport,
+    gate_regime_alignment,
+    gate_utilization_by_date,
+    regime_alignment,
+)
+from .baselines import BaselineModel, MLPBaseline, RidgeBaseline
+from .context_data import build_context, load_french_factors, load_vix
+from .data import (
+    Batch,
+    FeatureSchema,
+    Panel,
+    PanelData,
+    SyntheticPanel,
+    SyntheticRegimePanel,
+    SyntheticSpec,
+)
+from .evaluation import (
+    FoldResult,
+    IcSummary,
+    PortfolioSummary,
+    WalkForwardFold,
+    WalkForwardResult,
+    ic_summary,
+    long_short_by_date,
+    portfolio_summary,
+    rank_ic_by_date,
+    walk_forward_evaluate,
+    walk_forward_evaluate_baseline,
+    walk_forward_folds,
+)
+from .experts import (
+    EMISSION_REGISTRY,
+    ClassicalGaussianEmission,
+    Emission,
+    ExpertBank,
+    build_emission,
+)
+from .features import (
+    SEQUENCE_FEATURES,
+    SNAPSHOT_FEATURES,
+    StageBSpec,
+    build_panel,
+    build_stage_b_panel,
+    data_config_from_panel,
+)
+from .likelihood import expert_log_likelihood
+from .market_data import DEFAULT_UNIVERSE, MARKET_SYMBOL, load_ohlcv, load_universe
+from .multiple_testing import (
+    DeflatedSharpe,
+    benjamini_hochberg,
+    bonferroni,
+    deflated_sharpe_ratio,
+    expected_max_sharpe,
+    ic_pvalue,
+    probabilistic_sharpe_ratio,
+    sharpe_ratio,
+)
+from .registry import TrialRecord, TrialRegistry
+from .losses import (
+    LoadBalanceBuffer,
+    MixtureNLLOutput,
+    expert_decorrelation_aux,
+    load_balance_aux,
+    mixture_nll,
+)
+from .model import NECModel, NECOutput
+from .priors import (
+    PRIOR_REGISTRY,
+    GumbelSoftmaxRegimePrior,
+    HardRegimePrior,
+    HMMRegimePrior,
+    PriorContext,
+    PriorOutput,
+    RegimePrior,
+    Router,
+    SoftRegimePrior,
+    TopKRegimePrior,
+    UniformRegimePrior,
+    build_prior,
+)
+from .train import SequenceEval, Trainer
+from .utils import assert_shape, set_seed
+
+__all__ = [
+    "DataConfig",
+    "EncoderConfig",
+    "GateConfig",
+    "ExpertConfig",
+    "PriorConfig",
+    "TrainConfig",
+    "NECConfig",
+    "FeatureSchema",
+    "Batch",
+    "SyntheticSpec",
+    "Panel",
+    "PanelData",
+    "SyntheticPanel",
+    "SyntheticRegimePanel",
+    "expert_log_likelihood",
+    "MixtureNLLOutput",
+    "mixture_nll",
+    "LoadBalanceBuffer",
+    "load_balance_aux",
+    "expert_decorrelation_aux",
+    "NECModel",
+    "NECOutput",
+    "RegimePrior",
+    "SoftRegimePrior",
+    "UniformRegimePrior",
+    "HardRegimePrior",
+    "TopKRegimePrior",
+    "GumbelSoftmaxRegimePrior",
+    "HMMRegimePrior",
+    "PriorOutput",
+    "PriorContext",
+    "PRIOR_REGISTRY",
+    "build_prior",
+    "Router",
+    "Trainer",
+    "SequenceEval",
+    "WalkForwardFold",
+    "walk_forward_folds",
+    "rank_ic_by_date",
+    "IcSummary",
+    "ic_summary",
+    "long_short_by_date",
+    "PortfolioSummary",
+    "portfolio_summary",
+    "FoldResult",
+    "WalkForwardResult",
+    "walk_forward_evaluate",
+    "walk_forward_evaluate_baseline",
+    "BaselineModel",
+    "RidgeBaseline",
+    "MLPBaseline",
+    "Emission",
+    "ExpertBank",
+    "ClassicalGaussianEmission",
+    "EMISSION_REGISTRY",
+    "build_emission",
+    "StageBSpec",
+    "SEQUENCE_FEATURES",
+    "SNAPSHOT_FEATURES",
+    "build_panel",
+    "build_stage_b_panel",
+    "data_config_from_panel",
+    "DEFAULT_UNIVERSE",
+    "MARKET_SYMBOL",
+    "load_ohlcv",
+    "load_universe",
+    "load_vix",
+    "load_french_factors",
+    "build_context",
+    "gate_utilization_by_date",
+    "regime_alignment",
+    "gate_regime_alignment",
+    "ExpertAlignment",
+    "RegimeAlignmentReport",
+    "TrialRecord",
+    "TrialRegistry",
+    "sharpe_ratio",
+    "probabilistic_sharpe_ratio",
+    "expected_max_sharpe",
+    "DeflatedSharpe",
+    "deflated_sharpe_ratio",
+    "ic_pvalue",
+    "bonferroni",
+    "benjamini_hochberg",
+    "assert_shape",
+    "set_seed",
+]

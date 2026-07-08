@@ -1,0 +1,26 @@
+\contentsline {section}{\numberline {4.1}Least squares as a statistical model}{3}{section.1}%
+\contentsline {subsection}{\numberline {4.1.1}From geometry to inference}{3}{subsection.1.1}%
+\contentsline {subsection}{\numberline {4.1.2}The chi-squared distribution and confidence sets}{4}{subsection.1.2}%
+\contentsline {subsection}{\numberline {4.1.3}Gauss--Markov, and why it is weak comfort}{5}{subsection.1.3}%
+\contentsline {subsection}{\numberline {4.1.4}Orthogonalization: what a multiple-regression coefficient means}{5}{subsection.1.4}%
+\contentsline {section}{\numberline {4.2}Shrinkage I: ridge regression}{6}{section.2}%
+\contentsline {section}{\numberline {4.3}The constrained-optimization toolkit: KKT and subgradients}{9}{section.3}%
+\contentsline {subsection}{\numberline {4.3.1}Lagrange multipliers with inequality constraints}{9}{subsection.3.1}%
+\contentsline {subsection}{\numberline {4.3.2}Subgradients: differentiating the absolute value}{10}{subsection.3.2}%
+\contentsline {section}{\numberline {4.4}Shrinkage II: the lasso}{11}{section.4}%
+\contentsline {subsection}{\numberline {4.4.1}The estimator and its geometry}{11}{subsection.4.1}%
+\contentsline {subsection}{\numberline {4.4.2}Coordinate descent and the solution path}{12}{subsection.4.2}%
+\contentsline {section}{\numberline {4.5}Regularization as a Bayesian prior}{13}{section.5}%
+\contentsline {section}{\numberline {4.6}From regression to classification}{13}{section.6}%
+\contentsline {section}{\numberline {4.7}Linear discriminant analysis: the generative route}{14}{section.7}%
+\contentsline {subsection}{\numberline {4.7.1}Gaussian class-conditionals with a shared covariance}{14}{subsection.7.1}%
+\contentsline {subsection}{\numberline {4.7.2}Generative versus discriminative}{15}{subsection.7.2}%
+\contentsline {section}{\numberline {4.8}Logistic and softmax regression: the discriminative route}{16}{section.8}%
+\contentsline {subsection}{\numberline {4.8.1}The binary model, its gradient, its Hessian}{16}{subsection.8.1}%
+\contentsline {subsection}{\numberline {4.8.2}Newton's method is iteratively reweighted least squares}{16}{subsection.8.2}%
+\contentsline {subsection}{\numberline {4.8.3}Separation: when the MLE runs away}{17}{subsection.8.3}%
+\contentsline {subsection}{\numberline {4.8.4}Softmax regression: $K$ classes}{17}{subsection.8.4}%
+\contentsline {section}{\numberline {4.9}Calibration: probabilities you can act on}{18}{section.9}%
+\contentsline {section}{\numberline {4.10}Capstone: the NEC gate, assembled}{19}{section.10}%
+\contentsline {section}{\numberline {4.11}Exercises}{20}{section.11}%
+\contentsline {section}{Source map and what comes next}{23}{section*.12}%

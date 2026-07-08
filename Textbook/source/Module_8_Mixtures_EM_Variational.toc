@@ -1,0 +1,9 @@
+\contentsline {section}{\numberline {8.1}Latent-variable models and the Gaussian mixture}{2}{section.1}%
+\contentsline {section}{\numberline {8.2}Two log-likelihoods, one gap}{3}{section.2}%
+\contentsline {section}{\numberline {8.3}EM for the Gaussian mixture, executed}{4}{section.3}%
+\contentsline {section}{\numberline {8.4}How mixture estimation fails, structurally}{5}{section.4}%
+\contentsline {section}{\numberline {8.5}Variational Bayesian mixtures, structurally}{6}{section.5}%
+\contentsline {section}{\numberline {8.6}From GMM to mixture of experts}{7}{section.6}%
+\contentsline {section}{\numberline {8.7}Capstone: training the corrected NEC, as a theorem with an implementation}{8}{section.7}%
+\contentsline {section}{\numberline {8.8}Exercises}{9}{section.8}%
+\contentsline {section}{Source map and what comes next}{11}{section*.12}%

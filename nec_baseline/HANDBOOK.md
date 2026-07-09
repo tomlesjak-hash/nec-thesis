@@ -1317,60 +1317,76 @@ Report the distribution of `vix_corr` across folds × seeds — that is the hone
 the +0.81 headline. Both prior families work (`hmm` uses the filtered posterior). For
 synthetic panels, index the context frame by integer date codes.
 
-## II.9 Sweeps, the registry, and defensible claims
+## II.9 Multi-seed sweeps, the registry, and defensible claims
 
-The complete experiment pattern — save as `run_sweep.py` and adapt:
+The protocol layer is `run_sweep` (`nec_moe/sweep.py`): named **arms** × a **seed
+grid**, every run through the identical harness, every trial logged, mean ± std per
+arm. This is the intended shape of every thesis experiment:
 
 ```python
-import statistics, torch
-from nec_moe import (NECConfig, NECModel, PriorConfig, Trainer, TrialRegistry,
-                     benjamini_hochberg, deflated_sharpe_ratio, ic_pvalue,
-                     long_short_by_date, walk_forward_evaluate)
+from nec_moe import (NECConfig, PriorConfig, RidgeBaseline, MLPBaseline,
+                     TrialRegistry, baseline_arm, corrected_claims, nec_arm,
+                     run_sweep)
 
-SPLIT = dict(n_folds=4, test_dates_per_fold=60, purge_dates=5,
-             backtest_quantiles=5, cost_rate=0.001)
 reg = TrialRegistry("results/routing_sweep.jsonl")
+vol_key = lambda p: p.x_seq[:, -1, 2]                 # observable regime proxy
 
-def make_trainer(kind: str, seed: int):
-    def make():
-        torch.manual_seed(seed)
-        return Trainer(NECModel(NECConfig(data=data_cfg, prior=PriorConfig(kind=kind),
-                                          train=train_cfg)))
-    return make
+arms = [
+    nec_arm("soft",    NECConfig(data=data_cfg, train=train_cfg),
+            warmstart_key=vol_key),
+    nec_arm("uniform", NECConfig(data=data_cfg, prior=PriorConfig(kind="uniform"),
+                                 train=train_cfg), warmstart_key=vol_key),
+    nec_arm("hard",    NECConfig(data=data_cfg, prior=PriorConfig(kind="hard"),
+                                 train=train_cfg), warmstart_key=vol_key),
+    nec_arm("topk",    NECConfig(data=data_cfg, prior=PriorConfig(kind="topk", top_k=2),
+                                 train=train_cfg), warmstart_key=vol_key),
+    nec_arm("gumbel",  NECConfig(data=data_cfg,
+                                 prior=PriorConfig(kind="gumbel", tau_anneal_steps=300),
+                                 train=train_cfg), warmstart_key=vol_key),
+    baseline_arm("ridge", lambda seed: RidgeBaseline(l2=1.0)),
+    baseline_arm("mlp",   lambda seed: MLPBaseline(input_dim=d_snap, hidden_dim=32,
+                                                   steps=600, seed=seed)),
+]
+report = run_sweep(panel, arms, seeds=range(5), registry=reg, tag="routing_sweep",
+                   steps=600, n_folds=4, test_dates_per_fold=60, purge_dates=5,
+                   backtest_quantiles=5, cost_rate=0.001)
 
-for kind in ["soft", "uniform", "hard", "topk", "gumbel"]:
-    for seed in range(5):
-        res = walk_forward_evaluate(panel, make_trainer(kind, seed), steps=600,
-                                    warmstart_key=lambda p: p.x_seq[:, -1, 2], **SPLIT)
-        reg.log("routing_sweep",
-                {"mean_ic": res.pooled_ic.mean_ic, "icir": res.pooled_ic.icir,
-                 "p": ic_pvalue(res.pooled_ic), "net_ir": res.pooled_portfolio.ir_net,
-                 "nll": res.mean_fold_nll},
-                config={"prior": kind}, seed=seed)
-
-# --- the claim family, corrected (one p per configuration: mean over seeds first) ---
-by_kind = {}
-for r in reg.trials("routing_sweep"):
-    by_kind.setdefault(r.config["prior"], []).append(r.metrics["p"])
-kinds = sorted(by_kind)
-reject, qvals = benjamini_hochberg([min(by_kind[k]) for k in kinds], alpha=0.10)
-print(dict(zip(kinds, zip(reject, qvals))))
-
-# --- picking a winner is a LOGGED selection event, and its Sharpe gets deflated ---
-winner = reg.best("routing_sweep", "net_ir")
-d = deflated_sharpe_ratio(
-    winner_ls_returns,                       # the winner's per-date net L/S series
-    n_trials=reg.n_trials("routing_sweep"),
-    sr_variance=statistics.pvariance(reg.metric_values("routing_sweep", "net_ir")))
-print(f"naive PSR {d.psr_zero:.3f}  →  DSR {d.dsr:.3f}  (hurdle {d.expected_max_sr:.3f})")
+print(report.to_frame().round(3))    # arms × {mean_ic, mean_ic_std, icir, nll, …}
+print(corrected_claims(report, alpha=0.10))   # {arm: (reject, q_value)}
 ```
 
-To materialize `winner_ls_returns`, re-run the winner's folds via II.7's raw-prediction
-recipe and collect `gross − cost_rate·2·turnover` from `long_short_by_date` per fold.
-Registry API in one breath: `log(tag, metrics, config=, seed=, notes=)`,
-`trials(tag)`, `n_trials(tag)`, `metric_values(tag, metric)`,
-`best(tag, metric, mode=)` (logs the pick), `selection_events(tag)`. Metrics must be
-finite; the `#selection` suffix is reserved.
+What the pieces guarantee:
+
+- `nec_arm(name, cfg, warmstart_key=)` plants each seed in the global RNG *and* in
+  `TrainConfig.seed` via `dataclasses.replace`, so seeds vary the expert
+  diversification and shuffling too; each seed remains fully deterministic. Every
+  trial's registry row carries the complete `NECConfig` dict — reconstructible.
+- `baseline_arm(name, build)` runs baselines through the same folds and the same
+  grading code; deterministic baselines show a seed std of exactly 0 (itself
+  informative in the table).
+- **The claim family is the arms, not the seeds.** Seed replicates are repeated
+  measurements of one hypothesis, not new hypotheses; `corrected_claims` combines each
+  arm's p-values by their **median** and runs BH across arms. Pre-register that choice.
+  (Do *not* take the min over seeds — that is anti-conservative selection inside the
+  family.)
+
+Selecting a winner and deflating its Sharpe (unchanged from the registry workflow):
+
+```python
+import statistics
+from nec_moe import deflated_sharpe_ratio
+winner = reg.best("routing_sweep", "net_ir")          # LOGS the selection event
+d = deflated_sharpe_ratio(
+    winner_ls_returns,                                # per-date net L/S series (II.7)
+    n_trials=reg.n_trials("routing_sweep"),
+    sr_variance=statistics.pvariance(reg.metric_values("routing_sweep", "net_ir")))
+print(f"naive PSR {d.psr_zero:.3f} → DSR {d.dsr:.3f} (hurdle {d.expected_max_sr:.3f})")
+```
+
+Registry API in one breath: `log(tag, metrics, config=, seed=, notes=)`, `trials(tag)`,
+`n_trials(tag)`, `metric_values(tag, metric)`, `best(tag, metric, mode=)` (logs the
+pick), `selection_events(tag)`. Metrics must be finite; the `#selection` suffix is
+reserved.
 
 ## II.10 Making figures
 
@@ -1546,8 +1562,8 @@ work is *experimental design and execution*:
    IR, NLL), the claim family and its correction (BH at α=0.10 over per-mechanism
    p-values), the split parameters, and what a negative result would look like. The
    registry then makes deviations visible.
-2. **Multi-seed sweep runner** (1 day). II.9's script generalized: config list × seeds →
-   registry; report mean ± std per config. Convenience layer, not new machinery.
+2. ✅ **Multi-seed sweep runner** — built (`run_sweep`, II.9); the grid is now a list of
+   `nec_arm`/`baseline_arm` entries.
 3. **Hard routing's cold start needs a fair shake** (1–2 days). Give top-1 its
    literature-standard aids — a soft-warmed gate (train soft, switch mechanism via the
    checkpoint recipe) and/or train-time logit noise — or the comparison indicts the
@@ -1590,7 +1606,9 @@ filtered-path tooling exist. In order:
 
 Ordered by value per effort; ✅ exists, ◻ to do:
 
-1. ◻ **Multi-seed protocol** — nothing is a result until it has a seed std.
+1. ✅ **Multi-seed protocol** — `run_sweep` (`sweep.py`, II.9): arms × seeds through the
+   shared harness, registry-logged, mean ± std per arm, BH-corrected claim family
+   across arms with median-combined replicate p-values.
 2. ◻ **Full point-in-time panel** — `members_union` → download → filter → coverage
    table (compute + ~½ day plumbing for failures at scale).
 3. ◻ **Residual-return target** (`y = r − β·r_mkt`, β from *past* data only) — a named
@@ -1609,8 +1627,8 @@ Ordered by value per effort; ✅ exists, ◻ to do:
 9. ✅ Purged walk-forward, cost-aware backtest, registry + DSR/BH, PIT membership +
    coverage, alignment diagnostics, defect regression tests.
 
-Items 1–3 are the line between "the scaffolding works" and "these numbers can enter a
-thesis."
+Items 2–3 are now the line between "the scaffolding works" and "these numbers can enter
+a thesis" (item 1, the seed protocol, is built — use it).
 
 ---
 

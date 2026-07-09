@@ -75,6 +75,15 @@ from .multiple_testing import (
     sharpe_ratio,
 )
 from .registry import TrialRecord, TrialRegistry
+from .sweep import (
+    ArmSummary,
+    SweepArm,
+    SweepReport,
+    baseline_arm,
+    corrected_claims,
+    nec_arm,
+    run_sweep,
+)
 from .universe import (
     PointInTimeUniverse,
     filter_point_in_time,
@@ -183,6 +192,13 @@ __all__ = [
     "RegimeAlignmentReport",
     "TrialRecord",
     "TrialRegistry",
+    "SweepArm",
+    "nec_arm",
+    "baseline_arm",
+    "ArmSummary",
+    "SweepReport",
+    "run_sweep",
+    "corrected_claims",
     "PointInTimeUniverse",
     "load_sp500_universe",
     "filter_point_in_time",

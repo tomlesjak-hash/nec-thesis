@@ -1017,6 +1017,8 @@ a pipeline demonstration.
 | `horizon` | 5 | forward-return target in trading days (5 or 20 per the syllabus); **purge by exactly this number in evaluation** |
 | `cs_rank` | True | per-date rank-normalize snapshot features to [−0.5, 0.5] — leave on |
 | `min_names_per_date` | 5 | drop dates with a thinner valid cross-section |
+| `target_kind` | `"raw"` | `"residual"` = market-neutral target `fwd − β_t·mkt_fwd` (β from a *trailing* window — no lookahead, planted-truth tested); the syllabus's "raw vs residual" ablation is these two specs on the same prices |
+| `beta_window` | 250 | trailing days for the rolling market beta (residual only); windows > 120 cost extra warm-up rows beyond `mom_120d`'s |
 
 ### The point-in-time path (what any shown result should use)
 
@@ -1611,9 +1613,10 @@ Ordered by value per effort; ✅ exists, ◻ to do:
    across arms with median-combined replicate p-values.
 2. ◻ **Full point-in-time panel** — `members_union` → download → filter → coverage
    table (compute + ~½ day plumbing for failures at scale).
-3. ◻ **Residual-return target** (`y = r − β·r_mkt`, β from *past* data only) — a named
-   syllabus ablation; stops the model from just learning the market. ~½ day + a
-   no-lookahead test for β.
+3. ✅ **Residual-return target** — `StageBSpec(target_kind="residual", beta_window=250)`
+   (`rolling_beta`, trailing OLS β; market-clone ⇒ zero target, β=2 name ⇒
+   market-neutral target, no-lookahead β — all planted-truth tested). The "raw vs
+   residual" ablation is now two specs on the same prices.
 4. ◻ **Hyperparameter discipline** — a purged validation tail *inside* each training
    window for lr/steps/width; tune once, freeze, pre-register. ~1 day.
 5. ◻ **`plots.py`** — II.10's recipes as functions, so figures are reproducible
@@ -1627,8 +1630,9 @@ Ordered by value per effort; ✅ exists, ◻ to do:
 9. ✅ Purged walk-forward, cost-aware backtest, registry + DSR/BH, PIT membership +
    coverage, alignment diagnostics, defect regression tests.
 
-Items 2–3 are now the line between "the scaffolding works" and "these numbers can enter
-a thesis" (item 1, the seed protocol, is built — use it).
+Item 2 — the full point-in-time panel run — is now the last gate between "the
+scaffolding works" and "these numbers can enter a thesis"; items 1 and 3 are built (use
+them), and 4–8 are polish in comparison.
 
 ---
 

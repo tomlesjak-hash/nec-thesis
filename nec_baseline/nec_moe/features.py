@@ -7,8 +7,14 @@ A row (date t, ticker i) represents a prediction made **at the close of t**:
 - every feature at t is computed from information through the close of t
   (trailing rolling windows, diffs of past closes — pandas rolling/diff are
   trailing by construction);
-- the target is the *forward* log return ``fwd_ret_{h}d = log(C_{t+h} / C_t)``
-  — the only column allowed to touch the future;
+- the target is the *forward* return — the only column allowed to touch the
+  future. Two kinds (``StageBSpec.target_kind``):
+  ``"raw"``: ``fwd_ret_{h}d = log(C_{t+h} / C_t)``;
+  ``"residual"``: ``fwd_resid_ret_{h}d = fwd_ret − β_t · mkt_fwd_ret`` — the
+  market-neutralized target the syllabus prescribes so the model cannot score
+  by just learning market direction. ``β_t`` is a **trailing** rolling OLS
+  beta (:func:`rolling_beta`, window ``beta_window``) — estimated from past
+  data only, so the residualization itself introduces no lookahead;
 - cross-sectional rank normalization uses only date-t's own cross-section.
 
 ``test_no_lookahead`` verifies this mechanically: features at t computed from
@@ -31,6 +37,7 @@ The result is a plain :class:`~nec_moe.data.Panel` — everything downstream
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -45,6 +52,7 @@ __all__ = [
     "SEQUENCE_FEATURES",
     "SNAPSHOT_FEATURES",
     "StageBSpec",
+    "rolling_beta",
     "market_features",
     "ticker_features",
     "build_panel",
@@ -79,12 +87,22 @@ SNAPSHOT_FEATURES: tuple[str, ...] = (
 
 @dataclass(frozen=True)
 class StageBSpec:
-    """Knobs of the real-data panel build."""
+    """Knobs of the real-data panel build.
+
+    ``target_kind="residual"`` switches the target to the market-neutralized
+    forward return ``fwd − β_t·mkt_fwd`` with ``β_t`` a trailing
+    ``beta_window``-day rolling OLS beta (syllabus: "later, use residual
+    returns … this prevents the model from just learning market direction").
+    The beta warm-up consumes ``beta_window`` leading days per ticker — rows
+    without a converged beta have a NaN target and are dropped by validity.
+    """
 
     seq_len: int = 20
     horizon: int = 5  # forward-return target horizon in trading days
     cs_rank: bool = True  # cross-sectional rank-normalize snapshot features
     min_names_per_date: int = 5  # drop dates with too thin a cross-section
+    target_kind: Literal["raw", "residual"] = "raw"
+    beta_window: int = 250  # trailing window for the market beta (residual only)
 
     def validate(self) -> "StageBSpec":
         if self.seq_len < 2 or self.horizon < 1 or self.min_names_per_date < 2:
@@ -92,11 +110,19 @@ class StageBSpec:
                 f"invalid StageBSpec: seq_len={self.seq_len}, "
                 f"horizon={self.horizon}, min_names={self.min_names_per_date}"
             )
+        if self.target_kind not in ("raw", "residual"):
+            raise ValueError(f"unknown target_kind {self.target_kind!r}")
+        if self.target_kind == "residual" and self.beta_window < 20:
+            raise ValueError(
+                f"beta_window={self.beta_window} is too short to estimate a "
+                "market beta (need >= 20 trailing days)"
+            )
         return self
 
     @property
     def target(self) -> str:
-        return f"fwd_ret_{self.horizon}d"
+        prefix = "fwd_resid_ret" if self.target_kind == "residual" else "fwd_ret"
+        return f"{prefix}_{self.horizon}d"
 
 
 # --------------------------------------------------------------------------- #
@@ -104,17 +130,39 @@ class StageBSpec:
 # --------------------------------------------------------------------------- #
 
 
-def market_features(market_px: pd.DataFrame) -> pd.DataFrame:
-    """Market-symbol series needed for relative features: ret_1d/ret_20d/vol_20d."""
+def rolling_beta(r: pd.Series, mkt_r: pd.Series, window: int) -> pd.Series:
+    """Trailing rolling OLS beta of ``r`` on ``mkt_r``: cov/var over ``window``.
+
+    Both inputs are daily returns aligned on the same index; pandas rolling
+    windows are trailing by construction, so ``beta_t`` uses days ≤ t only —
+    the residual target's no-lookahead property rests on exactly this.
+    """
+    return r.rolling(window).cov(mkt_r) / mkt_r.rolling(window).var()
+
+
+def market_features(
+    market_px: pd.DataFrame, spec: StageBSpec | None = None
+) -> pd.DataFrame:
+    """Market-symbol series needed for relative features: ret_1d/ret_20d/vol_20d.
+
+    With ``spec`` given, also emits ``mkt_fwd_ret`` — the market's forward
+    ``horizon``-day log return, computed on the **market's own calendar** (so a
+    ticker with missing days still gets the correctly aligned market move) and
+    used only inside the residual target. It is forward-looking by definition,
+    exactly like the target it feeds; it is never a feature.
+    """
     logc = np.log(market_px["close"])
     r1 = logc.diff()
-    return pd.DataFrame(
+    out = pd.DataFrame(
         {
             "mkt_ret_1d": r1,
             "mkt_ret_20d": logc.diff(20),
             "mkt_vol_20d": r1.rolling(20).std(),
         }
     )
+    if spec is not None:
+        out["mkt_fwd_ret"] = logc.shift(-spec.horizon) - logc
+    return out
 
 
 def ticker_features(
@@ -148,7 +196,18 @@ def ticker_features(
     f["rel_ret_20d"] = f["ret_20d"] - f["mkt_ret_20d"]
     f["rel_vol_20d"] = f["vol_20d"] / f["mkt_vol_20d"]
 
-    f[spec.target] = logc.shift(-spec.horizon) - logc  # the ONLY forward column
+    # the target — the ONLY forward-looking column(s)
+    fwd = logc.shift(-spec.horizon) - logc
+    if spec.target_kind == "raw":
+        f[spec.target] = fwd
+    else:  # residual: market-neutralized forward return
+        if "mkt_fwd_ret" not in f.columns:
+            raise ValueError(
+                "residual target needs the market's forward return: call "
+                "market_features(market_px, spec) with the same spec"
+            )
+        beta = rolling_beta(f["ret_1d"], f["mkt_ret_1d"], spec.beta_window)
+        f[spec.target] = fwd - beta * f["mkt_fwd_ret"]
     return f.replace([np.inf, -np.inf], np.nan)
 
 
@@ -175,7 +234,7 @@ def build_panel(
 ) -> Panel:
     """Assemble the contract-shaped :class:`Panel` from per-ticker OHLCV."""
     spec = spec.validate()
-    mkt = market_features(market_px)
+    mkt = market_features(market_px, spec)
 
     frames: dict[str, pd.DataFrame] = {}
     valid: dict[str, pd.Series] = {}

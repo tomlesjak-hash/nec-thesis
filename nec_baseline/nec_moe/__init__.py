@@ -61,6 +61,7 @@ from .features import (
     build_panel,
     build_stage_b_panel,
     data_config_from_panel,
+    rolling_beta,
 )
 from .likelihood import expert_log_likelihood
 from .market_data import DEFAULT_UNIVERSE, MARKET_SYMBOL, load_ohlcv, load_universe
@@ -177,6 +178,7 @@ __all__ = [
     "SNAPSHOT_FEATURES",
     "build_panel",
     "build_stage_b_panel",
+    "rolling_beta",
     "data_config_from_panel",
     "DEFAULT_UNIVERSE",
     "MARKET_SYMBOL",

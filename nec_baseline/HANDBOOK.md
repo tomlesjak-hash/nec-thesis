@@ -1392,8 +1392,34 @@ reserved.
 
 ## II.10 Making figures
 
-No `plots.py` yet (Part III item) — these run today and cover the thesis's figure needs.
-Each ends with `savefig`; commit the PNGs with the registry rows they illustrate.
+`nec_moe/plots.py` provides the six standard figures as functions — figures are
+artifacts of a run, saved next to the registry rows they illustrate. Every function
+returns the matplotlib `Figure` and takes `path=` to save (dpi 150, parents created);
+matplotlib is imported lazily (optional dependency; set `MPLBACKEND=Agg` for headless).
+
+```python
+from nec_moe import (plot_training_dashboard, plot_gate_utilization, plot_ic_series,
+                     plot_long_short_curve, plot_transition_matrix, plot_sweep_report)
+
+plot_training_dashboard(history, n_experts=2, path="figs/dash.png")
+    # 4 panels: NLL, entropy (log K line), min running utilization (alarm), expert corr
+
+plot_gate_utilization(trainer, panel, context=ctx, path="figs/util_vs_vix.png")
+    # the interpretability headline: one expert's per-date gate share (default:
+    # highest-σ), filled; memoryless -> mean predictive π, HMM -> the FILTERED
+    # posterior (the Hamilton figure); optional context overlay on a twin axis
+
+plot_ic_series(pred, test.y, test.date, path="figs/ic.png")
+plot_long_short_curve(pred, test.y, test.date, test.entity,
+                      n_quantiles=5, cost_rate=0.001, path="figs/ls.png")
+plot_transition_matrix(trainer, path="figs/A.png")     # Variation 3; rejects memoryless
+plot_sweep_report(report, metric="mean_ic", path="figs/sweep.png")
+    # mean ± seed-std bars per arm — "nothing is a result until it has a seed std",
+    # as a picture
+```
+
+The raw matplotlib recipes below remain for *custom* figures — they show how to work
+directly against the returned data structures.
 
 **1. Training dashboard** (from `history = trainer.fit(...)`):
 
@@ -1459,7 +1485,7 @@ from nec_moe import long_short_by_date
 _, gross, tno = long_short_by_date(pred, test.y, test.date, test.entity, n_quantiles=5)
 net = gross - 0.001 * 2.0 * tno
 fig, ax = plt.subplots(figsize=(11, 2.8), tight_layout=True)
-ax.plot(net.cumsum().numpy()); ax.set_ylabel("cum. net L/S return (per-period)")
+ax.plot(net.cumsum(0).numpy()); ax.set_ylabel("cum. net L/S return (per-period)")
 fig.savefig("figs/ls_curve.png", dpi=150)
 ```
 
@@ -1619,8 +1645,8 @@ Ordered by value per effort; ✅ exists, ◻ to do:
    residual" ablation is now two specs on the same prices.
 4. ◻ **Hyperparameter discipline** — a purged validation tail *inside* each training
    window for lr/steps/width; tune once, freeze, pre-register. ~1 day.
-5. ◻ **`plots.py`** — II.10's recipes as functions, so figures are reproducible
-   artifacts. ~1 day.
+5. ✅ **`plots.py`** — the six standard figures as tested functions (headless-safe,
+   lazy matplotlib, `path=` saving); II.10 leads with them.
 6. ◻ **Gate calibration** (M4 §4.9) — reliability diagrams of gate probabilities on
    held-out folds; temperature-scale if rank-good/overconfident. ~1 day; a
    thesis-quality diagnostic nobody else will have.

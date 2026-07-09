@@ -75,6 +75,14 @@ from .multiple_testing import (
     probabilistic_sharpe_ratio,
     sharpe_ratio,
 )
+from .plots import (
+    plot_gate_utilization,
+    plot_ic_series,
+    plot_long_short_curve,
+    plot_sweep_report,
+    plot_training_dashboard,
+    plot_transition_matrix,
+)
 from .registry import TrialRecord, TrialRegistry
 from .sweep import (
     ArmSummary,
@@ -194,6 +202,12 @@ __all__ = [
     "RegimeAlignmentReport",
     "TrialRecord",
     "TrialRegistry",
+    "plot_training_dashboard",
+    "plot_gate_utilization",
+    "plot_ic_series",
+    "plot_long_short_curve",
+    "plot_transition_matrix",
+    "plot_sweep_report",
     "SweepArm",
     "nec_arm",
     "baseline_arm",

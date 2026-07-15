@@ -45,6 +45,8 @@ from .train import Trainer
 if TYPE_CHECKING:  # pragma: no cover
     from matplotlib.figure import Figure
 
+    from .calibration import ReliabilityReport
+
 __all__ = [
     "plot_training_dashboard",
     "plot_gate_utilization",
@@ -52,6 +54,7 @@ __all__ = [
     "plot_long_short_curve",
     "plot_transition_matrix",
     "plot_sweep_report",
+    "plot_reliability",
 ]
 
 
@@ -279,4 +282,43 @@ def plot_sweep_report(
     ax.axhline(0.0, c="gray", lw=1)
     ax.set_ylabel(metric)
     ax.set_title(f"{report.tag}: {metric} (mean ± seed std, n={report.arms[0].n_seeds})")
+    return _save(fig, path)
+
+
+def plot_reliability(
+    report: "ReliabilityReport",
+    *,
+    path: str | Path | None = None,
+) -> "Figure":
+    """Reliability diagram of the gate's mixture weights (M4 §4.9).
+
+    Left: mean realized responsibility vs mean claimed probability per bin —
+    a calibrated gate hugs the diagonal; sagging below at high confidence is
+    the classic overconfidence signature. Right: where the claims live (bin
+    weights). Title carries the ECE and the temperature the numbers were
+    computed under (compare T=1 against a fitted T side by side).
+    """
+    plt = _plt()
+    fig, (ax, axw) = plt.subplots(
+        1, 2, figsize=(8.2, 3.4), tight_layout=True, width_ratios=[1.4, 1.0]
+    )
+    ax.plot([0, 1], [0, 1], ls="--", c="gray", lw=1, label="perfect")
+    conf = report.bin_confidence
+    out = report.bin_outcome
+    keep = [i for i, w in enumerate(report.bin_weight) if w > 0]
+    ax.plot([conf[i] for i in keep], [out[i] for i in keep],
+            marker="o", ms=4, lw=1.2, label="gate")
+    ax.set_xlabel("claimed  π")
+    ax.set_ylabel("realized responsibility  r")
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.legend(loc="upper left", fontsize=8)
+    ax.set_title(
+        f"ECE = {report.ece:.3f}  (T = {report.temperature:.2f}, "
+        f"{report.n_claims:,} claims)", fontsize=9,
+    )
+    centers = [(a + b) / 2 for a, b in zip(report.bin_edges[:-1], report.bin_edges[1:])]
+    axw.bar(centers, report.bin_weight, width=0.9 / len(centers), alpha=0.6)
+    axw.set_xlabel("claimed  π")
+    axw.set_ylabel("share of claims")
     return _save(fig, path)

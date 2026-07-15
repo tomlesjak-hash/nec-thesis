@@ -1319,6 +1319,39 @@ Report the distribution of `vix_corr` across folds × seeds — that is the hone
 the +0.81 headline. Both prior families work (`hmm` uses the filtered posterior). For
 synthetic panels, index the context frame by integer date codes.
 
+### Gate calibration (reliability + temperature scaling)
+
+A gate can rank regimes correctly and still lie about probabilities — and gate
+probabilities are *mixture weights*, so overconfidence misallocates experts on every
+forward pass (M4 §4.9). For a latent-regime gate, "calibrated" means: among held-out
+samples where the gate claimed `π_k ≈ q`, the realized **responsibility** `r_k` averages
+`q` (the responsibilities are the gate's training target, so they are its honest
+yardstick).
+
+```python
+from nec_moe import gate_reliability, fit_temperature, plot_reliability, validation_tail
+
+report = gate_reliability(trainer, test_panel)        # held-out data only!
+print(report.ece, report.to_frame())
+
+tail = validation_tail(train_panel.date, val_dates=40, purge_dates=5)
+fit = fit_temperature(trainer, train_panel.subset_dates(tail.test_dates))
+print(fit.verdict)     # e.g. "gate overconfident (T > 1 softens): T = 2.31"
+
+fixed = gate_reliability(trainer, test_panel, temperature=fit.temperature)
+plot_reliability(report, path="figs/rel_before.png")
+plot_reliability(fixed,  path="figs/rel_after.png")
+```
+
+Protocol: fit `T` on a **validation tail of the training window** (never the test
+block); it is one scalar chosen by held-out mixture NLL, so it cannot meaningfully
+overfit — that is the charm of temperature scaling. Scope: softmax-predictive gates
+(soft, Gumbel-at-eval); hard/top-k have no smooth confidence to rescale, and the HMM's
+regime probabilities come from the forward filter, not the gate — the functions reject
+those with guidance. Planted-truth tested: identical experts ⇒ ECE exactly 0; a gate
+with ×4-sharpened logits ⇒ fitted T > 1.5 improving NLL *and* ECE out of sample, while
+an honestly trained gate fits T ≈ 1.
+
 ## II.9 Multi-seed sweeps, the registry, and defensible claims
 
 The protocol layer is `run_sweep` (`nec_moe/sweep.py`): named **arms** × a **seed
@@ -1449,6 +1482,8 @@ plot_transition_matrix(trainer, path="figs/A.png")     # Variation 3; rejects me
 plot_sweep_report(report, metric="mean_ic", path="figs/sweep.png")
     # mean ± seed-std bars per arm — "nothing is a result until it has a seed std",
     # as a picture
+plot_reliability(gate_reliability(trainer, test_panel), path="figs/rel.png")
+    # the calibration diagram (II.8): realized responsibility vs claimed π + ECE
 ```
 
 The raw matplotlib recipes below remain for *custom* figures — they show how to work
@@ -1687,9 +1722,12 @@ Ordered by value per effort; ✅ exists, ◻ to do:
    tune-once-freeze protocol documented, per-fold re-tuning deliberately not offered.
 5. ✅ **`plots.py`** — the six standard figures as tested functions (headless-safe,
    lazy matplotlib, `path=` saving); II.10 leads with them.
-6. ◻ **Gate calibration** (M4 §4.9) — reliability diagrams of gate probabilities on
-   held-out folds; temperature-scale if rank-good/overconfident. ~1 day; a
-   thesis-quality diagnostic nobody else will have.
+6. ✅ **Gate calibration** (M4 §4.9) — `calibration.py`: `gate_reliability` (reliability
+   vs held-out responsibilities, ECE) + `fit_temperature` (held-out-NLL-fitted scalar on
+   the validation tail) + `plot_reliability`; planted-truth tested both ways
+   (identical experts ⇒ ECE 0; ×4-sharpened gate ⇒ T > 1.5 repairs NLL and ECE out of
+   sample). The thesis-quality diagnostic nobody else will have — use it in the
+   interpretability chapter.
 7. ◻ **Lint + type-check + CI** — `ruff`, `pyright`, a CI job running the offline
    suite once a remote exists. ~½ day.
 8. ◻ **Pre-registration template** in the repo. ~½ day.

@@ -23,6 +23,12 @@ from .alignment import (
     regime_alignment,
 )
 from .baselines import BaselineModel, MLPBaseline, RidgeBaseline
+from .calibration import (
+    ReliabilityReport,
+    TemperatureFit,
+    fit_temperature,
+    gate_reliability,
+)
 from .context_data import build_context, load_french_factors, load_vix
 from .data import (
     Batch,
@@ -79,6 +85,7 @@ from .plots import (
     plot_gate_utilization,
     plot_ic_series,
     plot_long_short_curve,
+    plot_reliability,
     plot_sweep_report,
     plot_training_dashboard,
     plot_transition_matrix,
@@ -219,6 +226,11 @@ __all__ = [
     "validation_tail",
     "TuneResult",
     "tune",
+    "ReliabilityReport",
+    "gate_reliability",
+    "TemperatureFit",
+    "fit_temperature",
+    "plot_reliability",
     "PointInTimeUniverse",
     "load_sp500_universe",
     "filter_point_in_time",

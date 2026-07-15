@@ -122,6 +122,7 @@ from .priors import (
     build_prior,
 )
 from .train import SequenceEval, Trainer
+from .tuning import TuneResult, tune, validation_tail
 from .utils import assert_shape, set_seed
 
 __all__ = [
@@ -215,6 +216,9 @@ __all__ = [
     "SweepReport",
     "run_sweep",
     "corrected_claims",
+    "validation_tail",
+    "TuneResult",
+    "tune",
     "PointInTimeUniverse",
     "load_sp500_universe",
     "filter_point_in_time",

@@ -1372,6 +1372,39 @@ What the pieces guarantee:
   (Do *not* take the min over seeds — that is anti-conservative selection inside the
   family.)
 
+### Tuning before sweeping (`tune` — the honest hyperparameter protocol)
+
+Hand-picked hyperparameters are researcher degrees of freedom; tuning on test dates is
+leakage. The protocol: **tune once on a purged validation tail inside the first fold's
+training window, freeze the winner, pre-register the candidate list.**
+
+```python
+from nec_moe import nec_arm, tune, walk_forward_folds
+
+outer = walk_forward_folds(panel.date, n_folds=4, test_dates_per_fold=60, purge_dates=5)
+train_panel = panel.subset_dates(outer[0].train_dates)   # NEVER the full panel
+
+candidates = [
+    nec_arm("lr1e-3", NECConfig(data=data_cfg, train=TrainConfig(lr=1e-3, ...)),
+            warmstart_key=vol_key),
+    nec_arm("lr3e-3", NECConfig(data=data_cfg, train=TrainConfig(lr=3e-3, ...)),
+            warmstart_key=vol_key),
+    nec_arm("wide",   NECConfig(data=data_cfg, encoder=EncoderConfig(hidden_dim=64),
+                                train=train_cfg), warmstart_key=vol_key),
+]
+result = tune(train_panel, candidates, seeds=(0, 1, 2), registry=reg, tag="hp_tune",
+              steps=600, val_dates=40, purge_dates=5)   # purge = label horizon, again
+print(result.winner, result.scores)   # freeze this; run the real sweep with it
+```
+
+What it does under the hood: the validation tail *is* a one-fold walk-forward on the
+training panel (`validation_tail` wraps the same tested purge arithmetic), candidates
+*are* sweep arms scored by the same harness, the pick is by **seed-mean** of the metric
+(`mode="min"` for NLL), and the selection is **logged**: per-run trials under the tag,
+arm aggregates under `<tag>.arms`, and one `#selection` event carrying the candidate
+count — tuning is a selection with multiplicity, and the registry remembers it.
+Deliberately not offered: per-fold re-tuning (multiplies degrees of freedom).
+
 Selecting a winner and deflating its Sharpe (unchanged from the registry workflow):
 
 ```python
@@ -1637,14 +1670,21 @@ Ordered by value per effort; ✅ exists, ◻ to do:
 1. ✅ **Multi-seed protocol** — `run_sweep` (`sweep.py`, II.9): arms × seeds through the
    shared harness, registry-logged, mean ± std per arm, BH-corrected claim family
    across arms with median-combined replicate p-values.
-2. ◻ **Full point-in-time panel** — `members_union` → download → filter → coverage
-   table (compute + ~½ day plumbing for failures at scale).
+2. ✅ **Full point-in-time panel** — `scripts/build_pit_panel.py` (resumable:
+   cache-first, rerun to retry failures). Built 2015–2024: 640 candidates attempted,
+   590 loaded, **1,089,688 PIT rows** across 2,390 dates; measured coverage 83.4%
+   (2016) → 97.2% (2024), published at `results/pit_coverage_2015_2024.csv`; panel
+   checkpoint at `data_cache/pit_panel_2015_2024.pt` (~412 MB, gitignored,
+   re-buildable). The ~50 failures are the departed names (TWTR, YHOO, XLNX, WFM…) —
+   survivorship component 2, measured not silent.
 3. ✅ **Residual-return target** — `StageBSpec(target_kind="residual", beta_window=250)`
    (`rolling_beta`, trailing OLS β; market-clone ⇒ zero target, β=2 name ⇒
    market-neutral target, no-lookahead β — all planted-truth tested). The "raw vs
    residual" ablation is now two specs on the same prices.
-4. ◻ **Hyperparameter discipline** — a purged validation tail *inside* each training
-   window for lr/steps/width; tune once, freeze, pre-register. ~1 day.
+4. ✅ **Hyperparameter discipline** — `tune` (`tuning.py`, II.9): purged validation
+   tail inside the training window, candidates scored as sweep arms by the shared
+   harness, winner by seed-mean, selection event logged with its multiplicity;
+   tune-once-freeze protocol documented, per-fold re-tuning deliberately not offered.
 5. ✅ **`plots.py`** — the six standard figures as tested functions (headless-safe,
    lazy matplotlib, `path=` saving); II.10 leads with them.
 6. ◻ **Gate calibration** (M4 §4.9) — reliability diagrams of gate probabilities on
@@ -1656,9 +1696,10 @@ Ordered by value per effort; ✅ exists, ◻ to do:
 9. ✅ Purged walk-forward, cost-aware backtest, registry + DSR/BH, PIT membership +
    coverage, alignment diagnostics, defect regression tests.
 
-Item 2 — the full point-in-time panel run — is now the last gate between "the
-scaffolding works" and "these numbers can enter a thesis"; items 1 and 3 are built (use
-them), and 4–8 are polish in comparison.
+Items 1–5 are done: seeds, the PIT panel, the residual target, tuning discipline, and
+figures — the line to "these numbers can enter a thesis" is crossed on the
+infrastructure side. What remains is polish (6: gate calibration, 7: lint/CI, 8: the
+pre-registration template) and then the experiments themselves.
 
 ---
 

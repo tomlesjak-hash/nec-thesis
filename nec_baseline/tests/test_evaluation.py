@@ -12,8 +12,8 @@ import math
 
 import pytest
 import torch
-
 from conftest import small_config
+
 from nec_moe import (
     NECModel,
     SyntheticRegimePanel,
@@ -26,7 +26,6 @@ from nec_moe import (
     walk_forward_evaluate,
     walk_forward_folds,
 )
-
 
 # --------------------------------------------------------------------------- #
 # Splits and purging

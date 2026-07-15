@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 import math
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -82,7 +82,7 @@ class TrialRegistry:
                 raise ValueError(f"metric {k!r} is not finite: {v}")
         rec = TrialRecord(
             trial_id=len(self._read_all()),
-            timestamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            timestamp=datetime.now(UTC).isoformat(timespec="seconds"),
             tag=tag,
             metrics=clean,
             config=config or {},
@@ -127,7 +127,7 @@ class TrialRegistry:
         )
         rec = TrialRecord(
             trial_id=len(self._read_all()),
-            timestamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            timestamp=datetime.now(UTC).isoformat(timespec="seconds"),
             tag=f"{tag}{_SELECTION_SUFFIX}",
             metrics={metric: pick.metrics[metric]},
             config={

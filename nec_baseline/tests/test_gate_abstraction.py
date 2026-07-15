@@ -10,8 +10,8 @@ import math
 
 import pytest
 import torch
-
 from conftest import random_inputs, small_config
+
 from nec_moe import (
     Batch,
     NECModel,

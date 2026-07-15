@@ -104,7 +104,7 @@ class StageBSpec:
     target_kind: Literal["raw", "residual"] = "raw"
     beta_window: int = 250  # trailing window for the market beta (residual only)
 
-    def validate(self) -> "StageBSpec":
+    def validate(self) -> StageBSpec:
         if self.seq_len < 2 or self.horizon < 1 or self.min_names_per_date < 2:
             raise ValueError(
                 f"invalid StageBSpec: seq_len={self.seq_len}, "
@@ -230,10 +230,10 @@ def _valid_rows(f: pd.DataFrame, spec: StageBSpec) -> pd.Series:
 def build_panel(
     prices: dict[str, pd.DataFrame],
     market_px: pd.DataFrame,
-    spec: StageBSpec = StageBSpec(),
+    spec: StageBSpec | None = None,
 ) -> Panel:
     """Assemble the contract-shaped :class:`Panel` from per-ticker OHLCV."""
-    spec = spec.validate()
+    spec = (spec if spec is not None else StageBSpec()).validate()
     mkt = market_features(market_px, spec)
 
     frames: dict[str, pd.DataFrame] = {}
@@ -332,7 +332,7 @@ def build_stage_b_panel(
     tickers: tuple[str, ...] = DEFAULT_UNIVERSE,
     market_symbol: str = MARKET_SYMBOL,
     source: str = "stooq",
-    spec: StageBSpec = StageBSpec(),
+    spec: StageBSpec | None = None,
     refresh: bool = False,
 ) -> Panel:
     """Download (or read cached) daily data and build the Stage-B panel.

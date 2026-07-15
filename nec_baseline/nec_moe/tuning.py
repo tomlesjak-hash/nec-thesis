@@ -28,8 +28,8 @@ purged inside it.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Sequence
 
 from torch import Tensor
 

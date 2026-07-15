@@ -8,8 +8,8 @@ predictions — before any real data is plugged in.
 from __future__ import annotations
 
 import torch
-
 from conftest import small_config
+
 from nec_moe import (
     NECModel,
     SyntheticRegimePanel,

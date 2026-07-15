@@ -11,8 +11,8 @@ import math
 
 import pytest
 import torch
-
 from conftest import small_config
+
 from nec_moe import (
     LoadBalanceBuffer,
     NECConfig,

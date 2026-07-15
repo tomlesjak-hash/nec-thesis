@@ -30,8 +30,9 @@ training data precedes the test block by construction.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable, Sequence
+from typing import TYPE_CHECKING
 
 import torch
 from torch import Tensor
@@ -465,7 +466,7 @@ def walk_forward_evaluate(
 
 def walk_forward_evaluate_baseline(
     panel: Panel,
-    make_model: Callable[[], "BaselineModel"],
+    make_model: Callable[[], BaselineModel],
     *,
     n_folds: int,
     test_dates_per_fold: int,

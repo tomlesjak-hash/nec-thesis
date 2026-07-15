@@ -26,7 +26,8 @@ from __future__ import annotations
 
 import math
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Callable, Sequence
+from collections.abc import Callable, Sequence
+from typing import TYPE_CHECKING
 
 import torch
 import torch.nn as nn
@@ -52,6 +53,10 @@ class Emission(nn.Module, ABC):
     """``x (B, d) -> (mu (B, K), log_sigma (K,))``."""
 
     n_experts: int
+    #: part of the contract: every emission owns per-expert noise scales —
+    #: the sigma freeze schedule and the canonical (sigma-sorted) expert
+    #: ordering both depend on this attribute existing
+    log_sigma: Tensor
 
     @abstractmethod
     def forward(self, x: Tensor) -> tuple[Tensor, Tensor]: ...
@@ -123,12 +128,13 @@ class ExpertBank(Emission):
         super().__init__()
         self.n_experts = cfg.n_experts
         self.input_dim = input_dim
-        self.experts = nn.ModuleList(
+        experts = [
             ExpertMLP(input_dim, cfg.hidden_dim, cfg.dropout)
             for _ in range(cfg.n_experts)
-        )
-        for k, expert in enumerate(self.experts):
+        ]
+        for k, expert in enumerate(experts):
             expert.reset_parameters_seeded(seed + 7919 * (k + 1))
+        self.experts = nn.ModuleList(experts)
         self.log_sigma = nn.Parameter(
             torch.full((cfg.n_experts,), math.log(sigma_init))
         )
@@ -207,7 +213,7 @@ class ClassicalGaussianEmission(Emission):
 # the corner of the (emission x prior) grid.
 # --------------------------------------------------------------------------- #
 
-EMISSION_REGISTRY: dict[str, Callable[["NECConfig"], Emission]] = {
+EMISSION_REGISTRY: dict[str, Callable[[NECConfig], Emission]] = {
     "mlp": lambda cfg: ExpertBank(
         cfg.experts,
         input_dim=cfg.expert_input_dim,
@@ -220,7 +226,7 @@ EMISSION_REGISTRY: dict[str, Callable[["NECConfig"], Emission]] = {
 }
 
 
-def build_emission(cfg: "NECConfig") -> Emission:
+def build_emission(cfg: NECConfig) -> Emission:
     try:
         return EMISSION_REGISTRY[cfg.experts.kind](cfg)
     except KeyError:

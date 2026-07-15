@@ -23,8 +23,9 @@ from __future__ import annotations
 
 import dataclasses
 import math
+from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Iterator, Literal
+from typing import Literal
 
 import torch
 from torch import Tensor
@@ -80,7 +81,7 @@ class Batch:
     def __len__(self) -> int:
         return self.x_seq.shape[0]
 
-    def validate_schema(self, schema: FeatureSchema) -> "Batch":
+    def validate_schema(self, schema: FeatureSchema) -> Batch:
         """Width check against the named schema (defect-7 contract clause).
 
         A target column smuggled into a feature tensor changes its width and
@@ -150,7 +151,7 @@ class Panel:
             entity=self.entity[idx],
         )
 
-    def _take(self, idx: Tensor) -> "Panel":
+    def _take(self, idx: Tensor) -> Panel:
         return dataclasses.replace(self, **self._row_kwargs(idx))
 
     def _batch_regime(self, idx: Tensor) -> Tensor | None:
@@ -182,11 +183,11 @@ class Panel:
         for i in range(0, len(self), batch_size):
             yield self._batch(perm[i : i + batch_size])
 
-    def subset_dates(self, dates: Tensor) -> "Panel":
+    def subset_dates(self, dates: Tensor) -> Panel:
         """Rows whose date is in ``dates`` (walk-forward fold construction)."""
         return self._take(torch.isin(self.date, dates))
 
-    def split_by_date(self, train_frac: float) -> tuple["Panel", "Panel"]:
+    def split_by_date(self, train_frac: float) -> tuple[Panel, Panel]:
         """Chronological split (leakage discipline holds even on synthetic data)."""
         dates = torch.unique(self.date, sorted=True)
         cut = dates[int(math.floor(train_frac * len(dates))) - 1]
@@ -221,7 +222,7 @@ class SyntheticSpec:
     noise_std: float = 0.5
     seed: int = 0
 
-    def validate(self) -> "SyntheticSpec":
+    def validate(self) -> SyntheticSpec:
         if self.n_regimes < 2:
             raise ValueError("n_regimes must be >= 2")
         if len(self.vol_levels) != self.n_regimes:

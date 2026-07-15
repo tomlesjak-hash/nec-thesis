@@ -6,15 +6,6 @@ thesis variations — the routing-mechanism comparison and the HMM-gated NEC —
 are config choices over one skeleton.
 """
 
-from .config import (
-    DataConfig,
-    EncoderConfig,
-    ExpertConfig,
-    GateConfig,
-    NECConfig,
-    PriorConfig,
-    TrainConfig,
-)
 from .alignment import (
     ExpertAlignment,
     RegimeAlignmentReport,
@@ -28,6 +19,15 @@ from .calibration import (
     TemperatureFit,
     fit_temperature,
     gate_reliability,
+)
+from .config import (
+    DataConfig,
+    EncoderConfig,
+    ExpertConfig,
+    GateConfig,
+    NECConfig,
+    PriorConfig,
+    TrainConfig,
 )
 from .context_data import build_context, load_french_factors, load_vix
 from .data import (
@@ -70,7 +70,15 @@ from .features import (
     rolling_beta,
 )
 from .likelihood import expert_log_likelihood
+from .losses import (
+    LoadBalanceBuffer,
+    MixtureNLLOutput,
+    expert_decorrelation_aux,
+    load_balance_aux,
+    mixture_nll,
+)
 from .market_data import DEFAULT_UNIVERSE, MARKET_SYMBOL, load_ohlcv, load_universe
+from .model import NECModel, NECOutput
 from .multiple_testing import (
     DeflatedSharpe,
     benjamini_hochberg,
@@ -90,30 +98,6 @@ from .plots import (
     plot_training_dashboard,
     plot_transition_matrix,
 )
-from .registry import TrialRecord, TrialRegistry
-from .sweep import (
-    ArmSummary,
-    SweepArm,
-    SweepReport,
-    baseline_arm,
-    corrected_claims,
-    nec_arm,
-    run_sweep,
-)
-from .universe import (
-    PointInTimeUniverse,
-    filter_point_in_time,
-    load_sp500_universe,
-    universe_coverage_report,
-)
-from .losses import (
-    LoadBalanceBuffer,
-    MixtureNLLOutput,
-    expert_decorrelation_aux,
-    load_balance_aux,
-    mixture_nll,
-)
-from .model import NECModel, NECOutput
 from .priors import (
     PRIOR_REGISTRY,
     GumbelSoftmaxRegimePrior,
@@ -128,8 +112,24 @@ from .priors import (
     UniformRegimePrior,
     build_prior,
 )
+from .registry import TrialRecord, TrialRegistry
+from .sweep import (
+    ArmSummary,
+    SweepArm,
+    SweepReport,
+    baseline_arm,
+    corrected_claims,
+    nec_arm,
+    run_sweep,
+)
 from .train import SequenceEval, Trainer
 from .tuning import TuneResult, tune, validation_tail
+from .universe import (
+    PointInTimeUniverse,
+    filter_point_in_time,
+    load_sp500_universe,
+    universe_coverage_report,
+)
 from .utils import assert_shape, set_seed
 
 __all__ = [

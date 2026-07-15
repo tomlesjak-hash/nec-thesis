@@ -27,8 +27,8 @@ Optimizer hygiene:
 from __future__ import annotations
 
 import itertools
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import Iterable, Sequence
 
 import torch
 from torch import Tensor

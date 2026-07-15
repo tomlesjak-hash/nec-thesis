@@ -12,9 +12,30 @@ dependencies = ["torch>=2.0", "numpy>=1.24", "pandas>=2.0"]
 [project.optional-dependencies]
 test = ["pytest>=8"]
 yahoo = ["yfinance>=0.2"]  # Stage-B prototyping fallback source (unofficial)
+plots = ["matplotlib>=3.8"]
+universe = ["lxml>=4.9"]  # Wikipedia constituent tables (pandas.read_html)
+dev = ["ruff>=0.5", "mypy>=1.10"]
 
 [tool.setuptools]
 packages = ["nec_moe"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+[tool.ruff.lint.per-file-ignores]
+# tests must set MPLBACKEND before matplotlib loads; scripts sys.path-bootstrap
+"tests/*" = ["E402"]
+"scripts/*" = ["E402"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true  # pandas/yfinance/matplotlib ship no stubs
+check_untyped_defs = true
+warn_redundant_casts = true
+warn_unused_ignores = true

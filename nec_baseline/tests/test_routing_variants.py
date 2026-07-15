@@ -15,16 +15,13 @@ import math
 import pytest
 import torch
 import torch.nn.functional as F
-
 from conftest import small_config
+
 from nec_moe import (
     NECModel,
-    PriorConfig,
-    PriorContext,
     SyntheticRegimePanel,
     SyntheticSpec,
     Trainer,
-    build_prior,
 )
 from nec_moe.likelihood import expert_log_likelihood
 from nec_moe.losses import mixture_nll

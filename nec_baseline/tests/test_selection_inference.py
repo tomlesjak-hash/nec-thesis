@@ -134,7 +134,8 @@ def test_moment_guards():
 
 
 def test_ic_pvalue():
-    ics = torch.full((100,), 0.05) + 0.02 * torch.randn(100, generator=torch.Generator().manual_seed(2))
+    g = torch.Generator().manual_seed(2)
+    ics = torch.full((100,), 0.05) + 0.02 * torch.randn(100, generator=g)
     s = ic_summary(ics)
     p = ic_pvalue(s)
     assert 0.0 <= p < 0.05  # strong, consistent IC -> tiny p
@@ -155,7 +156,7 @@ def test_benjamini_hochberg_classic_example():
     # ordered: .005 <= .0125, .01 <= .025, .03 <= .0375, .04 <= .05 -> all reject
     assert reject == [True, True, True, True]
     # monotone q-values, each >= its raw p
-    assert all(q >= p for q, p in zip(qvals, pvals))
+    assert all(q >= p for q, p in zip(qvals, pvals, strict=True))
     # a family with one clear discovery among junk
     reject2, q2 = benjamini_hochberg([0.001, 0.8, 0.9, 0.7, 0.95], alpha=0.10)
     assert reject2 == [True, False, False, False, False]
@@ -167,7 +168,7 @@ def test_bh_no_stricter_than_bonferroni():
     pvals = torch.rand(40, generator=g).tolist() + [1e-5, 3e-4]
     bon_rej, _ = bonferroni(pvals, alpha=0.05)
     bh_rej, _ = benjamini_hochberg(pvals, alpha=0.05)
-    assert all(bh for bon, bh in zip(bon_rej, bh_rej) if bon)  # BH ⊇ Bonferroni
+    assert all(bh for bon, bh in zip(bon_rej, bh_rej, strict=True) if bon)  # BH ⊇ Bonferroni
 
 
 def test_pvalue_guards():

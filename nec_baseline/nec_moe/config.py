@@ -173,7 +173,7 @@ class NECConfig:
         return self.data.d_snap + self.encoder.hidden_dim
 
     # ------------------------------------------------------------ validation
-    def validate(self) -> "NECConfig":
+    def validate(self) -> NECConfig:
         d, e, x, p, t = self.data, self.encoder, self.experts, self.prior, self.train
 
         def bad(msg: str) -> ValueError:
@@ -280,7 +280,7 @@ class NECConfig:
         return dataclasses.asdict(self)
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "NECConfig":
+    def from_dict(cls, d: dict[str, Any]) -> NECConfig:
         def _tupled(sub: dict[str, Any], keys: tuple[str, ...]) -> dict[str, Any]:
             return {
                 k: tuple(v) if k in keys and v is not None else v

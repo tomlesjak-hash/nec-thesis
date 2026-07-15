@@ -33,8 +33,8 @@ from __future__ import annotations
 
 import dataclasses
 import statistics
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Callable, Mapping, Sequence
 
 import pandas as pd
 import torch
@@ -201,31 +201,34 @@ def run_sweep(
     if len(set(names)) != len(names):
         raise ValueError(f"duplicate arm names: {sorted(names)}")
 
-    split = dict(
-        n_folds=n_folds,
-        test_dates_per_fold=test_dates_per_fold,
-        purge_dates=purge_dates,
-        min_train_dates=min_train_dates,
-        backtest_quantiles=backtest_quantiles,
-        cost_rate=cost_rate,
-    )
     per_arm: dict[str, list[dict[str, float]]] = {a.name: [] for a in arms}
     for arm in arms:
         for seed in seeds:
-            if arm.build_trainer is not None:
+            build_trainer, build_baseline = arm.build_trainer, arm.build_baseline
+            if build_trainer is not None:
                 res = walk_forward_evaluate(
                     panel,
-                    lambda: arm.build_trainer(seed),  # noqa: B023 — bound per iteration
+                    lambda: build_trainer(seed),  # noqa: B023 — consumed this iteration
                     steps=steps,
                     warmstart_key=arm.warmstart_key,
-                    **split,
+                    n_folds=n_folds,
+                    test_dates_per_fold=test_dates_per_fold,
+                    purge_dates=purge_dates,
+                    min_train_dates=min_train_dates,
+                    backtest_quantiles=backtest_quantiles,
+                    cost_rate=cost_rate,
                 )
             else:
-                assert arm.build_baseline is not None
+                assert build_baseline is not None
                 res = walk_forward_evaluate_baseline(
                     panel,
-                    lambda: arm.build_baseline(seed),  # noqa: B023
-                    **split,
+                    lambda: build_baseline(seed),  # noqa: B023 — consumed this iteration
+                    n_folds=n_folds,
+                    test_dates_per_fold=test_dates_per_fold,
+                    purge_dates=purge_dates,
+                    min_train_dates=min_train_dates,
+                    backtest_quantiles=backtest_quantiles,
+                    cost_rate=cost_rate,
                 )
             metrics = _metrics_from_result(res)
             registry.log(tag, metrics, config=arm.config_record, seed=seed)
@@ -271,4 +274,4 @@ def corrected_claims(
     reject, qvals = benjamini_hochberg(
         [a.median_p for a in report.arms], alpha=alpha
     )
-    return {arm: (r, q) for arm, r, q in zip(arms, reject, qvals)}
+    return {arm: (r, q) for arm, r, q in zip(arms, reject, qvals, strict=True)}

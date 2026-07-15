@@ -94,7 +94,8 @@ def parse_french_csv(text: str) -> pd.DataFrame:
         (
             i
             for i, ln in enumerate(lines)
-            if ln.startswith(",") and re.match(r"^\s*\d{8},", lines[i + 1] if i + 1 < len(lines) else "")
+            if ln.startswith(",")
+            and re.match(r"^\s*\d{8},", lines[i + 1] if i + 1 < len(lines) else "")
         ),
         None,
     )

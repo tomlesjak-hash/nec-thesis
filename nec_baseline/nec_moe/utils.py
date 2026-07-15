@@ -29,7 +29,7 @@ def assert_shape(t: Tensor, expected: tuple[int | None, ...], name: str) -> None
     """
     actual = tuple(t.shape)
     ok = len(actual) == len(expected) and all(
-        e is None or a == e for a, e in zip(actual, expected)
+        e is None or a == e for a, e in zip(actual, expected, strict=True)
     )
     if not ok:
         exp_str = tuple("*" if e is None else e for e in expected)

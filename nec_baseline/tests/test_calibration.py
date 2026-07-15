@@ -15,8 +15,8 @@ os.environ.setdefault("MPLBACKEND", "Agg")
 
 import pytest
 import torch
-
 from conftest import small_config
+
 from nec_moe import (
     NECModel,
     SyntheticRegimePanel,

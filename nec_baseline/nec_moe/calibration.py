@@ -135,7 +135,7 @@ def _reliability_from(
         conf.append(float(pi[m].mean()) if c else float("nan"))
         out.append(float(r[m].mean()) if c else float("nan"))
     ece = sum(
-        w * abs(c - o) for w, c, o in zip(weight, conf, out) if w > 0
+        w * abs(c - o) for w, c, o in zip(weight, conf, out, strict=True) if w > 0
     )
     return ReliabilityReport(
         bin_edges=tuple(float(e) for e in edges),

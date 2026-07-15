@@ -17,7 +17,9 @@ import torch
 
 matplotlib = pytest.importorskip("matplotlib")
 
+import pandas as pd
 from conftest import small_config
+
 from nec_moe import (
     ArmSummary,
     NECModel,
@@ -32,8 +34,6 @@ from nec_moe import (
     plot_training_dashboard,
     plot_transition_matrix,
 )
-
-import pandas as pd
 
 
 @pytest.fixture(scope="module")

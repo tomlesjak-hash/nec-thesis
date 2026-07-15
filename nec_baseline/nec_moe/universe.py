@@ -246,7 +246,7 @@ def filter_point_in_time(panel: Panel, universe: PointInTimeUniverse) -> Panel:
     keep = torch.tensor(
         [
             panel.entity_labels[int(e)] in members_by_code[int(d)]
-            for d, e in zip(panel.date, panel.entity)
+            for d, e in zip(panel.date, panel.entity, strict=True)
         ],
         dtype=torch.bool,
     )

@@ -28,8 +28,9 @@ scripts, notebooks, and headless CI (set ``MPLBACKEND=Agg`` there).
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Mapping, Sequence
+from typing import TYPE_CHECKING
 
 import pandas as pd
 from torch import Tensor
@@ -64,7 +65,7 @@ def _plt():
     return plt
 
 
-def _save(fig: "Figure", path: str | Path | None) -> "Figure":
+def _save(fig: Figure, path: str | Path | None) -> Figure:
     if path is not None:
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -89,7 +90,7 @@ def plot_training_dashboard(
     *,
     n_experts: int,
     path: str | Path | None = None,
-) -> "Figure":
+) -> Figure:
     """Four panels over training steps: NLL, gate entropy (with the uniform
     ``log K`` reference), min running utilization (with the 0.05 alarm), and
     max off-diagonal expert correlation (the homogenization watch)."""
@@ -125,7 +126,7 @@ def plot_gate_utilization(
     context_col: str = "vix",
     expert: int | None = None,
     path: str | Path | None = None,
-) -> "Figure":
+) -> Figure:
     """One expert's per-date gate share as a filled path, optionally overlaid
     with a context series on a twin axis.
 
@@ -168,7 +169,7 @@ def plot_ic_series(
     *,
     roll: int = 20,
     path: str | Path | None = None,
-) -> "Figure":
+) -> Figure:
     """Per-date rank-IC bars with a rolling mean — the honest picture behind a
     pooled IC (a pooled 0.03 can be a steady 0.03 or a lucky quarter)."""
     _, ics = rank_ic_by_date(pred, y, date)
@@ -194,7 +195,7 @@ def plot_long_short_curve(
     n_quantiles: int,
     cost_rate: float = 0.0,
     path: str | Path | None = None,
-) -> "Figure":
+) -> Figure:
     """Cumulative gross and net quantile long-short returns (per-period sums —
     no calendar, no annualization)."""
     _, gross, tno = long_short_by_date(pred, y, date, entity, n_quantiles=n_quantiles)
@@ -215,7 +216,7 @@ def plot_transition_matrix(
     source: object,
     *,
     path: str | Path | None = None,
-) -> "Figure":
+) -> Figure:
     """Annotated heatmap of the learned transition matrix ``A`` (Variation 3).
 
     ``source`` may be an ``NECModel``/``Trainer`` (whose prior must be the
@@ -260,7 +261,7 @@ def plot_sweep_report(
     *,
     metric: str = "mean_ic",
     path: str | Path | None = None,
-) -> "Figure":
+) -> Figure:
     """Mean ± seed-std of one metric per arm — the comparison-table figure.
 
     The error bars are the seed stds from the report: the visual form of
@@ -286,10 +287,10 @@ def plot_sweep_report(
 
 
 def plot_reliability(
-    report: "ReliabilityReport",
+    report: ReliabilityReport,
     *,
     path: str | Path | None = None,
-) -> "Figure":
+) -> Figure:
     """Reliability diagram of the gate's mixture weights (M4 §4.9).
 
     Left: mean realized responsibility vs mean claimed probability per bin —
@@ -317,7 +318,8 @@ def plot_reliability(
         f"ECE = {report.ece:.3f}  (T = {report.temperature:.2f}, "
         f"{report.n_claims:,} claims)", fontsize=9,
     )
-    centers = [(a + b) / 2 for a, b in zip(report.bin_edges[:-1], report.bin_edges[1:])]
+    edges = report.bin_edges
+    centers = [(a + b) / 2 for a, b in zip(edges[:-1], edges[1:], strict=True)]
     axw.bar(centers, report.bin_weight, width=0.9 / len(centers), alpha=0.6)
     axw.set_xlabel("claimed  π")
     axw.set_ylabel("share of claims")

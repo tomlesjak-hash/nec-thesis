@@ -14,8 +14,8 @@ import math
 
 import pytest
 import torch
-
 from conftest import D_SEQ, D_SNAP, SEQ_LEN, small_config
+
 from nec_moe import (
     Batch,
     ClassicalGaussianEmission,

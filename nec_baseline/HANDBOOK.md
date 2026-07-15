@@ -1728,16 +1728,28 @@ Ordered by value per effort; ✅ exists, ◻ to do:
    (identical experts ⇒ ECE 0; ×4-sharpened gate ⇒ T > 1.5 repairs NLL and ECE out of
    sample). The thesis-quality diagnostic nobody else will have — use it in the
    interpretability chapter.
-7. ◻ **Lint + type-check + CI** — `ruff`, `pyright`, a CI job running the offline
-   suite once a remote exists. ~½ day.
-8. ◻ **Pre-registration template** in the repo. ~½ day.
+7. ✅ **Lint + type-check + CI** — `ruff` (E/F/W/I/B/UP, clean) and `mypy` (clean over
+   all 26 source files) configured in `pyproject.toml`; run them with
+   `python3.14 -m ruff check nec_moe/ tests/ scripts/` and `python3.14 -m mypy nec_moe/`.
+   The pass hardened real things: `zip(strict=True)` throughout, no
+   call-in-argument-defaults, and `log_sigma` promoted to a declared field of the
+   `Emission` contract (the σ-schedule and canonical ordering depend on it).
+   CI: `.github/workflows/ci.yml` (repo root) runs ruff + mypy + the offline suite on
+   CPU torch — live the day the repo gets a remote.
+8. ✅ **Pre-registration template** — `PREREGISTRATION_TEMPLATE.md`: identity, frozen
+   data + coverage posture, the complete candidate grid, tuning plan, evaluation
+   protocol, claim family + corrections (BH over arms, median-combined replicates,
+   deflated winner), success/negative-result criteria committed in advance, and an
+   append-only deviations log. Copy to `results/prereg_<tag>.md`, fill, commit
+   **before the first trial**.
 9. ✅ Purged walk-forward, cost-aware backtest, registry + DSR/BH, PIT membership +
    coverage, alignment diagnostics, defect regression tests.
 
-Items 1–5 are done: seeds, the PIT panel, the residual target, tuning discipline, and
-figures — the line to "these numbers can enter a thesis" is crossed on the
-infrastructure side. What remains is polish (6: gate calibration, 7: lint/CI, 8: the
-pre-registration template) and then the experiments themselves.
+**All eight items are done.** The completion list is closed: seeds, the PIT panel, the
+residual target, tuning discipline, figures, gate calibration, lint/type-check/CI, and
+the pre-registration template. What remains is not infrastructure — it is the science:
+copy `PREREGISTRATION_TEMPLATE.md`, fill it for the supervisor-approved variation,
+commit it, and run the grid.
 
 ---
 

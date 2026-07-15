@@ -11,8 +11,8 @@ import dataclasses
 import pytest
 import torch
 import torch.nn as nn
-
 from conftest import D_SEQ, D_SNAP, SEQ_LEN, random_inputs, small_config
+
 from nec_moe import (
     Batch,
     DataConfig,

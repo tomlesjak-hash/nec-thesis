@@ -18,15 +18,14 @@ import numpy as np
 import pandas as pd
 import pytest
 import torch
-
 from conftest import small_config
+
 from nec_moe import (
     NECModel,
     SyntheticRegimePanel,
     SyntheticSpec,
     Trainer,
     build_context,
-    gate_regime_alignment,
     gate_utilization_by_date,
     load_french_factors,
     load_vix,

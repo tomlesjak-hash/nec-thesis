@@ -1,0 +1,33 @@
+# CI for the thesis baseline (nec_baseline/). Runs the moment this repo gets a
+# GitHub remote — nothing to configure. Network-dependent tests skip themselves
+# (NEC_NETWORK_TESTS gate), so the suite is hermetic here.
+name: nec-baseline
+
+on:
+  push:
+    paths: ["nec_baseline/**", ".github/workflows/ci.yml"]
+  pull_request:
+    paths: ["nec_baseline/**", ".github/workflows/ci.yml"]
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: nec_baseline
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install (CPU torch)
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install numpy pandas pytest ruff mypy matplotlib lxml
+      - name: Lint (ruff)
+        run: python -m ruff check nec_moe/ tests/ scripts/
+      - name: Type-check (mypy)
+        run: python -m mypy nec_moe/
+      - name: Tests (offline suite)
+        run: python -m pytest tests/ -q

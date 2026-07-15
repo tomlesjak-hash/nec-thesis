@@ -135,7 +135,7 @@ def test_filter_point_in_time_on_panel():
     assert len(filtered) == 4
     kept = {
         (panel.date_labels[int(d)], panel.entity_labels[int(e)])
-        for d, e in zip(filtered.date, filtered.entity)
+        for d, e in zip(filtered.date, filtered.entity, strict=True)
     }
     assert kept == {
         ("2021-05-28", "www"),

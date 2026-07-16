@@ -937,7 +937,24 @@ Where output is shown, it is the output you should approximately see.
 
 ## II.0 The workflow at a glance
 
-Every experiment in this codebase is the same seven moves:
+**The shortcut: `run_experiment.py` — the control panel.** One file, all the knobs in a
+single `Experiment(...)` settings block (data source, model, prior, training length,
+seeds, evaluation split, figures on/off), everything downstream automatic:
+
+```bash
+# edit the EXPERIMENT = Experiment(...) block at the top, then
+python3.14 run_experiment.py
+```
+
+`mode="quick"` trains ONE model on a chronological split and produces the full
+diagnostic picture (dashboard, utilization, IC/L-S curves, calibration, optional VIX
+alignment) — the iterate-fast loop. `mode="evaluate"` runs the honest protocol
+(multi-seed purged walk-forward, baseline rows, BH-corrected claims) — the
+show-to-someone loop. Outputs land in `results/<tag>/` with a `settings.json`
+provenance snapshot and the registry. It is a thin driver over everything below — the
+rest of Part II documents the pieces it drives, for when you outgrow the panel.
+
+Under the hood, every experiment is the same seven moves:
 
 ```
 1 DATA      build or load a Panel        (synthetic | Stage B real | your own)

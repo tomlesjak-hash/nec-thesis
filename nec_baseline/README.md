@@ -7,6 +7,20 @@ variations).
 
 The original prototype this corrects lives untouched at `../OP model/nec/nec_hybrid_explained.py`.
 
+## The control panel (start here)
+
+All the knobs in one file — edit the `Experiment(...)` block at the top of
+[`run_experiment.py`](run_experiment.py) (data, model, prior, training length, seeds,
+evaluation) and run:
+
+```bash
+python3.14 run_experiment.py
+```
+
+`mode="quick"` = one model + full diagnostics (figures, calibration); `mode="evaluate"`
+= multi-seed purged walk-forward with baselines and corrected claims. Outputs +
+provenance land in `results/<tag>/`. Everything below is the machinery it drives.
+
 ## Quickstart (smoke: train on synthetic regime data)
 
 ```bash

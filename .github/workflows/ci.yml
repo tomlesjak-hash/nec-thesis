@@ -26,8 +26,8 @@ jobs:
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install numpy pandas pytest ruff mypy matplotlib lxml
       - name: Lint (ruff)
-        run: python -m ruff check nec_moe/ tests/ scripts/
+        run: python -m ruff check nec_moe/ tests/ scripts/ run_experiment.py
       - name: Type-check (mypy)
-        run: python -m mypy nec_moe/
+        run: python -m mypy nec_moe/ run_experiment.py
       - name: Tests (offline suite)
         run: python -m pytest tests/ -q

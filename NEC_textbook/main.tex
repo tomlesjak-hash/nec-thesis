@@ -1,0 +1,85 @@
+\documentclass[11pt,openany]{book}
+\input{preamble}
+
+\title{\Huge Regime-Conditional Mixture-of-Experts\\[6pt]
+       \Large Theory and Engineering of a Quant Research System\\[18pt]
+       \normalsize A personal textbook, written against the \code{nec\_baseline} codebase}
+\author{Tom Kores Lesjak\\ \small with Claude (Anthropic)}
+\date{Draft --- Part I \\ \today}
+
+\begin{document}
+\frontmatter
+\maketitle
+
+\chapter*{Preface}
+\addcontentsline{toc}{chapter}{Preface}
+
+This book exists to answer one question in full: \emph{how do you build a
+machine-learning research system for cross-sectional return prediction that
+you can actually trust?} Its subject is a single concrete artifact --- the
+\code{nec\_baseline} package, a regime-conditional mixture-of-experts written
+for a Master's thesis --- but its method is general. Every chapter starts from
+a problem you would genuinely face at that stage of the build, develops the
+theory needed to solve it, derives the mathematics in full, and only then
+shows how the engineering falls out of the theory. Motivation always precedes
+mechanism.
+
+Three running principles shape the text.
+
+\emph{First, failure is the curriculum.} The project began as a prototype
+that was wrong in eight distinct, instructive ways. Chapter~\ref{ch:autopsy}
+performs the autopsy; every later chapter repairs a named defect. When you
+meet the mixture negative log-likelihood in Part~II, you will already know
+exactly which silent failure it exists to prevent.
+
+\emph{Second, everything is derived.} The reader is assumed to know
+probability, linear algebra and basic machine learning at a Master's level,
+and nothing else is taken on faith: the EM algorithm's monotonicity, the gate
+gradient $\pi - r$, the forward filter, the deflated Sharpe ratio --- all are
+derived from first principles, because in this field a formula you cannot
+derive is a formula you cannot debug.
+
+\emph{Third, honesty over impressiveness.} Quantitative research has a
+structural bias toward self-deception: a leak or a lucky seed always
+\emph{improves} a backtest, so errors are asymmetrically rewarded. The
+engineering discipline in this book --- data contracts, planted-truth tests,
+purged evaluation, trial registries, pre-registration --- is not software
+aesthetics. It is epistemology made executable. Where the project has a known
+limitation, the book says so plainly, because the defensible posture is the
+entire point.
+
+\paragraph{How to read.} The parts are designed to be read in order on a
+first pass. Each chapter ends with exercises --- a mix of pen-and-paper
+derivations and hands-on tasks against the real codebase --- with solutions in
+Appendix~\ref{app:solutions}. Boxes punctuate the text:
+\emph{Engineering consequence} (where theory forces a code decision),
+\emph{What breaks without this} (the concrete failure that occurs if the
+lesson is skipped), \emph{Origins} (where the idea comes from in the
+literature), and \emph{Code walkthrough} (annotated excerpts from the real
+package). The companion reference for day-to-day use of the code is
+\code{nec\_baseline/HANDBOOK.md}; this book teaches you to be the person who
+could have written it.
+
+\tableofcontents
+
+\mainmatter
+
+% ===================================================================== PART I
+\part{The Problem}\label{part:problem}
+
+\input{chapters/ch01_cross_section}
+\input{chapters/ch02_regimes}
+\input{chapters/ch03_autopsy}
+
+% Parts II--VII are added as they are written:
+% \part{The Mathematics}
+% \part{From Math to Architecture}
+% \part{Data Engineering}
+% \part{Honest Evaluation}
+% \part{Research Software Engineering}
+% \part{Practicum}
+
+\appendix
+\input{chapters/solutions_part1}
+
+\end{document}

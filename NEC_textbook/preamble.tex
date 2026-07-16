@@ -1,0 +1,123 @@
+% ---------------------------------------------------------------------------
+% Preamble: typography, math, theorem/exercise machinery, pedagogical boxes.
+% ---------------------------------------------------------------------------
+% Build with tectonic (XeTeX): native UTF-8, packages fetched on demand.
+\usepackage{amsmath,mathtools,bm}         % math BEFORE newpxmath (symbol clashes)
+\usepackage{amsthm}
+\usepackage{newpxtext,newpxmath}          % Palatino-like text + matching math
+\usepackage{microtype}
+\usepackage[margin=1.15in]{geometry}
+\usepackage{booktabs,tabularx,array,multirow}
+\usepackage{enumitem}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{positioning,arrows.meta,fit,calc}
+\usepackage[most]{tcolorbox}
+\usepackage{listings}
+\usepackage{caption}
+\captionsetup{font=small,labelfont=bf}
+\usepackage[colorlinks=true,linkcolor=linkblue,citecolor=linkblue,urlcolor=linkblue]{hyperref}
+\usepackage[nameinlink,capitalise]{cleveref}
+
+% ------------------------------------------------------------------- colors
+\definecolor{linkblue}{HTML}{2B4C7E}
+\definecolor{engbg}{HTML}{EEF3F8}
+\definecolor{engframe}{HTML}{2B4C7E}
+\definecolor{breakbg}{HTML}{FBEFEA}
+\definecolor{breakframe}{HTML}{A84C32}
+\definecolor{histbg}{HTML}{F4F1E8}
+\definecolor{histframe}{HTML}{8A7B4D}
+\definecolor{codebg}{HTML}{F7F7F7}
+\definecolor{codeframe}{HTML}{999999}
+\definecolor{kwcolor}{HTML}{2B4C7E}
+\definecolor{strcolor}{HTML}{7A4A22}
+\definecolor{comcolor}{HTML}{6B7B62}
+
+% ------------------------------------------------------------------ listings
+\lstdefinestyle{py}{
+  language=Python,
+  basicstyle=\ttfamily\footnotesize,
+  keywordstyle=\color{kwcolor}\bfseries,
+  stringstyle=\color{strcolor},
+  commentstyle=\color{comcolor}\itshape,
+  showstringspaces=false,
+  columns=fullflexible,
+  keepspaces=true,
+  breaklines=true,
+  frame=single,
+  rulecolor=\color{codeframe},
+  backgroundcolor=\color{codebg},
+  framesep=4pt,
+  xleftmargin=6pt, xrightmargin=6pt,
+  aboveskip=8pt, belowskip=8pt,
+}
+\lstset{style=py}
+
+% ------------------------------------------------------------------ theorems
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}[chapter]
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{corollary}[theorem]{Corollary}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{example}[theorem]{Example}
+\newtheorem{exercise}{Exercise}[chapter]
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+
+% --------------------------------------------------------- pedagogical boxes
+% Engineering consequence: where a piece of theory forces a code decision.
+\newtcolorbox{engineering}[1][]{%
+  enhanced, breakable, colback=engbg, colframe=engframe,
+  boxrule=0.6pt, arc=1.5pt, left=6pt, right=6pt, top=4pt, bottom=4pt,
+  title={Engineering consequence\ifblank{#1}{}{ --- #1}},
+  fonttitle=\bfseries\small, coltitle=white}
+
+% What breaks: the concrete failure that occurs if the lesson is skipped.
+\newtcolorbox{whatbreaks}[1][]{%
+  enhanced, breakable, colback=breakbg, colframe=breakframe,
+  boxrule=0.6pt, arc=1.5pt, left=6pt, right=6pt, top=4pt, bottom=4pt,
+  title={What breaks without this\ifblank{#1}{}{ --- #1}},
+  fonttitle=\bfseries\small, coltitle=white}
+
+% Origins: literature and history context.
+\newtcolorbox{origins}[1][]{%
+  enhanced, breakable, colback=histbg, colframe=histframe,
+  boxrule=0.6pt, arc=1.5pt, left=6pt, right=6pt, top=4pt, bottom=4pt,
+  title={Origins\ifblank{#1}{}{ --- #1}},
+  fonttitle=\bfseries\small, coltitle=white}
+
+% Code walkthrough: annotated excerpts from the real package.
+\newtcolorbox{codewalk}[1][]{%
+  enhanced, breakable, colback=white, colframe=codeframe,
+  boxrule=0.6pt, arc=1.5pt, left=6pt, right=6pt, top=4pt, bottom=4pt,
+  title={Code walkthrough\ifblank{#1}{}{ --- \texttt{#1}}},
+  fonttitle=\bfseries\small, coltitle=white}
+
+% ------------------------------------------------------------------- macros
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\Prob}{\mathbb{P}}
+\newcommand{\Var}{\operatorname{Var}}
+\newcommand{\Cov}{\operatorname{Cov}}
+\newcommand{\Corr}{\operatorname{Corr}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\gauss}{\mathcal{N}}
+\newcommand{\ind}[1]{\mathbf{1}\{#1\}}
+\newcommand{\LSE}{\operatorname{LSE}}
+\DeclareMathOperator*{\argmax}{arg\,max}
+\DeclareMathOperator*{\argmin}{arg\,min}
+\newcommand{\vx}{\bm{x}}
+\newcommand{\vy}{\bm{y}}
+\newcommand{\vz}{\bm{z}}
+\newcommand{\vh}{\bm{h}}
+\newcommand{\vpi}{\bm{\pi}}
+\newcommand{\IC}{\mathrm{IC}}
+\newcommand{\ICbar}{\overline{\mathrm{IC}}}
+\newcommand{\ICIR}{\mathrm{ICIR}}
+\newcommand{\NLL}{\mathrm{NLL}}
+\newcommand{\code}[1]{\texttt{#1}}
+
+% Exercise list at chapter end
+\newcommand{\exercisehead}{\section*{Exercises}\addcontentsline{toc}{section}{Exercises}}

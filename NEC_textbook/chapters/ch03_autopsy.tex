@@ -1,0 +1,474 @@
+\chapter{Autopsy of a Prototype}\label{ch:autopsy}
+
+\begin{quote}\small\itshape
+The project did not begin with a blank page. It began with a working ---
+running, loss-decreasing, plausible-looking --- prototype that was wrong in
+eight distinct ways, none of which produced an error message. This chapter
+dissects it. The point is not self-flagellation: the prototype's
+\emph{architectural idea} was sound, and the corrected system keeps it. The
+point is that each defect is a specimen of an entire \emph{class} of failure,
+and the corrected system is best understood as eight class-level defenses.
+Every later chapter of this book repairs something that dies on this table.
+\end{quote}
+
+\section{The specimen}\label{sec:specimen}
+
+The prototype (preserved untouched in the repository at
+\code{OP model/nec/nec\_hybrid\_explained.py}) implements a
+\emph{normal-versus-extreme conditional} model --- NEC --- in three pieces:
+
+\begin{itemize}[leftmargin=2em]
+\item \code{C\_L}: a stacked LSTM sequence encoder (defaults: hidden size
+  $256$, \emph{eight} layers) reading the feature window;
+\item \code{C\_F}: a classifier head on one selected time step of the LSTM
+  output --- \code{Linear} $\to$ \code{BatchNorm1d} $\to$ activation $\to$
+  \code{Linear} $\to$ \code{nn.Softmax} --- emitting probabilities over
+  \emph{three} market classes;
+\item two \code{NEC\_MLP} regressors, ``\code{extreme}'' and
+  ``\code{normal},'' each reading a raw slice of the input window.
+\end{itemize}
+
+The forward pass routes hard:
+
+\begin{lstlisting}
+prob  = self.classifier(h)               # (B, 3) softmax output
+e_out = self.extreme(x[:, -1, :-1])      # slice: last step, drop last col
+n_out = self.normal(x[:, -1, :-1])
+pred  = torch.where(torch.argmax(prob, dim=1) == 1, e_out, n_out)
+\end{lstlisting}
+
+Figure~\ref{fig:prototype} draws the whole machine with the defects marked
+where they live.
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[
+  font=\small,
+  box/.style={draw, rounded corners=1.5pt, minimum height=8mm,
+              minimum width=26mm, align=center, fill=white},
+  bad/.style={draw=breakframe, circle, fill=breakbg, inner sep=1pt,
+              font=\bfseries\footnotesize, text=breakframe},
+  arr/.style={-{Latex[length=2mm]}, thick},
+  ]
+  \node[box] (xseq) {window $x$\\ $(B, T, d)$};
+  \node[box, right=12mm of xseq] (lstm) {\code{C\_L}: LSTM\\ $n{=}256$, $L{=}8$};
+  \node[box, right=12mm of lstm] (cf) {\code{C\_F}: head\\ BatchNorm $\to$ Softmax};
+  \node[box, right=12mm of cf] (route) {\code{argmax} $=1$?};
+  \node[box, below=13mm of xseq] (slice) {\code{x[:, -1, :-1]}\\ raw last-step slice};
+  \node[box, below=13mm of cf] (ext) {\code{extreme} MLP};
+  \node[box, below=8mm of ext] (norm) {\code{normal} MLP};
+  \node[box, below=13mm of route] (pred) {$\hat y$ (one expert,\\ winner takes all)};
+
+  \draw[arr] (xseq) -- (lstm);
+  \draw[arr] (lstm) -- (cf);
+  \draw[arr] (cf) -- (route);
+  \draw[arr] (xseq) -- (slice);
+  \draw[arr] (slice.east) -- (ext.west);
+  \draw[arr] (slice.east) -- (norm.west);
+  \draw[arr] (ext.east) -- (pred.west);
+  \draw[arr] (norm.east) -| (pred.south);
+  \draw[arr] (route) -- (pred);
+
+  \node[bad, above right=-1.5mm and -3mm of lstm] {5};
+  \node[bad, above right=-1.5mm and -3mm of cf] {3,4};
+  \node[bad, above right=-1.5mm and -3mm of route] {1,2};
+  \node[bad, below right=-1.5mm and -3mm of slice] {6,7};
+  \node[bad, above left=-1.5mm and -2mm of lstm] {8};
+\end{tikzpicture}
+\caption{\textbf{The prototype, with defects in place.} Numbers key to the
+ledger of Section~\ref{sec:ledger}. Note the two load-bearing absurdities
+visible even at block-diagram level: the gradient cannot cross the
+\code{argmax} (1), so the entire left half of the diagram --- the
+four-million-parameter encoder and its head --- receives no training signal
+from the prediction task; and the experts read a raw, undocumented slice of
+the input (6, 7), so the encoder's summary influences \emph{nothing} except
+the untrainable routing decision.}
+\label{fig:prototype}
+\end{figure}
+
+Before the knife comes out, record what is \emph{right}. The prototype's
+thesis --- encode the recent sequence into a state, classify the market
+regime from that state, and route to a regime-specialized regressor --- is
+exactly Definition~\ref{def:nec}. The corrected system keeps this skeleton
+wholesale: encoder $\to$ gate $\to$ experts. Diagnosing which part of a
+broken system is sound is as much a skill as finding the breaks; the ledger's
+verdict on the architecture was \emph{keep}, and the whole project is
+downstream of that judgment call being correct.
+
+\section{The ledger}\label{sec:ledger}
+
+Eight defects, in logical rather than severity order. For each: what the
+code does, why it is wrong (with the mathematics where mathematics is the
+right scalpel), and the repair --- with a pointer to the chapter that builds
+it properly.
+
+\subsection*{Defect 1 --- \code{argmax} routing: the gate cannot learn}
+
+The routing decision \code{torch.where(argmax(prob) == 1, e\_out, n\_out)}
+selects one expert per sample. As a function of the classifier's parameters
+$\theta$, the selection $\ind{\argmax_k \mathrm{prob}_k(\theta) = 1}$ is
+piecewise constant: small perturbations of $\theta$ leave the argmax
+unchanged almost everywhere, so
+\[
+  \frac{\partial\, \hat y}{\partial \theta} = 0
+  \quad \text{almost everywhere.}
+\]
+Autograd dutifully computes this zero. Whatever loss is attached to
+$\hat y$, \emph{no gradient ever reaches the classifier} through the routing
+path --- the gate's weights receive exactly zero training signal from the
+prediction task. The four-million-parameter encoder feeding it is trained,
+if at all, only by whatever auxiliary classification loss the gate carries,
+and the routing quality can never improve from prediction feedback. Nothing
+crashes; the loss on the experts still decreases; the model ``trains.''
+
+The repair (Chapter~5) is to stop making a decision and start mixing:
+weight each expert's \emph{density} by a probability and maximize the
+mixture likelihood. The gradient of that objective with respect to the gate
+logits will turn out to be the beautiful $\pi - r$ --- prior minus posterior
+--- restoring a rich training signal to precisely the module that had none.
+The lesson generalizes far beyond this file:
+\begin{center}
+\emph{hard decisions inside a differentiable model are gradient graves;}\\
+\emph{make the decision soft, or move it outside the training path.}
+\end{center}
+And the story has a coda that will recur in Chapter~6: the ``obvious'' soft
+fix of renormalizing the top-1 weight is \emph{equally} gradient-dead --- a
+constant $1$ is as flat as an indicator --- a fact the corrected package
+enforces with a validation error and proves with a test.
+
+\subsection*{Defect 2 --- three classes collapsed to one bit}
+
+The classifier emits three market classes; the routing consumes only
+$\ind{\text{class} = 1}$. Classes $0$ and $2$ --- presumably ``calm'' and
+some third state --- are silently merged, the distinction the classifier
+spends capacity learning is discarded, and the number of regimes is
+hard-wired into an equality test buried in the forward pass. $K$ is not a
+parameter; it is folklore.
+
+The repair is structural, not cosmetic: \emph{all} $K$ components enter the
+likelihood with their own weights and densities (Chapter~5), $K$ lives in
+one configuration field, and no class index has hardcoded meaning anywhere
+--- which later forces an honest confrontation with the fact that mixture
+components are exchangeable (the label-permutation problem, Chapters~7--8),
+a problem the prototype never met only because it had welded the labels to
+the furniture.
+
+\subsection*{Defect 3 --- \code{nn.Softmax} inside the model, feeding a
+second loss}
+
+The head ends in \code{nn.Softmax}, so downstream code sees probabilities,
+and any classification loss must be computed as
+$\log(\mathrm{softmax}(z))$ in two separate steps. Two distinct failures
+hide here. \emph{Numerical:} $\log(\mathrm{softmax}(z))$ computed
+na\"ively overflows for logits as small as $z \approx 90$ (since
+$e^{90} \approx 10^{39}$ exceeds float32's range) and catastrophically
+cancels for confident predictions, where the winning probability rounds to
+$1.0$ and its log to exactly $0$; the fused \code{log\_softmax} identity
+$\log \pi_k = z_k - \LSE(z)$, with the max-subtracted log-sum-exp, is exact
+and stable at any scale --- Chapter~11 makes log-domain computation a
+system-wide law. \emph{Statistical:} the gate was to be trained by a
+\emph{separate} classification objective against externally supplied
+regime labels, while the experts trained on regression --- two losses, two
+sources of truth, and a gate whose notion of ``regime'' is whatever the
+labeler said rather than whatever best explains the returns. The corrected
+model has \emph{one} scalar objective, the mixture NLL, in which routing and
+prediction are the same optimization (Chapter~5) and the gate is
+unsupervised by design (Decision~B, Chapters~2 and~9).
+
+\subsection*{Defect 4 --- \code{BatchNorm1d} in the head: samples that
+whisper to each other}
+
+BatchNorm normalizes each activation by statistics of the \emph{current
+batch}. Consequences, in ascending severity for this domain: (i)
+train/eval asymmetry --- at eval time the layer switches to running
+statistics, so the very function being computed differs between training
+and deployment; (ii) batch-composition sensitivity --- a sample's output
+depends on which other samples share its batch; (iii) \emph{leakage} ---
+in a panel, a batch can mix dates, and normalizing by batch statistics lets
+information flow between dates within the batch: sample $A$ at date $t$ is
+transformed using moments computed partly from samples at $t' > t$. That is
+look-ahead, laundered through a normalization layer, invisible in any code
+review that does not know to look for it. And by
+Remark~\ref{rem:ratchet}, if it helps the backtest, nothing downstream
+will ever flag it.
+
+The repair is the drop-in \code{LayerNorm} --- identical normalization
+\emph{within} each sample across features, no cross-sample statistics, no
+train/eval asymmetry, no leakage channel (Chapter~11). The general lesson:
+in time-ordered data, \emph{any} operation that couples samples --- batch
+normalization, batch-level feature scaling, cross-sectional ranks computed
+over a batch rather than a date --- is a leakage suspect until proven
+innocent, and the proof must be structural (the operation cannot see the
+future) rather than empirical (``the backtest looks fine'').
+
+\subsection*{Defect 5 --- four million parameters against a whisper of
+signal}
+
+The encoder defaults: LSTM, hidden size $n = 256$, $L = 8$ stacked layers.
+Parameter count for an LSTM layer is $4\bigl(n(n + d) + n\bigr)$ --- four
+gates, each with input and recurrent weights and a bias --- so with $d$
+small, layer one costs $4(256 \cdot 256 + 256 \cdot d + 256) \approx 270$K
+and layers two through eight, whose input dimension is $n$, cost
+$4(256^2 + 256^2 + 256) \approx 525$K each: roughly \emph{four million
+trainable parameters} before the head. Chapter~\ref{ch:cross} priced the
+other side of the scale: a generous panel offers order $10^6$ rows whose
+effective information content is orders of magnitude lower
+(\S\ref{sec:dependence}), pursuing a signal of $R^2 \sim 10^{-3}$. This is
+not a subtle bias--variance trade-off to be tuned; it is a category error,
+resolvable by arithmetic before any experiment is run.
+
+The repair (Chapters~9 and~11): a one-layer GRU with $n = 32$
+--- about $3\bigl(n(n+d)+n\bigr) \approx 3{,}500$ parameters --- with the
+GRU-over-LSTM choice itself an application of the same arithmetic (three
+gates versus four: a $25\%$ parameter cut at equal hidden size is pure
+variance reduction at this data scale). The deeper practice being taught:
+\emph{effective-sample arithmetic is a design-time activity}. Parameter
+budgets in this field are set by the noise floor, not by what fits in GPU
+memory, and ``bigger model'' claims must clear a capacity-matched baseline
+(Chapter~16) precisely because capacity itself is a confounder.
+
+\subsection*{Defect 6 --- the encoder's summary influences nothing
+trainable}
+
+Follow the information flow in Figure~\ref{fig:prototype}. The experts read
+\code{x[:, -1, :-1]} --- a raw slice of the input window --- not the
+encoder's state. The encoder state reaches only the classifier, whose
+routing decision is gradient-dead by defect~1. Net effect: the LSTM's
+summary of history influences no trainable pathway. Four million parameters
+compute a representation whose only consumer cannot learn. The model is,
+functionally, two MLPs on a raw feature slice plus an elaborate,
+untrained switch.
+
+The repair is a genuine \emph{decision}, not a reflex --- because once
+defect~1 is fixed and the gate trains, ``what should the experts see?''
+has two defensible answers. Feed experts the snapshot features only, and
+the encoder specializes in \emph{state} while experts specialize in
+\emph{cross-section} --- clean division of labor, fewer parameters, and the
+regime interpretation of Chapter~2 stays legible. Feed them snapshot
+$\oplus$ encoder state, and experts can condition on history --- more
+capacity, blurrier semantics, and the gate/expert division of labor can
+collapse (if the experts see the state, they can privately un-mix the
+regimes and the gate's job evaporates). The corrected design makes this
+Decision~A: snapshot-only by \emph{default}, switchable by configuration,
+with the trade-off documented and the switch exposed as an ablation
+(Chapter~9). Defects that are really decisions deserve to be decided in
+daylight.
+
+\subsection*{Defect 7 --- \code{x[:, -1, :-1]}: the undocumented reserved
+column}
+
+The slice quietly asserts a convention: \emph{the last feature column is
+not a feature}. Somewhere upstream, the data pipeline packed something ---
+by all evidence the \emph{target} --- into the final column of the feature
+tensor, and every consumer must remember to slice it off. The contract
+lives in a \code{-1} in the middle of a forward pass: undocumented,
+untyped, unchecked. Now enumerate the failure modes. A new feature appended
+after the reserved column shifts the target \emph{into} the model's view:
+instant, silent, catastrophic look-ahead (the model ``predicts'' returns it
+was shown). A consumer that forgets to slice trains on the target directly.
+A pipeline change that drops the reserved column makes every downstream
+slice off by one --- silently, since shapes still match. By
+Remark~\ref{rem:ratchet}, the first failure mode is the one you will
+never find, because it makes results \emph{better}.
+
+The repair (Chapter~12): a named feature schema --- every column of both
+tensors has a name checked at panel construction; the target is a separate
+tensor of the \code{Panel}, so there \emph{is no} reserved column to slice
+off; and the model never slices feature tensors, anywhere. The class-level
+lesson: \emph{data-layout conventions are contracts, and contracts that
+live in comments (or worse, in a \code{-1}) eventually get broken by
+someone who never saw them.} Encode contracts in types, schemas, and
+constructors that refuse to build the invalid object.
+
+\subsection*{Defect 8 --- default dimensions that disagree}
+
+\code{C\_L} defaults its hidden size to $256$; \code{C\_F} defaults its
+expected input dimension to $64$. Instantiated with defaults, the pieces do
+not fit --- and whether that produces a loud shape error or a silent
+mis-projection depends on incidental details of which linear layer touches
+the tensor first. The defect is not the mismatch itself but the
+\emph{design that made it possible}: each module carries its own copy of a
+shared quantity, and nothing owns the truth. Configuration drift is the
+generic name --- two defaults, one meaning, no reconciliation.
+
+The repair (Chapters~9 and~11): a single configuration tree in which every
+dimension is written exactly once, cross-validated at construction time
+(\code{NECConfig.validate()} checks every derived dimension and raises with
+names and numbers), with derived quantities \emph{computed}, never
+restated --- the gate's input dimension, for instance, is a property
+derived from the encoder's hidden size and is deliberately not a settable
+field, making the prototype's mismatch \emph{unrepresentable}. Shape
+assertions at module boundaries (\code{assert\_shape}, with tensor names in
+the error) catch what validation cannot. The slogan for the whole family:
+\emph{make illegal states unrepresentable, and make the remaining errors
+loud and early.}
+
+\section{A taxonomy, and the shape of the cure}\label{sec:taxonomy}
+
+Eight defects, four families --- and the families, not the instances, are
+what the rest of the book is organized around:
+
+\begin{center}
+\small
+\begin{tabular}{@{}p{0.26\textwidth}cp{0.42\textwidth}c@{}}
+\toprule
+family & defects & defense layer & built in \\
+\midrule
+\textbf{Objective pathologies} --- the loss cannot train what it must
+  & 1, 2, 3 & derive the objective and its gradients \emph{before} coding;
+  fused log-domain losses; gradient-flow regression tests & Part II \\
+\addlinespace
+\textbf{Leakage channels} --- information crosses the time boundary
+  & 4, 7 & data contracts (schema, separate target tensor); leakage stated
+  as executable invariants; no cross-sample ops in models & Parts III, IV \\
+\addlinespace
+\textbf{Capacity delusions} --- parameters vastly outnumber effective
+  samples
+  & 5, 6 & effective-sample arithmetic at design time; small defaults;
+  capacity-matched baselines; decisions-as-ablations & Parts II, III, V \\
+\addlinespace
+\textbf{Contract failures} --- modules disagree about shared truths
+  & 8 & single config tree, validated at construction; derived (not
+  settable) dimensions; shape assertions at boundaries & Part III \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Notice what is \emph{absent} from the defense column: ``be more careful.''
+None of the eight defects would have been prevented by vigilance, because
+each was invisible at the moment of writing --- the code ran, the loss fell,
+and (Remark~\ref{rem:ratchet}) the failures that helped the numbers had
+negative incentive to be found. Every defense above is \emph{structural}:
+a derivation that must exist before the loss is coded, a constructor that
+refuses the invalid object, a test that fails on the defect, an API that
+does not offer the dangerous operation. The prototype's deepest lesson is
+that in this field, correctness is a property of \emph{systems}, not of
+authors.
+
+\begin{engineering}[every defect becomes a test]
+The corrected package operationalizes the ledger as a regression suite:
+for each defect, a test that \emph{would have failed on the prototype}.
+Defect~1: after one backward pass of the mixture NLL, the gate's weight
+gradient is asserted nonzero --- and a companion test builds an
+argmax-routing double and asserts its gate gradient is \emph{exactly} zero,
+pinning the defect itself, not just the fix. Defect~4: LayerNorm's output
+for a sample is asserted invariant to its batch companions. Defect~7: a
+target column smuggled into a feature tensor changes its width and fails
+the schema check. Defect~8: constructing the config with mismatched
+dimensions raises at build time. Tests-as-theorems is the working style of
+the whole project --- Chapter~19 is devoted to it --- and it began here, as
+the only honest response to a prototype that had passed every informal
+inspection.
+\end{engineering}
+
+\section{The road ahead}\label{sec:roadmap}
+
+The book now proceeds in the only defensible order: theory first, because
+five of the eight defects (1, 2, 3, 5, 6) are visible \emph{only} to someone
+who has derived the objective and priced the statistics --- no amount of
+code review finds a gradient grave if the reviewer does not know what the
+gradient must be.
+
+\begin{center}
+\small
+\begin{tabular}{@{}clp{0.52\textwidth}@{}}
+\toprule
+defect & repaired in & by \\
+\midrule
+1 & Ch.~5, 6 & mixture NLL; the $\pi{-}r$ gate gradient; trainable hard
+              routing done right (hard-EM), top-1 renormalization proven
+              dead \\
+2 & Ch.~5, 7, 8 & all-$K$ likelihood; $K$ as configuration; label
+              permutation confronted honestly \\
+3 & Ch.~5, 11 & one fused objective; log-domain law; logits-only modules \\
+4 & Ch.~11, 12 & LayerNorm; no cross-sample operations; leakage invariants \\
+5 & Ch.~9, 11 & effective-sample arithmetic; GRU $n{=}32$; capacity-matched
+              baselines (Ch.~16) \\
+6 & Ch.~9 & Decision~A --- expert inputs decided, documented, switchable \\
+7 & Ch.~12 & feature schema; target outside the feature tensors \\
+8 & Ch.~9, 11 & single validated config tree; derived dimensions; shape
+              assertions \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+One closing observation. The prototype was not written by a fool; it was
+written by the same intelligence that later diagnosed all eight defects.
+What changed in between was not talent but \emph{method}: derivations
+before code, arithmetic before architecture, contracts before conventions,
+and tests that encode the failures already survived. That method is the
+actual subject of this book. The mixture-of-experts is merely the occasion.
+
+\exercisehead
+
+\begin{exercise}\label{ex:3-argmax}
+(\emph{The gradient grave, exhibited.}) In five lines of PyTorch, build
+$z \in \R^3$ with \code{requires\_grad=True}, compute
+$\hat y = \code{torch.where}(\argmax_k \mathrm{softmax}(z)_k = 1,\, a,\, b)$
+for constants $a \ne b$, backpropagate a loss through $\hat y$, and print
+\code{z.grad}. Explain the result via the piecewise-constance argument of
+defect~1. Then replace the hard selection with the probability-weighted
+combination $\hat y = \sum_k \pi_k \mu_k$ and show the gradient comes
+alive. (This is, in miniature, the package's
+\code{test\_gate\_receives\_gradient} and its argmax companion.)
+\end{exercise}
+
+\begin{exercise}\label{ex:3-params}
+(\emph{Capacity arithmetic.}) (a) Derive the LSTM per-layer parameter count
+$4\bigl(n(n + d_{\text{in}}) + n\bigr)$ from the four-gate equations, and
+the GRU's $3\bigl(n(n + d_{\text{in}}) + n\bigr)$. (b) Verify the
+$\approx 4$M figure for the prototype ($n = 256$, $L = 8$, small $d$) and
+compute the corrected encoder's count ($\text{GRU}, n = 32, L = 1, d = 2$).
+(c) Using Chapter~\ref{ch:cross}'s panel ($N = 500$ names, $T = 2{,}500$
+dates) and the crude rule ``at most one parameter per ten effective
+samples,'' bound the affordable parameter count if effective samples are
+(i) all rows, (ii) rows discounted by cross-sectional effective size
+$N_{\text{eff}} = 20$. Where does each encoder sit?
+\end{exercise}
+
+\begin{exercise}\label{ex:3-bn}
+(\emph{Hands-on: BatchNorm leaks, LayerNorm does not.}) Construct a toy
+two-date batch where date $2$'s samples have a large common shift
+(simulating a future volatility spike). Pass it through
+\code{nn.BatchNorm1d} in training mode and show date $1$'s
+\emph{normalized} outputs change when date $2$'s samples are included
+versus excluded --- information flowed backward in time. Repeat with
+\code{nn.LayerNorm} and show date $1$'s outputs are bit-identical in both
+cases. State, in one sentence each, which of the three BatchNorm
+consequences of defect~4 your experiment exhibited.
+\end{exercise}
+
+\begin{exercise}\label{ex:3-reserved}
+(\emph{The reserved column, weaponized.}) Simulate defect~7: build a
+feature matrix whose final column \emph{is} the target, train (i) a model
+that correctly slices it off and (ii) a model that ``forgets,'' and compare
+their in-sample and out-of-sample $R^2$ on a task where the true signal is
+$R^2 = 0.01$. Then append one extra innocent feature \emph{after} the
+reserved column (the shift failure) and measure again. Write the two-line
+schema check that would have made all three configurations fail loudly at
+construction.
+\end{exercise}
+
+\begin{exercise}\label{ex:3-taxonomy}
+(\emph{Classify new specimens.}) Assign each of the following real-world
+bugs to a family of Section~\ref{sec:taxonomy} and name the structural
+defense that catches it: (a) a validation split created with
+\code{sklearn.train\_test\_split(shuffle=True)} on a daily panel; (b) a
+z-score normalization whose mean and standard deviation were fitted on the
+full history before the train/test split; (c) an attention model whose
+mask allows position $t$ to attend to $t{+}1$ during training only; (d) a
+config file where \code{seq\_len} appears in three places and a refactor
+changes two of them; (e) a reinforcement-learning reward computed from
+next-day prices already visible in the state. (One sentence each.)
+\end{exercise}
+
+\begin{exercise}\label{ex:3-keep}
+(\emph{The judgment call.}) The ledger's verdict on the prototype's
+architecture was \emph{keep}. Write one paragraph for the opposite brief:
+the strongest honest argument that the encoder--gate--experts skeleton
+should have been abandoned (consider: Chapter~\ref{ch:cross}'s variance
+budget, the optimization pathologies previewed in
+\S\ref{sec:whynotfeatures}, and what a plain pooled ridge on snapshot
+features costs to build and maintain by comparison). Then write the
+rebuttal you find most convincing. Keep both; Part~V will referee.
+\end{exercise}

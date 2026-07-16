@@ -20,3 +20,9 @@ __pycache__/
 .pytest_cache/
 .ipynb_checkpoints/
 .DS_Store
+
+# LaTeX build artifacts (NEC_textbook)
+NEC_textbook/*.log
+NEC_textbook/*.aux
+NEC_textbook/*.toc
+NEC_textbook/*.out

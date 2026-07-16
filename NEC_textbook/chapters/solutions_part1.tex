@@ -1,0 +1,328 @@
+\chapter{Solutions to Exercises}\label{app:solutions}
+
+\section*{Chapter 1}
+
+\paragraph{Solution to Exercise \ref{ex:1-null}.}
+\emph{Moments.} $\Pi(i)$ is uniform on $\{1,\dots,N\}$, so
+$\E[b_{\Pi(i)}^2] = \frac1N \sum_j b_j^2 = \frac1N$ by normalization. For
+$i \ne i'$, the pair $(\Pi(i), \Pi(i'))$ is uniform on ordered pairs
+$j \ne j'$, so
+\[
+  \E[b_{\Pi(i)} b_{\Pi(i')}]
+  = \frac{1}{N(N-1)} \sum_{j \ne j'} b_j b_{j'}
+  = \frac{\bigl(\sum_j b_j\bigr)^2 - \sum_j b_j^2}{N(N-1)}
+  = \frac{0 - 1}{N(N-1)} .
+\]
+\emph{Asymptotic normality.} $\IC = \sum_i a_i b_{\Pi(i)}$ is a simple
+linear rank statistic. Hoeffding's combinatorial CLT gives normality
+provided no single term dominates (the Noether condition
+$\max_i a_i^2 / \sum_i a_i^2 \to 0$). For rank scores,
+$a_i \propto i - \frac{N+1}{2}$ with
+$\sum_i (i - \frac{N+1}{2})^2 = \frac{N(N^2-1)}{12}$, so
+$\max_i a_i^2 = \frac{(N-1)^2/4}{N(N^2-1)/12} = \frac{3(N-1)}{N(N+1)} \to 0$.
+Hence $\IC/\sqrt{\Var(\IC)} = \sqrt{N-1}\,\IC \Rightarrow \gauss(0,1)$.
+
+\paragraph{Solution to Exercise \ref{ex:1-quantile}.}
+Standardize the score, $Z = s/\sigma_s$. Joint normality gives
+$\E[y \mid Z] = \rho\,\sigma_y Z$, so by the tower property the long leg's
+expected return is $\rho\,\sigma_y\,\E[Z \mid Z > z_{0.8}]$ and the short
+leg's is $\rho\,\sigma_y\,\E[Z \mid Z < z_{0.2}]$. With
+$z_{0.8} = 0.8416$, $\phi(z_{0.8}) = 0.2800$:
+$\E[Z \mid Z > z_{0.8}] = \phi(z_{0.8})/0.2 = 1.400$, and by symmetry the
+lower tail gives $-1.400$. Hence
+$\E[\mathrm{L{-}S}] = 2.80\,\rho\,\sigma_y$. Numerically:
+$2.80 \times 0.03 \times 0.02 = 1.68\times10^{-3}$, i.e.\
+\emph{$\approx 17$ basis points per holding period}, gross. Against
+Chapter~1's cost accounting (a fresh two-sided book turns over fully:
+$2\times$ turnover $\times$ 10 bp $= 4$ bp if fully rebuilt daily), the
+margin is real but thin --- which is why turnover is a headline number, not
+a footnote.
+
+\paragraph{Solution to Exercise \ref{ex:1-bestofN}.}
+Core simulation (vectorized; ranks via double \code{argsort}):
+
+\begin{lstlisting}
+rng = np.random.default_rng(0)
+best_t = []
+for rep in range(1000):
+    ics = np.empty((20, 250))
+    for m in range(20):                    # 20 strategies
+        p = rng.standard_normal((250, 100))
+        y = rng.standard_normal((250, 100))
+        rp = p.argsort(1).argsort(1); ry = y.argsort(1).argsort(1)
+        rp = rp - rp.mean(1, keepdims=True); ry = ry - ry.mean(1, keepdims=True)
+        ics[m] = (rp * ry).sum(1) / np.sqrt((rp**2).sum(1) * (ry**2).sum(1))
+    t = ics.mean(1) / (ics.std(1, ddof=1) / np.sqrt(250))
+    best_t.append(t.max())
+\end{lstlisting}
+
+Expected findings: each strategy's $t$ is approximately standard normal
+under the null, so the best of $M = 20$ has
+$\Prob(\max t > 2) = 1 - \Phi(2)^{20} = 1 - 0.97725^{20} \approx 0.37$ ---
+simulation lands near $37\%$ --- and the mean best-$t$ sits near the
+$\sqrt{2\ln 20} \approx 2.45$ heuristic. The best strategy's $\ICbar$ is
+about $1.87 \times 0.1/\sqrt{250} \approx 0.012$ (expected maximum of 20
+standard normals times the SE): a plausible-looking ``signal,''
+manufactured from nothing, better than one date-per-week of real research
+projects. This is Remark~\ref{rem:ratchet} in numbers, and the reason
+Chapter~17's registry counts trials.
+
+\paragraph{Solution to Exercise \ref{ex:1-tstat}.}
+(a) $T \ge (3 \times 0.12/0.02)^2 = 18^2 = 324$ dates. (b) If the IC series
+has autocorrelations $\rho_s = 1 - s/h$ for $s < h$ and $0$ beyond
+(the linear-decay overlap profile), then for $T \gg h$,
+\[
+  \Var(\ICbar) \approx \frac{\sigma_{\IC}^2}{T}
+  \Bigl(1 + 2\sum_{s=1}^{h-1}\bigl(1 - \tfrac{s}{h}\bigr)\Bigr)
+  = \frac{\sigma_{\IC}^2}{T}\bigl(1 + (h-1)\bigr)
+  = \frac{\sigma_{\IC}^2}{T}\, h,
+\]
+using $\sum_{s=1}^{h-1}(1-s/h) = (h-1)/2$. The variance inflation factor is
+exactly $h$: overlapping $5$-day labels make $T$ dates worth $T/5$
+independent ones. Corrected requirement: $324 \times 5 = 1{,}620$ dates ---
+about $6.5$ years of daily out-of-sample. (c) Any
+\code{n\_folds} $\times$ \code{test\_dates\_per\_fold} $\ge 1{,}620$ works
+arithmetically, e.g.\ $9 \times 180$; on a $2{,}500$-date panel this leaves
+$\approx 880$ dates for the first fold's training window --- the practical
+tension (evaluation appetite versus training data) that walk-forward design
+always negotiates, and a reason thesis-scale claims favor pooled multi-year
+evaluations over quarterly ones.
+
+\paragraph{Solution to Exercise \ref{ex:1-nll}.}
+(a) $\partial \NLL/\partial(\sigma^2) =
+\frac{1}{2\sigma^2} - \frac{1}{2\sigma^4}\cdot\frac1n\sum_j e_j^2 = 0$
+gives $\hat\sigma^2 = \frac1n\sum_j e_j^2$; substituting back yields
+$\tfrac12\log\hat\sigma^2 + \tfrac12\log 2\pi + \tfrac12$.
+(b) $\Delta\NLL = \tfrac12 \log(\hat\sigma_A^2/\hat\sigma_B^2)$, so
+$\hat\sigma_A^2/\hat\sigma_B^2 = e^{2 \times 0.021} = 1.043$: model A's
+residual variance is about $4.3\%$ higher. (c) Two points with
+heteroskedastic truth. Model A predicts errors $(0.1, 10)$ but knows its
+uncertainty, $\sigma = (0.1, 10)$: per-point NLL (dropping constants)
+$= [\log 0.1 + \tfrac12] + [\log 10 + \tfrac12] = 1.0$, MSE $= 50$. Model B
+predicts better, errors $(0.05, 8)$, but claims $\sigma = 1$ everywhere:
+NLL $= \tfrac12(0.0025) + \tfrac12(64) \approx 32$, MSE $= 32$. B wins MSE
+$32 < 50$; A wins NLL $1.0 \ll 32$. The likelihood is rewarding
+\emph{calibrated uncertainty} --- being right about how wrong you will be
+--- which is precisely the capacity Chapter~2 argues regime models must
+have, and MSE cannot see.
+
+\paragraph{Solution to Exercise \ref{ex:1-panel}.}
+(a) \code{x\_seq} is $(n, 8, 2)$ and \code{x\_snap} $(n, 3)$ for the test
+spec, \code{y} a separate $(n,)$ tensor; no feature column can equal the
+target because the target is not stored among features at all.
+(b) \code{split\_by\_date(0.8)} yields
+$\max(\code{train.date}) < \min(\code{test.date})$; assert it directly.
+(c) The public surface offers \code{full\_batch}, \code{minibatches}
+(within a panel already split), \code{date\_batches},
+\code{subset\_dates}, \code{split\_by\_date} --- every subsetting operation
+is keyed by date; row-level selection (\code{\_take}, \code{\_batch}) is
+private by underscore convention. The honest path is the paved one.
+\code{test\_no\_lookahead} pins the invariant of
+Definition~\ref{def:pit}: it rebuilds features after perturbing only
+\emph{future} prices and asserts every feature at date $t$ is unchanged
+while the forward-return target changes --- look-ahead, if ever introduced,
+fails a test rather than improving a backtest.
+
+\section*{Chapter 2}
+
+\paragraph{Solution to Exercise \ref{ex:2-kurt}.}
+(a) $\kappa - 3 = 3\bigl(\E[V^2] - (\E V)^2\bigr)/(\E V)^2 =
+3\Var(V)/(\E V)^2$. (b) Let $q$ be the weight of the volatile state and
+$r = \sigma_2^2/\sigma_1^2 = 25$. Then
+$\kappa(q) = 3\,\frac{1 + (r^2-1)q}{(1 + (r-1)q)^2}$; setting
+$\kappa'(q) = 0$ gives $(r^2-1)(1 + (r-1)q) = 2(r-1)(1 + (r^2-1)q)$, i.e.\
+$q^\ast = \frac{1}{r+1} = \frac{1}{26} \approx 3.8\%$, with
+$\kappa(q^\ast) = \frac{3(r+1)^2}{4r} \approx 20.3$. Rare volatile regimes
+maximize kurtosis because $\kappa - 3$ is the \emph{relative} variance of
+the randomized variance $V$: a scarce, extreme value of $V$ maximizes
+$\Var(V)$ against a small mean, exactly as a rare large claim dominates an
+insurer's loss distribution. (c) The three numbers say: equal-weight
+regime mixing underexplains empirical tails ($5.6$ vs.\ $10$--$30$), but
+\emph{realistically proportioned} regimes --- turbulence as the rare state
+--- put the same machinery in range ($\approx 20$). Regime switching is
+thus a sufficient explanation for most of empirical kurtosis \emph{only if}
+the volatile state is genuinely rare and distinct, which is also what the
+persistence estimates of Proposition~\ref{prop:acf} deliver
+(long calm spells, occasional storms); residual excess beyond that
+suggests within-regime non-normality or more than two states.
+
+\paragraph{Solution to Exercise \ref{ex:2-acf}.}
+(a) With $a = b$ the stationary law is $(\tfrac12, \tfrac12)$; write
+$v \in \{\sigma_1^2, \sigma_2^2\}$. From the proof:
+$\Cov(r_t^2, r_{t+s}^2) = \Cov(v_t, v_{t+s}) = \Var(v)\lambda^s$ and
+$\Var(r_t^2) = 3\E[v^2] - (\E v)^2$, so
+$c = \Var(v)/\bigl(3\E[v^2] - (\E v)^2\bigr)$. For
+$\sigma = (0.6, 2.2)$: $v \in \{0.36, 4.84\}$, $\E v = 2.6$,
+$\E v^2 = 11.778$, $\Var(v) = 5.018$, so
+$c = 5.018/(35.333 - 6.76) = 5.018/28.573 = 0.176$; with
+$\lambda = 2(0.98) - 1 = 0.96$, the lag-10 autocorrelation is
+$0.176 \times 0.96^{10} = 0.117$. (b) Duration in state 1 is the number of
+steps until the first departure: $\Prob(D = n) = a^{n-1}(1-a)$, geometric,
+$\E D = 1/(1-a)$. (c) GARCH(1,1) persistence $\alpha + \beta$ absorbs
+$\lambda$: the fitted volatility process must reproduce an ACF decaying
+like $0.96^s$, and $\alpha+\beta$ \emph{is} the ACF decay rate of a
+GARCH's squared returns. This is the classic Lamoureux--Lastrapes point:
+ignored regime switching masquerades as near-integrated GARCH
+($\alpha + \beta \approx 1$), so extreme persistence estimates can be an
+artifact of unmodeled states.
+
+\paragraph{Solution to Exercise \ref{ex:2-pool}.}
+(a) $\beta_{\mathrm{pool}} = \E[\beta_S] = p\beta_1 + (1-p)\beta_2$
+(independence of $x$ and $S$); since
+$\Var(y) = \E[\beta_S^2] + \sigma_\varepsilon^2$ (unit-variance $x$),
+$R^2_{\mathrm{pool}} = (\E\beta_S)^2 / (\E[\beta_S^2] +
+\sigma_\varepsilon^2)$. (b) Pooled residual:
+$y - \beta_{\mathrm{pool}}x = (\beta_S - \E\beta_S)x + \varepsilon$, whose
+variance is $\Var(\beta_S)\,\E[x^2] + \sigma_\varepsilon^2$ --- exceeding
+the oracle's $\sigma_\varepsilon^2$ by $\Var(\beta_S)\E[x^2]$. (c) Both
+results are the law of total variance with a latent index: unexplained
+dispersion of a latent \emph{parameter} (variance $\sigma_S^2$ in
+Proposition~\ref{prop:kurtosis}, slope $\beta_S$ here) reappears as
+inflation of an unconditional moment (kurtosis there, residual variance
+here). ``Variance of the variance'' produces fat tails; ``variance of the
+slope'' produces phantom noise --- one phenomenon, two disguises, and the
+mixture model is the device that gives the latent index somewhere to live
+instead.
+
+\paragraph{Solution to Exercise \ref{ex:2-modes}.}
+Center and scale: $\mu_{1,2} = \pm\delta$, $\sigma = 1$. The density is
+proportional to
+$e^{-(x-\delta)^2/2} + e^{-(x+\delta)^2/2}
+= 2e^{-(x^2+\delta^2)/2}\cosh(\delta x)$. Setting the log-derivative to
+zero: $x = \delta \tanh(\delta x)$. $x = 0$ is always critical. The map
+$x \mapsto \delta\tanh(\delta x)$ has slope $\delta^2$ at the origin and is
+strictly concave on $x > 0$; nonzero fixed points therefore exist iff
+$\delta^2 > 1$. Checking curvature, $x = 0$ is the unique maximum when
+$\delta \le 1$ and becomes a local \emph{minimum} flanked by two symmetric
+maxima when $\delta > 1$. In original units: bimodal iff
+$|\mu_1 - \mu_2| > 2\sigma$. Conclusion: components must be separated by
+more than two standard deviations before the mixture \emph{looks} like a
+mixture; regime structure at realistic separations is invisible to the
+eye, so recovery must be graded against planted latent states
+(Chapter~14), not histograms.
+
+\paragraph{Solution to Exercise \ref{ex:2-hands}.}
+Sketch of expected results (exact values vary with seed):
+(a) sample kurtosis of the pooled series lands near the
+$3\,\E[V^2]/(\E V)^2 = 5.56$ prediction for equal-weight
+$\sigma = (0.5, 2.5)$ (the Markov chain with $a = b$ spends half its time
+in each state); the log-ACF of $r_t^2$ is linear in lag with slope
+$\log(0.96) \approx -0.041$, i.e.\ $\approx 4\%$ decay per day.
+(b) Pooled OLS slopes on the snapshot features are statistically
+indistinguishable from zero while within-regime regressions recover
+$\pm\beta$ with $R^2 = \beta^2/(\beta^2 + \sigma_\varepsilon^2)$; with
+\code{beta\_scale}${}=2$, \code{noise\_std}${}=0.4$ the oracle $R^2$
+exceeds $0.9$ --- the full Proposition~\ref{prop:signflip} contrast.
+(c) With \code{regime\_process="iid"} the squared-return ACF collapses to
+zero at all positive lags while the kurtosis is unchanged --- mixing makes
+tails, persistence makes memory, exactly the division of
+Sections~\ref{sec:mixmath}.
+
+\section*{Chapter 3}
+
+\paragraph{Solution to Exercise \ref{ex:3-argmax}.}
+\begin{lstlisting}
+z = torch.tensor([0.2, 1.0, -0.5], requires_grad=True)
+a, b = torch.tensor(3.0), torch.tensor(-3.0)
+pred = torch.where(torch.softmax(z, 0).argmax() == 1, a, b)
+pred.pow(2).backward()
+print(z.grad)   # -> None (no graph reaches z), or zeros if z re-enters
+\end{lstlisting}
+\code{argmax} returns an integer with no gradient function, and
+\code{where} on that condition selects between tensors that do not depend
+on $z$; the loss is a piecewise-constant function of $z$, whose derivative
+is zero wherever it exists. Replacing the selection with
+$\hat y = \sum_k \pi_k \mu_k$ (\code{(torch.softmax(z,0) *
+torch.stack([b, a, b])).sum()}) routes real gradient into every logit:
+$\partial \hat y/\partial z_k = \pi_k(\mu_k - \hat y)$, alive whenever the
+experts disagree. The package's \code{test\_gate\_receives\_gradient}
+asserts the second fact; its argmax companion asserts the first ---
+pinning both the defect and the repair.
+
+\paragraph{Solution to Exercise \ref{ex:3-params}.}
+(a) Each LSTM gate $g \in \{i, f, o, \tilde c\}$ computes
+$g = \phi(W_g x_t + U_g h_{t-1} + b_g)$ with $W_g \in \R^{n \times d}$,
+$U_g \in \R^{n \times n}$, $b_g \in \R^n$: four gates give
+$4\bigl(n(n+d) + n\bigr)$. The GRU has three such blocks ($r$, $z$,
+candidate): $3\bigl(n(n+d)+n\bigr)$. (b) Prototype, $d = 5$: layer 1,
+$4(256 \cdot 261 + 256) \approx 268$K; layers 2--8 have input dimension
+$256$: $4(256 \cdot 512 + 256) \approx 525$K each, $\times 7 \approx
+3.68$M; total $\approx 3.95$M. Corrected, GRU $n = 32$, $d = 2$:
+$3(32 \cdot 34 + 32) = 3{,}360$. Three orders of magnitude apart.
+(c) (i) All rows: $1.25$M samples $\to$ budget $\approx 125$K parameters.
+(ii) $N_{\text{eff}} = 20$: $50$K effective samples $\to$ budget
+$\approx 5$K. The prototype exceeds even the na\"ive budget $30\times$ and
+the discounted one $\approx 800\times$; the corrected encoder fits
+\emph{inside} the pessimistic budget. The point of the exercise is that
+this verdict required no training run --- it is design-time arithmetic.
+
+\paragraph{Solution to Exercise \ref{ex:3-bn}.}
+Build eight samples for date 1 ($\gauss(0,1)$ features) and eight for date
+2 with a common $+5$ shift. \code{BatchNorm1d} in train mode, forward on
+date 1 alone versus on the concatenated batch: date-1 outputs differ
+(the batch mean absorbs date 2's shift --- with the shift included, the
+batch mean rises by $2.5$, so date-1 samples are pushed down), a
+back-in-time flow of date-2 information: consequence (iii), leakage, via
+consequence (ii), batch-composition sensitivity. Switching the layer to
+\code{eval()} changes date-1 outputs yet again (running statistics replace
+batch statistics): consequence (i), train/eval asymmetry.
+\code{LayerNorm} normalizes each sample by \emph{its own} feature moments,
+so date-1 outputs are bit-identical with or without date 2 present ---
+\code{torch.equal} returns \code{True} --- and there is nothing to leak.
+
+\paragraph{Solution to Exercise \ref{ex:3-reserved}.}
+With true signal $R^2 = 0.01$: model (i) scores in- and out-of-sample
+$R^2 \approx 0.01$. Model (ii) --- target among its inputs --- scores
+$R^2 \approx 1.0$ \emph{both} in-sample and out-of-sample, because the
+pipeline that packs the target into the last column does so for test data
+too: the leak follows the data, and no holdout detects it. That is the
+chilling part: ordinary validation is defenseless against a layout bug.
+Appending an innocent feature after the reserved column shifts the slice:
+model (i)'s ``correct'' \code{[:, :-1]} now \emph{includes} the target
+(instant $R^2 \approx 1$) while dropping a real feature --- one appended
+column flipped a correct model into a leaking one without touching its
+code. The two-line defense:
+\begin{lstlisting}
+if x.shape[-1] != len(schema.feature_names):
+    raise ValueError(f"width {x.shape[-1]} != schema {len(schema.feature_names)}")
+\end{lstlisting}
+plus the structural fix of never storing the target among features --- at
+which point all three configurations fail loudly at construction, which is
+the only acceptable behavior.
+
+\paragraph{Solution to Exercise \ref{ex:3-taxonomy}.}
+(a) Leakage channel (near-duplicate rows with overlapping labels cross the
+split): defense --- a date-keyed splitting API that offers no random row
+split. (b) Leakage channel (test-period moments enter the transform):
+defense --- fit-on-train-only as a pipeline contract, pinned by a
+shifted-history invariant test. (c) Leakage channel (future positions
+visible in training): defense --- a causality test asserting predictions
+at $t$ are invariant to perturbations of inputs after $t$ (the package
+runs exactly this for the HMM filter). (d) Contract failure (three copies
+of one truth): defense --- a single validated config tree where derived
+quantities are computed, not restated. (e) Leakage channel (reward peeks
+at prices the state already contains): defense --- point-in-time
+discipline applied to the \emph{reward} path, same invariant test family
+as (b).
+
+\paragraph{Solution to Exercise \ref{ex:3-keep}.}
+(Model answers; yours may be better.) \emph{The brief against:} the
+skeleton multiplies the parameter and failure-mode budget of a linear
+baseline by an order of magnitude --- an encoder, a gate, $K$ experts, a
+multimodal likelihood with symmetric local optima and permutation
+ambiguity, and (Chapter~\ref{ch:cross}) a target whose predictable
+component is $R^2 \sim 10^{-3}$; a convex, deterministic, one-line ridge
+regression captures most linear structure at near-zero variance cost,
+trains in milliseconds, cannot be mis-optimized, and by
+Proposition~\ref{prop:signflip} the mixture's \emph{categorical} advantage
+exists only if sign-flipping state-dependence is real and strong --- an
+empirical bet, not a theorem, and the burden of proof sits on the
+expensive model. \emph{The rebuttal:} the bet is precisely what the system
+is built to settle --- cheaply and fairly: capacity-matched baselines
+remain permanently in the comparison, planted-truth worlds verify both
+that the mixture wins where regimes exist and that the baselines win where
+they don't, and the evaluation protocol (purged walk-forward,
+multiplicity-corrected) prices the extra failure modes rather than hiding
+them. Keeping the skeleton is defensible \emph{because} the referee is
+already hired; keeping it on enthusiasm alone would not be. Part~V holds
+the whistle.

@@ -56,7 +56,9 @@ code:
 4. **Everything that makes results defensible** — data contracts (`data.py`,
    `features.py`, `market_data.py`, `universe.py`, `context_data.py`), the judging
    machinery (`evaluation.py`, `baselines.py`), diagnostics (`diagnostics.py`,
-   `alignment.py`), and the honesty layer (`registry.py`, `multiple_testing.py`).
+   `alignment.py`, `calibration.py`, `plots.py`), the honesty layer (`registry.py`,
+   `multiple_testing.py`), and the protocol layer that composes them into experiments
+   (`sweep.py`, `tuning.py` — I.18).
 
 The two plug axes give a 2×2 of models from one skeleton, all config-selected:
 
@@ -863,7 +865,45 @@ screening criterion). Worked BH example: sorted p = (.005, .01, .03, .04) vs thr
 `k/N·α` = (.0125, .025, .0375, .05) at α=.05 ⇒ all four rejected. Property-tested:
 BH's rejections always contain Bonferroni's.
 
-## I.18 The test suite as a map
+## I.18 The protocol layer: sweep, tuning, calibration
+
+Three modules sit *above* the harness and turn single runs into defensible experiments.
+They share one design idea: **every convenience function is a thin composition of
+already-tested machinery**, so the protocol layer adds discipline, not new split logic.
+
+**`sweep.py` — seeds as first-class citizens.** A sweep is named **arms** × a **seed
+grid**. `nec_arm(name, cfg, warmstart_key=)` plants each seed in *both* the global RNG
+(encoder/gate init) and `TrainConfig.seed` (expert diversification, shuffling) via
+`dataclasses.replace` — seeds are genuinely independent initializations, each exactly
+reproducible. `baseline_arm` runs ridge/MLP through the same folds and the same grading
+code (a deterministic baseline shows seed-std exactly 0, which is itself information).
+`run_sweep` logs every `(arm, seed)` trial to the registry with the full config dict and
+reports mean ± std per arm. The statistical subtlety lives in `corrected_claims`: **the
+claim family is the arms, not the seeds** — seed replicates are repeated measurements of
+one hypothesis, so each arm's p-values are combined by their **median** (min-over-seeds
+would be selection inside the family) and BH runs across arms.
+
+**`tuning.py` — tune once, freeze, log the pick.** `validation_tail` *is* a one-fold
+walk-forward on the training window (it reuses the outer split's tested purge
+arithmetic); `tune` scores candidates (ordinary sweep arms) on that tail via
+`run_sweep(n_folds=1)`, picks the winner by seed-mean (`mode="min"` for NLL), and logs
+the full provenance chain: per-run trials under `<tag>`, arm aggregates under
+`<tag>.arms`, one `#selection` event carrying the candidate count. Per-fold re-tuning is
+deliberately not offered — it multiplies researcher degrees of freedom.
+
+**`calibration.py` — is the gate lying about its probabilities?** For a latent-regime
+gate the honest yardstick is the one it was trained toward: the gate is calibrated iff
+`E[r_k | π_k = q] = q` on **held-out** data, where `r` is the Bayes posterior computed
+from the held-out `y`. `gate_reliability` bins the pooled `(sample, expert)` claims and
+reports the reliability curve + ECE; `fit_temperature` fits the single-scalar repair
+`softmax(z/T)` by held-out mixture NLL on a validation tail (T > 1 softens an
+overconfident gate). Scope: softmax-predictive gates only — hard/top-k have no smooth
+confidence to rescale, and the HMM's regime probabilities come from the filter, not the
+gate (rejected with guidance). Anchored by two planted truths: identical experts force
+`r ≡ π` (ECE exactly 0), and ×4-sharpened gate logits force a fitted T > 1.5 that
+repairs NLL *and* ECE on the untouched test block.
+
+## I.19 The test suite as a map
 
 | file | what it guards |
 |---|---|
@@ -875,10 +915,18 @@ BH's rejections always contain Bonferroni's.
 | `test_evaluation.py` | fold chronology + purge arithmetic; rank-IC properties (perfect/anti/monotone-invariant/random); long-short, turnover, and cost-drag math; both harnesses end-to-end |
 | `test_baselines.py` | ridge exact recovery + unpenalized intercept; MLP determinism; **the two-direction headline comparison** |
 | `test_selection_inference.py` | registry persistence + selection events; PSR/E[maxSR]/DSR properties; **the factor-zoo deflation**; BH/Bonferroni |
+| `test_sweep.py` | end-to-end mini-sweep on planted truth (arms separate correctly; claims family rejects only the signal); seed reality + determinism; arm validation |
+| `test_tuning.py` | validation-tail arithmetic; planted-winner selection with full registry provenance; no test-window contamination; min-mode |
+| `test_calibration.py` | ECE = 0 for identical experts; **planted overconfidence detected and repaired out of sample**; honest gate fits T ≈ 1; non-softmax priors rejected |
+| `test_residual_target.py` | rolling β recovers truth and is trailing (no-lookahead probe); market clone ⇒ zero residual target; β=2 name ⇒ market-neutral target |
+| `test_plots.py` | every figure renders headlessly and saves a real PNG; input guards |
 | `test_smoke.py` | end-to-end training + regime recovery (AUC > 0.8) + a broken-gradient guard that must fail |
 | `test_stage_b.py`, `test_stage_c.py`, `test_universe.py` | data parsers against fixtures that reproduce real-file quirks; the no-lookahead probe; point-in-time rollback across known epochs; coverage math; opt-in live tests |
 
-`python3.14 -m pytest tests/ -q` — the whole offline suite, deterministic, ~30 s.
+`python3.14 -m pytest tests/ -q` — the whole offline suite, deterministic, ~38 s
+(132 tests + 3 network-gated skips). Lint and types:
+`python3.14 -m ruff check nec_moe/ tests/ scripts/` and
+`python3.14 -m mypy nec_moe/` — both clean, configured in `pyproject.toml`.
 
 ---
 
@@ -908,17 +956,22 @@ and a dictionary of the package's error messages.
 
 ```bash
 cd nec_baseline
-python3.14 -m pytest tests/ -q                    # full offline suite (~30 s) — green?
+python3.14 -m pytest tests/ -q                    # full offline suite (~38 s) — green?
 python3.14 -m pytest tests/test_smoke.py -q       # just the end-to-end smoke
 python3.14 -m pytest tests/ -q -k "hmm"           # any subset by keyword
 NEC_NETWORK_TESTS=1 python3.14 -m pytest tests/test_stage_b.py tests/test_stage_c.py -q
                                                   # + live endpoints (needs network)
+python3.14 -m ruff check nec_moe/ tests/ scripts/ # lint (clean; config in pyproject)
+python3.14 -m mypy nec_moe/                       # types (clean; config in pyproject)
 ```
+
+CI (`.github/workflows/ci.yml`, repo root) runs the same three checks on CPU torch and
+goes live the day the repo gets a remote.
 
 Dependencies: `torch`, `numpy`, `pandas` are load-bearing. Optional, imported lazily:
 `yfinance` (price fallback), `lxml` (Wikipedia universe tables), `matplotlib` (your
 figures). Everything is CPU; typical times on this machine: smoke test ~8 s, a
-600-step real-panel fit ~1–2 min, the full suite ~30 s.
+600-step real-panel fit ~1–2 min, the full suite ~38 s.
 
 Git protects the work: the repo root is the project folder; commit early and often
 (`git add -A && git commit -m "..."`). The registry files (`*.jsonl`) and figures
@@ -1632,7 +1685,7 @@ The package fails loudly and specifically; the message usually *is* the fix.
 
 ## II.13 Practical notes
 
-- **Timing** (this machine, CPU): full suite ~30 s; synthetic 400-step fit ~2 s;
+- **Timing** (this machine, CPU): full suite ~38 s; synthetic 400-step fit ~2 s;
   real-panel 600-step fit ~1–2 min; a 5-mechanism × 5-seed sweep with 4 folds ≈ 1–2 h —
   start it and walk away, the registry accumulates.
 - **Memory**: the real panel is ~70k × (20×4 + 14) floats ≈ 25 MB; full-batch forwards
@@ -1653,11 +1706,11 @@ The package fails loudly and specifically; the message usually *is* the fix.
 Everything mechanical exists — six priors, the harness, the registry. The remaining
 work is *experimental design and execution*:
 
-1. **Pre-registration document first** (½ day). Before any real-data run, commit: the
-   exact grid (mechanisms × K ∈ {2,3,4} × ≥5 seeds), the metrics (pooled IC, ICIR, net
-   IR, NLL), the claim family and its correction (BH at α=0.10 over per-mechanism
-   p-values), the split parameters, and what a negative result would look like. The
-   registry then makes deviations visible.
+1. **Pre-registration document first** (hours, not days — the form exists). Copy
+   `PREREGISTRATION_TEMPLATE.md` to `results/prereg_<tag>.md`, fill the grid
+   (mechanisms × K ∈ {2,3,4} × ≥5 seeds), metrics, claim family (BH at α=0.10,
+   median-combined replicates), split parameters, and the success/negative-result
+   criteria; commit before the first trial. The registry then makes deviations visible.
 2. ✅ **Multi-seed sweep runner** — built (`run_sweep`, II.9); the grid is now a list of
    `nec_arm`/`baseline_arm` entries.
 3. **Hard routing's cold start needs a fair shake** (1–2 days). Give top-1 its
@@ -1763,10 +1816,10 @@ typical thesis repositories:
 | dimension | grade | justification |
 |---|---|---|
 | Correctness assurance | **A** | 100+ tests: analytic gradients, reference filters, causality probes, planted-truth recoveries, defect regressions. Far above field norm. |
-| Methodology | **A−** | Purged WF, fit-once-per-window, logged selection events, DSR/FDR, capacity-matched baselines, one grading path. Missing: multi-seed *practice*, tuning protocol. |
-| Reproducibility | **B+** | Deterministic seeds, config round-trip, cache-first data, append-only registry. Missing: CI, pinned env, plots-as-code. |
+| Methodology | **A** | Purged WF, fit-once-per-window, logged selection events, DSR/FDR, capacity-matched baselines, one grading path — plus the protocol layer: multi-seed sweeps with arm-level corrections, tune-once-freeze validation tails, gate calibration, and a pre-registration template. The tooling is complete; what remains is *using* it on the pre-registered runs. |
+| Reproducibility | **A−** | Deterministic seeds planted end-to-end, config round-trip in every registry row, cache-first data, append-only registry, figures as code, ruff+mypy clean, CI workflow committed. Missing: a pinned environment (lockfile) and an actual remote for the CI to run against. |
 | Data rigor | **C+** | Timing contract *tested*; PIT membership + measured coverage; but current panels are ≤~600 attempted names with no delisting returns, yfinance-grade prices. Honest about every limit — worth half a grade itself. |
-| Architecture | **A−** | Two plug axes proven by tests; extension checklists are short because the seams are real. Debt: no plots module, conftest path hack, no device handling. |
+| Architecture | **A−** | Two plug axes proven by tests; the protocol layer composes tested pieces rather than duplicating split logic; extension checklists are short because the seams are real. Remaining debt: conftest path hack (package not installed editable), no device/GPU handling. |
 | Documentation | **A−** | Design doc with decision traceability; docstrings with shapes *and reasons*; this handbook. |
 
 **Overall: strong research code whose distinguishing feature is that the
@@ -1796,17 +1849,23 @@ model versioning atop the registry; (4) scale-out, least urgent.
 
 ## IV.3 The one-paragraph verdict
 
-The machinery is finished for its declared purpose: both thesis variations are one
-config string away, the comparison table has both of its sides, and every number that
-could lie has a test or a correction standing over it. What separates the current state
-from thesis-grade *results* is protocol, not code — seeds, tuning discipline, the full
-point-in-time panel, pre-registration (Part III.3, items 1–4). What separates it from a
-desk is a data vendor and a portfolio layer, not a rewrite — the contracts were drawn so
-those bolt on. The risk to keep in view: every real-data number so far is single-seed on
-a survivorship-heavy universe; treat them all as pipeline demonstrations until III.3 is
-done.
+The machinery is finished for its declared purpose — and so, now, is the protocol
+around it. Both thesis variations are one config string away, the comparison table has
+both of its sides, every number that could lie has a test or a correction standing over
+it, and the completion list (III.3) is closed: seeds, the point-in-time panel, the
+residual target, tuning discipline, figures, calibration, lint/type-check/CI, and the
+pre-registration template all exist and are tested. Nothing left between here and
+thesis-grade results is infrastructure: fill `PREREGISTRATION_TEMPLATE.md` for the
+supervisor-approved variation, commit it, and run the grid through `tune` → `run_sweep`
+→ `corrected_claims` → deflated winner. What separates the codebase from a desk is
+still a data vendor and a portfolio layer, not a rewrite — the contracts were drawn so
+those bolt on. The one risk to keep in view is unchanged: every real-data number shown
+*so far* was a single-seed pipeline demonstration on measured-coverage data — the first
+numbers that deserve belief are the pre-registered, multi-seed, corrected ones this
+tooling now exists to produce.
 
 ---
 
-*Handbook version 2 — 2026-07-03. When the code moves, move this document: it is
-committed next to what it describes.*
+*Handbook version 3 — 2026-07-15, matching suite state 132 offline + 3 network-gated
+tests, ruff clean, mypy clean. When the code moves, move this document: it is committed
+next to what it describes.*

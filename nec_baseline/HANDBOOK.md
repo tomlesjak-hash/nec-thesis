@@ -954,6 +954,20 @@ show-to-someone loop. Outputs land in `results/<tag>/` with a `settings.json`
 provenance snapshot and the registry. It is a thin driver over everything below — the
 rest of Part II documents the pieces it drives, for when you outgrow the panel.
 
+**Long runs are interruptible.** Set `checkpoint_every=<N steps>` in the settings
+block, kill the process whenever, and continue with
+
+```bash
+python3.14 run_experiment.py --resume                        # the block's tag
+python3.14 run_experiment.py --resume results/my_experiment  # a specific run
+```
+
+Completed work is skipped (sweep runs via the registry, folds via persisted fold
+files), an interrupted fit continues from its last checkpoint on the *exact* same
+trajectory, and checkpoint writes are atomic. Keep the settings and data unchanged
+between launch and resume — a drifted `settings.json` prints a loud warning. Details
+and the underlying `Trainer.save/load` API: II.6.
+
 Under the hood, every experiment is the same seven moves:
 
 ```
@@ -1249,25 +1263,53 @@ Compare Hamilton on **held-out NLL and regime recovery, never rank-IC** (constan
 per-date predictions have no cross-sectional ranking; the error message will remind
 you).
 
-### Saving and loading a trained model
+### Checkpointing and resume (surviving a 100-hour run)
 
-There is deliberately no bespoke checkpoint format — plain torch + the config
-round-trip:
+`Trainer.save(path)` / `Trainer.load(path)` persist the **complete** training state:
+model, optimizer, `step_count` (the sigma freeze and Gumbel tau anneal key off it, so
+resume continues the schedules — never resets to 0), the load-balance buffer, the
+metrics history, the minibatch sampler frozen mid-epoch (generator state + current
+permutation + position), the stateful path's chunk cursor + carried filter state, and
+the *global* torch RNG (dropout draws from it). The consequence, pinned by
+`tests/test_checkpoint.py`: **interrupt + reload + finish reproduces the uninterrupted
+trajectory bit for bit**, given the same panel/sequence — the checkpoint stores the
+sampler, not the data.
 
 ```python
-import torch, json
-torch.save({"state_dict": trainer.model.state_dict(),
-            "config": trainer.model.cfg.to_dict(),
-            "step": trainer.step_count}, "runs/nec_soft_seed0.pt")
+trainer.fit(train, steps=100_000, checkpoint_path="runs/soft.pt")  # long run …
+# … process dies at step 61_430. Later:
+trainer = Trainer.load("runs/soft.pt")
+trainer.fit(train, steps=100_000 - trainer.step_count)             # same trajectory
+```
 
-ckpt = torch.load("runs/nec_soft_seed0.pt", weights_only=False)
+- `TrainConfig(checkpoint_every=N)` sets the save cadence when a `checkpoint_path` is
+  given (plus always one final save at the end of the call); writes are atomic
+  (tmp + rename), so a crash mid-write cannot corrupt the last good checkpoint.
+- `steps` means *additional steps for this call* — `fit(60)` then `fit(40)` equals one
+  `fit(100)`; compute the remainder from `trainer.step_count` as above.
+- `fit_sequence` resumes mid-pass too, and validates that the resumed call uses the
+  same sequence length and `chunk_len` (a chunking mismatch is a loud `ValueError`).
+
+The layers above compose with this: `walk_forward_evaluate(..., resume_dir=...)`
+persists each completed fold (scored payload + trained model state) as `fold_<i>.pt`
+and skips it on restart, while a fold interrupted mid-fit resumes from its
+`fold_<i>_trainer.pt`; `run_sweep(..., resume_dir=...)` additionally skips every
+(arm, seed) pair that already has a registry row, reusing its logged metrics. From
+the control panel: set `checkpoint_every`, and relaunch with
+`python3.14 run_experiment.py --resume` (II.0).
+
+For **inference-only** artifacts (shipping a fitted model, no optimizer), the plain
+recipe still works and is smaller:
+
+```python
+import torch
+torch.save({"state_dict": trainer.model.state_dict(),
+            "config": trainer.model.cfg.to_dict()}, "runs/nec_soft_final.pt")
+ckpt = torch.load("runs/nec_soft_final.pt", weights_only=False)
 model = NECModel(NECConfig.from_dict(ckpt["config"]))
 model.load_state_dict(ckpt["state_dict"])
 model.eval()
 ```
-
-(Any `Trainer` wrapped around a loaded model starts a fresh optimizer — fine for
-evaluation and fine-tuning; exact optimizer-state resumption isn't built.)
 
 ### Determinism rules
 
@@ -1292,6 +1334,7 @@ result = walk_forward_evaluate(
     min_train_dates=1,        # guard for degenerate requests
     backtest_quantiles=5,     # None disables the long-short backtest
     cost_rate=0.001,          # cost per unit traded notional (10 bps)
+    resume_dir="runs/wf_soft",  # None = off; fold-level resume (II.6)
 )
 ```
 
@@ -1299,6 +1342,14 @@ The two easy mistakes: (1) `make_trainer` that reuses one model — each fold mu
 fresh optimization (fit-once-per-window; the function's contract), so construct inside
 the lambda and reseed there for determinism; (2) `purge_dates ≠ horizon` — the purge is
 the label horizon, nothing else.
+
+`resume_dir` makes a long harness run interruptible: each completed fold is persisted
+there and skipped on restart, and a fold killed mid-fit resumes from its trainer
+checkpoint (written every `TrainConfig.checkpoint_every` steps) — the restarted run
+reproduces the uninterrupted one exactly, provided `make_trainer` reseeds (as above)
+and the settings/panel are unchanged. `run_sweep` takes the same parameter and
+additionally skips (arm, seed) runs already logged in the registry. Full mechanics:
+II.6 "Checkpointing and resume".
 
 `make_trainer` pattern:
 

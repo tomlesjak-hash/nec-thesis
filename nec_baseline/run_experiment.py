@@ -19,6 +19,17 @@ Everything is a thin driver over the tested package (`nec_moe`) — no logic is
 duplicated here. Outputs land in ``results/<tag>/``: a ``settings.json``
 snapshot (full provenance), the trial registry (``trials.jsonl``), and the
 figures. The handbook (HANDBOOK.md Part II) documents every underlying knob.
+
+Long runs are interruptible: set ``checkpoint_every`` (steps between saves),
+kill the process whenever, and continue with
+
+    python3.14 run_experiment.py --resume            # the EXPERIMENT block's tag
+    python3.14 run_experiment.py --resume results/my_experiment   # a specific run
+
+Resume is exact — completed work (sweep runs, folds) is skipped, an
+interrupted fit continues from its last checkpoint on the same trajectory —
+provided the settings and data are unchanged (a changed ``settings.json``
+prints a loud warning).
 """
 
 from __future__ import annotations
@@ -129,6 +140,11 @@ class Experiment:
     warmstart_channel: int | None = None  # seq channel of the vol proxy; None = auto
     chunk_len: int = 50             # HMM truncated-BPTT chunk (dates per step)
 
+    # ---------------- checkpointing / resume ----------------
+    checkpoint_every: int = 0       # save training state every N steps (0 = off);
+                                    #   set for any run you might interrupt
+    resume: bool = False            # continue results/<tag>/checkpoints/ (CLI: --resume)
+
     # ---------------- evaluation (mode="evaluate") ----------------
     n_folds: int = 3
     test_dates_per_fold: int = 40
@@ -221,7 +237,8 @@ def _nec_config(exp: Experiment, panel: Panel, sigma_init: float) -> NECConfig:
         train=TrainConfig(lr=exp.lr, batch_size=exp.batch_size, steps=exp.steps,
                           sigma_init=sigma_init,
                           sigma_freeze_steps=exp.sigma_freeze_steps,
-                          sequence_ordered=(exp.prior == "hmm")),
+                          sequence_ordered=(exp.prior == "hmm"),
+                          checkpoint_every=exp.checkpoint_every),
     )
 
 
@@ -241,25 +258,35 @@ def _quick(exp: Experiment, panel: Panel, purge: int, out: Path,
     train, test = panel.split_by_date(exp.quick_train_frac)
     sigma = exp.sigma_init or float(train.y.std())
     cfg = _nec_config(exp, panel, sigma)
-    torch.manual_seed(exp.seeds[0])
-    trainer = Trainer(NECModel(cfg))
-    key = _warm_key(exp)
-    if key is not None:
-        trainer.warmstart_experts(train.full_batch(), sort_key=key(train))
+    ckpt = (out / "checkpoints" / "trainer.pt"
+            if (exp.checkpoint_every or exp.resume) else None)
+    if exp.resume and ckpt is not None and ckpt.exists():
+        trainer = Trainer.load(ckpt)
+        remaining = max(exp.steps - trainer.step_count, 0)
+        print(f"[resume] {ckpt} at step {trainer.step_count:,} — "
+              f"{remaining:,} steps remaining")
+    else:
+        torch.manual_seed(exp.seeds[0])
+        trainer = Trainer(NECModel(cfg))
+        key = _warm_key(exp)
+        if key is not None:
+            trainer.warmstart_experts(train.full_batch(), sort_key=key(train))
+        remaining = exp.steps
 
     if exp.prior == "hmm":
-        history = trainer.fit_sequence(train.time_sequence(), steps=exp.steps,
-                                       chunk_len=exp.chunk_len)
+        trainer.fit_sequence(train.time_sequence(), steps=remaining,
+                             chunk_len=exp.chunk_len, checkpoint_path=ckpt)
         warm = trainer.evaluate_sequence(train.time_sequence())
         ev = trainer.evaluate_sequence(test.time_sequence(),
                                        init_state=warm.log_filtered[-1])
         nll, pred = ev.nll, torch.cat(list(ev.y_hat))
     else:
-        history = trainer.fit(train, steps=exp.steps)
+        trainer.fit(train, steps=remaining, checkpoint_path=ckpt)
         nll = trainer.evaluate(test.full_batch())
         trainer.model.eval()
         with torch.no_grad():
             pred = trainer.model(test.x_seq, test.x_snap).y_hat
+    history = trainer.history  # full trajectory, spanning any resumes
     print(f"[quick] held-out NLL = {nll:.4f}   "
           f"({len(train):,} train rows → {len(test):,} test rows)")
 
@@ -314,11 +341,13 @@ def _evaluate(exp: Experiment, panel: Panel, purge: int, out: Path,
             input_dim=d_snap, hidden_dim=exp.expert_hidden,
             steps=exp.steps, seed=seed)))
 
+    resume_dir = (out / "checkpoints"
+                  if (exp.checkpoint_every or exp.resume) else None)
     report = run_sweep(panel, arms, seeds=exp.seeds, registry=registry, tag=exp.tag,
                        steps=exp.steps, n_folds=exp.n_folds,
                        test_dates_per_fold=exp.test_dates_per_fold, purge_dates=purge,
                        backtest_quantiles=exp.backtest_quantiles,
-                       cost_rate=exp.cost_rate)
+                       cost_rate=exp.cost_rate, resume_dir=resume_dir)
     frame = report.to_frame().round(4)
     print("\n[evaluate] mean ± seed-std per arm:\n", frame.to_string())
     frame.to_csv(out / "report.csv")
@@ -338,7 +367,16 @@ def main(exp: Experiment) -> dict:
         base = Path(__file__).resolve().parent / base
     out = base / exp.tag
     out.mkdir(parents=True, exist_ok=True)
-    (out / "settings.json").write_text(json.dumps(dataclasses.asdict(exp), indent=2))
+    settings_path = out / "settings.json"
+    snapshot = json.loads(json.dumps(dataclasses.asdict(exp)))  # tuples -> lists
+    if exp.resume and settings_path.exists():
+        previous = json.loads(settings_path.read_text())
+        changed = sorted(k for k in snapshot
+                         if k != "resume" and previous.get(k) != snapshot[k])
+        if changed:
+            print(f"[resume] WARNING: settings changed since launch: {changed} — "
+                  "resume assumes identical settings and data")
+    settings_path.write_text(json.dumps(snapshot, indent=2))
     registry = TrialRegistry(out / "trials.jsonl")
 
     panel, purge = _build_panel(exp)
@@ -353,5 +391,20 @@ def main(exp: Experiment) -> dict:
     raise ValueError(f"unknown mode {exp.mode!r} (use 'quick' or 'evaluate')")
 
 
+def _parse_cli(exp: Experiment, argv: list[str]) -> Experiment:
+    """``--resume [path]``: resume the EXPERIMENT block's run, or — with a
+    path to ``results/<tag>`` (or its ``checkpoints/``) — that specific run."""
+    if "--resume" not in argv:
+        return exp
+    exp = dataclasses.replace(exp, resume=True)
+    i = argv.index("--resume")
+    if i + 1 < len(argv) and not argv[i + 1].startswith("-"):
+        run_dir = Path(argv[i + 1]).resolve()
+        if run_dir.name == "checkpoints":
+            run_dir = run_dir.parent
+        exp = dataclasses.replace(exp, tag=run_dir.name, out_dir=str(run_dir.parent))
+    return exp
+
+
 if __name__ == "__main__":
-    main(EXPERIMENT)
+    main(_parse_cli(EXPERIMENT, sys.argv[1:]))

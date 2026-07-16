@@ -151,6 +151,10 @@ class TrainConfig:
     seed: int = 0
     sequence_ordered: bool = False  # True required for the HMM prior
     log_every: int = 50
+    # Checkpoint cadence for Trainer.fit/fit_sequence when a checkpoint_path is
+    # given: save every N optimizer steps (plus always once at the end of the
+    # call). 0 = periodic saves off (final save still happens).
+    checkpoint_every: int = 0
 
 
 @dataclass(frozen=True)
@@ -273,6 +277,8 @@ class NECConfig:
                 "load_balance_buffer_batches must be >= 1 (and should span many "
                 f"dates), got {t.load_balance_buffer_batches}"
             )
+        if t.checkpoint_every < 0:
+            raise bad(f"checkpoint_every must be >= 0, got {t.checkpoint_every}")
         return self
 
     # --------------------------------------------------------- serialization

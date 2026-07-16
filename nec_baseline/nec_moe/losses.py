@@ -120,6 +120,16 @@ class LoadBalanceBuffer:
         total = torch.stack(tuple(self._counts)).sum(dim=0)
         return (total / total.sum()).to(torch.float32)
 
+    # ---------------------------------------------------- checkpoint plumbing
+    def get_state(self) -> list[Tensor]:
+        """Buffer contents for a trainer checkpoint (oldest first)."""
+        return list(self._counts)
+
+    def set_state(self, counts: list[Tensor]) -> None:
+        """Restore :meth:`get_state` output (maxlen re-truncates if it shrank)."""
+        self._counts.clear()
+        self._counts.extend(counts)
+
 
 def load_balance_aux(gate_probs: Tensor, fractions: Tensor) -> Tensor:
     """``K * sum_k f_k * mean_b P_bk`` — gradient flows only through ``gate_probs``.

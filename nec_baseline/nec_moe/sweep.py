@@ -35,6 +35,7 @@ import dataclasses
 import statistics
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 
 import pandas as pd
 import torch
@@ -188,12 +189,23 @@ def run_sweep(
     backtest_quantiles: int | None = None,
     cost_rate: float = 0.0,
     verbose: bool = True,
+    resume_dir: str | Path | None = None,
 ) -> SweepReport:
     """Run every arm over every seed through the shared harness; log; summarize.
 
     Split parameters are shared across all arms by construction — the folds are
     byte-identical, which is half of what makes the table a fair comparison
     (the shared fold accumulator is the other half).
+
+    **Resume** (``resume_dir``): a completed (arm, seed) run already has a
+    registry row under this tag — it is skipped and its logged metrics reused
+    (JSON round-trips floats exactly, so the summary is unchanged). An
+    in-progress NEC run resumes at fold granularity via
+    :func:`walk_forward_evaluate`'s per-run subdirectory
+    (``<resume_dir>/<arm>_seed<seed>/``), which composes with the trainer's
+    own mid-fit checkpoints. Baseline arms are seconds-fast and simply rerun.
+    Resume with the same settings — the registry row is matched on
+    (arm, seed) only.
     """
     if not arms or not seeds:
         raise ValueError("need at least one arm and one seed")
@@ -201,9 +213,26 @@ def run_sweep(
     if len(set(names)) != len(names):
         raise ValueError(f"duplicate arm names: {sorted(names)}")
 
+    resume = Path(resume_dir) if resume_dir is not None else None
+    completed: dict[tuple[str, int], dict[str, float]] = {}
+    if resume is not None:
+        resume.mkdir(parents=True, exist_ok=True)
+        for rec in registry.trials(tag):
+            arm_name = rec.config.get("arm")
+            if arm_name is not None and rec.seed is not None:
+                completed[(arm_name, rec.seed)] = rec.metrics
+
     per_arm: dict[str, list[dict[str, float]]] = {a.name: [] for a in arms}
     for arm in arms:
         for seed in seeds:
+            if (arm.name, seed) in completed:
+                per_arm[arm.name].append(completed[(arm.name, seed)])
+                if verbose:
+                    print(
+                        f"[sweep:{tag}] {arm.name} seed={seed}: already in the "
+                        "registry — skipped (resume)"
+                    )
+                continue
             build_trainer, build_baseline = arm.build_trainer, arm.build_baseline
             if build_trainer is not None:
                 res = walk_forward_evaluate(
@@ -217,6 +246,11 @@ def run_sweep(
                     min_train_dates=min_train_dates,
                     backtest_quantiles=backtest_quantiles,
                     cost_rate=cost_rate,
+                    resume_dir=(
+                        resume / f"{arm.name}_seed{seed}"
+                        if resume is not None
+                        else None
+                    ),
                 )
             else:
                 assert build_baseline is not None

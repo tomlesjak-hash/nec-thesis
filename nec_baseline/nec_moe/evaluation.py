@@ -32,7 +32,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import torch
 from torch import Tensor
@@ -43,6 +44,7 @@ if TYPE_CHECKING:  # pragma: no cover
     from .baselines import BaselineModel
 from .diagnostics import canonical_expert_order
 from .train import Trainer
+from .utils import atomic_torch_save
 
 __all__ = [
     "WalkForwardFold",
@@ -340,19 +342,21 @@ class _FoldAccumulator:
         test: Panel,
         nll: float,
         expert_order: tuple[int, ...] = (),
-    ) -> None:
+    ) -> dict[str, Any]:
+        """Score a freshly-evaluated fold. Returns the picklable payload that
+        fold-level resume persists and :meth:`add_completed` re-ingests."""
         _, ics = rank_ic_by_date(pred, test.y, test.date)
         portfolio = None
+        gross: Tensor | None = None
+        tno: Tensor | None = None
         if self.backtest_quantiles is not None:
             _, gross, tno = long_short_by_date(
                 pred, test.y, test.date, test.entity,
                 n_quantiles=self.backtest_quantiles,
             )
             portfolio = portfolio_summary(gross, tno, self.cost_rate)
-            self._gross.append(gross)
-            self._tno.append(tno)
-        self.folds.append(
-            FoldResult(
+        payload = {
+            "fold_result": FoldResult(
                 fold=fold.fold,
                 nll=nll,
                 ic=ic_summary(ics),
@@ -360,9 +364,32 @@ class _FoldAccumulator:
                 n_test=len(test),
                 portfolio=portfolio,
                 expert_order=expert_order,
+            ),
+            "ics": ics,
+            "gross": gross,
+            "turnover": tno,
+        }
+        self._ingest(payload)
+        return payload
+
+    def add_completed(self, payload: dict[str, Any]) -> None:
+        """Re-ingest a persisted fold (resume path) — pooled results come out
+        identical to the run that produced it, since the stored per-date
+        tensors are the pooling inputs."""
+        if (payload["gross"] is None) != (self.backtest_quantiles is None):
+            raise ValueError(
+                "resume mismatch: the persisted fold was scored with a "
+                "different backtest_quantiles setting — rerun with the "
+                "original settings or clear the resume directory"
             )
-        )
-        self._ics.append(ics)
+        self._ingest(payload)
+
+    def _ingest(self, payload: dict[str, Any]) -> None:
+        self.folds.append(payload["fold_result"])
+        self._ics.append(payload["ics"])
+        if payload["gross"] is not None:
+            self._gross.append(payload["gross"])
+            self._tno.append(payload["turnover"])
 
     def result(self) -> WalkForwardResult:
         pooled_portfolio = (
@@ -421,6 +448,7 @@ def walk_forward_evaluate(
     min_train_dates: int = 1,
     backtest_quantiles: int | None = None,
     cost_rate: float = 0.0,
+    resume_dir: str | Path | None = None,
 ) -> WalkForwardResult:
     """Fit-once-per-window walk-forward evaluation (Decision D protocol).
 
@@ -436,6 +464,16 @@ def walk_forward_evaluate(
     ``cost_rate`` per unit traded notional. Each fold's book starts fresh
     (full entry turnover on its first date) — a slight overstatement for
     adjacent folds, deterministic and conservative.
+
+    **Resume** (``resume_dir``): each completed fold is persisted there
+    (``fold_<i>.pt``: scored payload + the trained model's state dict and
+    config) and skipped on restart; a fold interrupted *mid-fit* leaves a
+    trainer checkpoint (``fold_<i>_trainer.pt``, written every
+    ``TrainConfig.checkpoint_every`` steps) that the next run picks up with
+    :meth:`Trainer.load` for the remaining steps. Resume the same settings
+    (folds, steps, backtest) on the same panel — the directory stores results,
+    not the data. Because ``make_trainer`` seeds deterministically (as the
+    sweep arms do), a resumed run reproduces the uninterrupted one exactly.
     """
     folds = walk_forward_folds(
         panel.date,
@@ -444,23 +482,51 @@ def walk_forward_evaluate(
         purge_dates=purge_dates,
         min_train_dates=min_train_dates,
     )
+    resume = Path(resume_dir) if resume_dir is not None else None
+    if resume is not None:
+        resume.mkdir(parents=True, exist_ok=True)
     acc = _FoldAccumulator(backtest_quantiles, cost_rate)
     for fold in folds:
+        done_file = resume / f"fold_{fold.fold}.pt" if resume is not None else None
+        if done_file is not None and done_file.exists():
+            acc.add_completed(torch.load(done_file, weights_only=False))
+            continue
         train = panel.subset_dates(fold.train_dates)
         test = panel.subset_dates(fold.test_dates)
-        trainer = make_trainer()
-        if warmstart_key is not None:
-            trainer.warmstart_experts(train.full_batch(), warmstart_key(train))
-        if trainer.model.prior.stateful:
-            trainer.fit_sequence(train.time_sequence(), steps=steps)
+        fit_ckpt = (
+            resume / f"fold_{fold.fold}_trainer.pt" if resume is not None else None
+        )
+        if fit_ckpt is not None and fit_ckpt.exists():
+            # interrupted mid-fit: warm-start already happened before step 0,
+            # so it must NOT rerun — everything is in the checkpoint
+            trainer = Trainer.load(fit_ckpt)
+            remaining = max(steps - trainer.step_count, 0)
         else:
-            trainer.fit(train, steps=steps)
+            trainer = make_trainer()
+            if warmstart_key is not None:
+                trainer.warmstart_experts(train.full_batch(), warmstart_key(train))
+            remaining = steps
+        if trainer.model.prior.stateful:
+            trainer.fit_sequence(
+                train.time_sequence(), steps=remaining, checkpoint_path=fit_ckpt
+            )
+        else:
+            trainer.fit(train, steps=remaining, checkpoint_path=fit_ckpt)
 
         pred, nll = _fold_predictions(trainer, train, test)
         order = tuple(
             int(i) for i in canonical_expert_order(trainer.model.experts.log_sigma)
         )
-        acc.add(fold, pred, train, test, nll, expert_order=order)
+        payload = acc.add(fold, pred, train, test, nll, expert_order=order)
+        if done_file is not None:
+            payload = dict(
+                payload,
+                model=trainer.model.state_dict(),
+                config=trainer.cfg.to_dict(),
+            )
+            atomic_torch_save(payload, done_file)
+            if fit_ckpt is not None:
+                fit_ckpt.unlink(missing_ok=True)  # superseded by the fold file
     return acc.result()
 
 

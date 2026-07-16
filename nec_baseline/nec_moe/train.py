@@ -22,13 +22,28 @@ Optimizer hygiene:
 - ``log_sigma`` is frozen for the first ``sigma_freeze_steps`` steps
   (warm-start: letting sigma move first lets the model explain everything as
   noise).
+
+Checkpointing (resume-exact):
+
+- :meth:`Trainer.save` / :meth:`Trainer.load` persist the *complete* training
+  state — model, optimizer, ``step_count`` (every schedule keys off it: sigma
+  freeze, Gumbel tau anneal), the load-balance buffer, the metrics history,
+  the minibatch sampler (generator state + current permutation + position),
+  the stateful path's chunk cursor + carried filter state, and the **global**
+  torch RNG (dropout draws from it). Interrupt a run, ``Trainer.load`` it, and
+  the remaining steps reproduce the uninterrupted trajectory bit for bit —
+  given the same panel/sequence, which the checkpoint does *not* store.
+- ``fit``/``fit_sequence`` take a ``checkpoint_path``: saved every
+  ``TrainConfig.checkpoint_every`` steps plus once at the end of the call.
+  Writes are atomic (tmp + rename), so a crash mid-write can't corrupt the
+  last good checkpoint.
 """
 
 from __future__ import annotations
 
-import itertools
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 
 import torch
 from torch import Tensor
@@ -51,8 +66,12 @@ from .losses import (
 )
 from .model import NECModel, NECOutput
 from .priors import PriorContext
+from .utils import atomic_torch_save
 
 __all__ = ["Trainer", "SequenceEval"]
+
+#: Bumped when the checkpoint payload layout changes incompatibly.
+CHECKPOINT_FORMAT = 1
 
 
 @dataclass
@@ -84,6 +103,16 @@ class Trainer:
         )
         self.step_count = 0
         self.history: list[dict[str, float]] = []
+        # fit()'s sampler state — instance-owned (not fit-local) so a
+        # checkpoint can freeze it mid-epoch and resume the exact stream
+        self._fit_gen: torch.Generator | None = None
+        self._fit_perm: Tensor | None = None
+        self._fit_pos: int = 0
+        # fit_sequence()'s cursor: which chunk is next + the carried
+        # (detached) filter state, plus the chunking it was built under
+        self._seq_ci: int = 0
+        self._seq_state: Tensor | None = None
+        self._seq_meta: dict[str, int] | None = None
 
     # ------------------------------------------------------------ internals
     def _param_groups(self) -> list[dict]:
@@ -236,15 +265,58 @@ class Trainer:
         self._optimize(loss)
         return self._metrics(loss, nll_out, out)
 
-    def fit(self, data: Panel, steps: int | None = None) -> list[dict[str, float]]:
-        """Minibatch training loop over a panel (memoryless prior)."""
+    def _next_fit_batch(self, data: Panel) -> Batch:
+        """The next shuffled minibatch of the seeded epoch stream.
+
+        Identical stream to chaining ``data.minibatches(batch_size, g)`` epoch
+        after epoch — but the generator, the current permutation, and the
+        position within it live on the instance, so a checkpoint can freeze
+        the stream mid-epoch and resume it exactly.
+        """
+        t = self.cfg.train
+        if self._fit_gen is None:
+            self._fit_gen = torch.Generator().manual_seed(t.seed)
+        if self._fit_perm is None or self._fit_pos >= len(self._fit_perm):
+            self._fit_perm = torch.randperm(len(data), generator=self._fit_gen)
+            self._fit_pos = 0
+        idx = self._fit_perm[self._fit_pos : self._fit_pos + t.batch_size]
+        self._fit_pos += t.batch_size
+        return data._batch(idx)
+
+    def _maybe_checkpoint(self, path: Path | None) -> None:
+        if (
+            path is not None
+            and self.cfg.train.checkpoint_every > 0
+            and self.step_count % self.cfg.train.checkpoint_every == 0
+        ):
+            self.save(path)
+
+    def fit(
+        self,
+        data: Panel,
+        steps: int | None = None,
+        checkpoint_path: str | Path | None = None,
+    ) -> list[dict[str, float]]:
+        """Minibatch training loop over a panel (memoryless prior).
+
+        ``steps`` are *additional* steps for this call — the sample stream and
+        ``step_count`` continue across calls, so ``fit(60)`` then ``fit(40)``
+        (possibly via a checkpoint reload in between) equals one ``fit(100)``.
+        With ``checkpoint_path`` set, saves every
+        ``TrainConfig.checkpoint_every`` steps and once at the end; resuming
+        requires the *same* panel (the checkpoint stores the sampler, not the
+        data).
+        """
         t = self.cfg.train
         steps = t.steps if steps is None else steps
-        g = torch.Generator().manual_seed(t.seed)
-        batches: Iterable[Batch] = itertools.chain.from_iterable(
-            data.minibatches(t.batch_size, generator=g) for _ in itertools.count()
-        )
-        return [self.train_step(b) for b in itertools.islice(batches, steps)]
+        ckpt = Path(checkpoint_path) if checkpoint_path is not None else None
+        metrics: list[dict[str, float]] = []
+        for _ in range(steps):
+            metrics.append(self.train_step(self._next_fit_batch(data)))
+            self._maybe_checkpoint(ckpt)
+        if ckpt is not None:
+            self.save(ckpt)
+        return metrics
 
     # ---------------------------------------------- stateful (time-threaded)
     def train_step_sequence(
@@ -279,26 +351,119 @@ class Trainer:
         sequence: Sequence[Batch],
         steps: int | None = None,
         chunk_len: int = 50,
+        checkpoint_path: str | Path | None = None,
     ) -> list[dict[str, float]]:
         """Chunked training over one chronological sequence (stateful prior).
 
         The filter state is detached at chunk boundaries and reset at each
-        pass over the sequence start.
+        pass over the sequence start. The chunk cursor and carried state live
+        on the instance, so — like :meth:`fit` — ``steps`` are *additional*
+        steps and a checkpointed run resumes mid-pass exactly. Resuming
+        requires the same ``sequence`` and ``chunk_len`` (validated against
+        the chunking recorded at first call).
         """
-        steps = self.cfg.train.steps if steps is None else steps
+        t = self.cfg.train
+        steps = t.steps if steps is None else steps
         chunks = [
             sequence[i : i + chunk_len] for i in range(0, len(sequence), chunk_len)
         ]
+        meta = {"chunk_len": chunk_len, "n_chunks": len(chunks)}
+        if self._seq_meta is not None and self._seq_meta != meta:
+            raise ValueError(
+                f"fit_sequence chunking mismatch: trained/checkpointed with "
+                f"{self._seq_meta}, this call gives {meta} — resume with the "
+                "same sequence and chunk_len"
+            )
+        self._seq_meta = meta
+        ckpt = Path(checkpoint_path) if checkpoint_path is not None else None
         metrics: list[dict[str, float]] = []
-        state: Tensor | None = None
-        ci = 0
         for _ in range(steps):
-            if ci == 0:
-                state = None  # sequence start: back to pi_0
-            m, state = self.train_step_sequence(chunks[ci], init_state=state)
+            if self._seq_ci == 0:
+                self._seq_state = None  # sequence start: back to pi_0
+            m, state = self.train_step_sequence(
+                chunks[self._seq_ci], init_state=self._seq_state
+            )
             metrics.append(m)
-            ci = (ci + 1) % len(chunks)
+            self._seq_state = state
+            self._seq_ci = (self._seq_ci + 1) % len(chunks)
+            self._maybe_checkpoint(ckpt)
+        if ckpt is not None:
+            self.save(ckpt)
         return metrics
+
+    # ------------------------------------------------------- checkpointing
+    def save(self, path: str | Path) -> None:
+        """Atomically persist the complete training state (see module docs).
+
+        The checkpoint is self-contained on the *model* side (it embeds the
+        config, so :meth:`load` rebuilds everything) but deliberately does not
+        store the data — resuming must supply the same panel/sequence.
+        """
+        payload = {
+            "format_version": CHECKPOINT_FORMAT,
+            "config": self.cfg.to_dict(),
+            "model": self.model.state_dict(),
+            "optimizer": self.opt.state_dict(),
+            "step_count": self.step_count,
+            "history": self.history,
+            "lb_state": self.lb_buffer.get_state(),
+            "fit_state": None
+            if self._fit_gen is None
+            else {
+                "generator": self._fit_gen.get_state(),
+                "perm": self._fit_perm,
+                "pos": self._fit_pos,
+            },
+            "seq_state": None
+            if self._seq_meta is None
+            else {
+                "ci": self._seq_ci,
+                "carried": self._seq_state,
+                "meta": self._seq_meta,
+            },
+            # dropout draws from the global RNG — without this, a resumed
+            # trajectory silently diverges from the uninterrupted one
+            "torch_rng": torch.get_rng_state(),
+        }
+        atomic_torch_save(payload, path)
+
+    @classmethod
+    def load(cls, path: str | Path) -> Trainer:
+        """Rebuild a :meth:`save`d trainer; resume-exact given the same data.
+
+        Restores the global torch RNG state as saved — call sites that need a
+        different RNG stream afterwards must reseed themselves.
+        """
+        payload = torch.load(path, weights_only=False)
+        version = payload.get("format_version")
+        if version != CHECKPOINT_FORMAT:
+            raise ValueError(
+                f"checkpoint {path} has format {version!r}, expected "
+                f"{CHECKPOINT_FORMAT}"
+            )
+        cfg = NECConfig.from_dict(payload["config"])
+        model = NECModel(cfg)
+        model.load_state_dict(payload["model"])
+        trainer = cls(model)
+        trainer.opt.load_state_dict(payload["optimizer"])
+        trainer.step_count = payload["step_count"]
+        trainer.history = payload["history"]
+        trainer.lb_buffer.set_state(payload["lb_state"])
+        if payload["fit_state"] is not None:
+            gen = torch.Generator()
+            gen.set_state(payload["fit_state"]["generator"])
+            trainer._fit_gen = gen
+            trainer._fit_perm = payload["fit_state"]["perm"]
+            trainer._fit_pos = payload["fit_state"]["pos"]
+        if payload["seq_state"] is not None:
+            trainer._seq_ci = payload["seq_state"]["ci"]
+            trainer._seq_state = payload["seq_state"]["carried"]
+            trainer._seq_meta = payload["seq_state"]["meta"]
+        trainer._apply_sigma_schedule()
+        # last, so the model rebuild's own init draws don't leak into the
+        # resumed stream
+        torch.set_rng_state(payload["torch_rng"])
+        return trainer
 
     # -------------------------------------------------------------- eval
     @torch.no_grad()

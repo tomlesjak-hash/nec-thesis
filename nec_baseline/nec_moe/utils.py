@@ -8,13 +8,16 @@ in :mod:`nec_moe.config`.
 
 from __future__ import annotations
 
+import os
 import random
+from pathlib import Path
+from typing import Any
 
 import numpy as np
 import torch
 from torch import Tensor
 
-__all__ = ["assert_shape", "set_seed"]
+__all__ = ["assert_shape", "set_seed", "atomic_torch_save"]
 
 
 def assert_shape(t: Tensor, expected: tuple[int | None, ...], name: str) -> None:
@@ -43,3 +46,15 @@ def set_seed(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
+
+
+def atomic_torch_save(payload: Any, path: str | Path) -> None:
+    """``torch.save`` via tmp-file + rename, so a crash mid-write can never
+    corrupt the last good checkpoint (``os.replace`` is atomic on POSIX when
+    source and destination share a filesystem — guaranteed here by writing the
+    tmp file next to the destination)."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    torch.save(payload, tmp)
+    os.replace(tmp, path)

@@ -21,6 +21,12 @@ python3.14 run_experiment.py
 = multi-seed purged walk-forward with baselines and corrected claims. Outputs +
 provenance land in `results/<tag>/`. Everything below is the machinery it drives.
 
+Long runs are interruptible: set `checkpoint_every=<N>` in the settings block, kill the
+process whenever, continue with `python3.14 run_experiment.py --resume` — completed
+sweep runs and folds are skipped, an interrupted fit resumes from its last (atomically
+written) checkpoint on the bit-exact same trajectory (`Trainer.save/load`; handbook
+II.6).
+
 ## Quickstart (smoke: train on synthetic regime data)
 
 ```bash

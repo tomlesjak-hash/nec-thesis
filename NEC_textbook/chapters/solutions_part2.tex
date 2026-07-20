@@ -1,0 +1,504 @@
+\section*{Chapter 4}
+
+\paragraph{Solution to Exercise \ref{ex:4-mstep}.}
+(a) Fix $k$ and differentiate $\sum_j r_{jk} \log \gauss(y_j; \mu_k,
+\sigma_k^2)$: the $\mu_k$ equation $\sum_j r_{jk}(y_j - \mu_k)/\sigma_k^2
+= 0$ gives the weighted mean; the $\sigma_k^2$ equation
+$\sum_j r_{jk}\bigl(-\tfrac{1}{2\sigma_k^2} +
+\tfrac{(y_j-\mu_k)^2}{2\sigma_k^4}\bigr) = 0$ gives the weighted mean
+square. (b) With $R_k = \sum_j r_{jk}$, maximize $\sum_k R_k \log\pi_k +
+\lambda(1 - \sum_k \pi_k)$: $\partial_{\pi_k} = R_k/\pi_k - \lambda = 0$,
+so $\pi_k = R_k/\lambda$; the constraint forces $\lambda = \sum_k R_k =
+n$, hence $\pi_k = R_k/n$. (c) If $R_k = 0$ the weight update sends
+$\pi_k \to 0$ and the component's moment equations become $0/0$ --- the
+M-step is undefined in the direction of a dead expert. The dashboard's
+running-utilization minimum is the early-warning system for exactly this
+state: an expert whose assignment mass decays toward zero is exiting the
+model, and whether that is specialization (fine) or starvation (a
+failure) is a judgment the monitoring exists to force \emph{before} the
+arithmetic degenerates.
+
+\paragraph{Solution to Exercise \ref{ex:4-fisher}.}
+Write $\ell(\theta) = \mathcal{L}(q, \theta) + \mathrm{KL}\bigl(q \,\|\,
+r(\theta)\bigr)$ and differentiate in $\theta$ at $\theta_0$ with $q =
+r(\theta_0)$ held fixed. The map $\theta \mapsto \mathrm{KL}(q \|
+r(\theta))$ is smooth, non-negative, and attains its minimum value $0$ at
+$\theta = \theta_0$; a smooth function is stationary at an interior
+minimum, so its $\theta$-gradient vanishes there. Hence $\nabla_\theta
+\ell(\theta_0) = \nabla_\theta \mathcal{L}(q, \theta)\big|_{\theta_0}$,
+and by \eqref{eq:elbo2} the latter is the gradient of the expected
+complete-data log-likelihood --- Fisher's identity again. Since one
+gradient step on $\mathcal{L}(q, \cdot)$ from $\theta_0$ increases it
+(small step), and $\mathcal{L}$ minorizes $\ell$, the step increases
+$\ell$: a GEM step.
+
+\paragraph{Solution to Exercise \ref{ex:4-handem}.}
+With equal, unit scales the responsibility ratio reduces to
+$r_{j1} = 1/(1 + e^{(\mu_2 - \mu_1)\bigl(y_j - \frac{\mu_1 +
+\mu_2}{2}\bigr)})$; for the symmetric states here, $r_{j1} = 1/(1 +
+e^{2\mu_2 y_j})$. \emph{Iteration 1} ($\mu = (-0.5, 0.5)$):
+$r_{\cdot 1} = (0.881, 0.731, 0.269, 0.119)$ for $y = (-2,-1,1,2)$;
+weighted mean $\mu_1' = (0.881(-2) + 0.731(-1) + 0.269 + 0.119(2)) / 2.0
+= -0.993$, and by symmetry $\mu_2' = +0.993$. \emph{Iteration 2}:
+$r_{\cdot 1} = (0.981, 0.880, 0.120, 0.019)$, giving $\mu'' = (-1.343,
++1.343)$. The iteration is climbing toward the symmetric fixed point near
+$\pm 1.5$ (each mean the soft-weighted center of its half of the data),
+sharpening as it separates. From $\mu = (0, 0)$: the components are
+identical, so $r_{j1} = \tfrac12$ for every $j$ \emph{and remain so
+forever}; both means update to the pooled mean $0$ and the algorithm is
+converged at the symmetric stationary point --- Chapter~\ref{ch:symmetry}'s
+trap, reached in zero iterations, with the likelihood reporting smooth
+``convergence'' throughout.
+
+\paragraph{Solution to Exercise \ref{ex:4-spike}.}
+The $j = 1$ term is $\log\bigl(\tfrac{\pi_1}{\sqrt{2\pi}\,\epsilon} +
+c_1\bigr) = \log(1/\epsilon) + O(1)$; all other terms are
+$\epsilon$-independent up to the vanishing contribution of component 1,
+so $\ell(\epsilon) = \log(1/\epsilon) + O(1)$. To beat an interior
+optimum by $\Delta$ nats requires $\epsilon \lesssim C e^{-\Delta}$:
+every extra nat of ``improvement'' costs a factor $e$ of collapse ---
+the spike is a cliff approached logarithmically slowly, which is why
+early training (bad means, large residuals everywhere except by luck) is
+the window of vulnerability. In the conditional model, $\mu_k(\cdot)$ is
+one function shared by all samples: parking it on $y_1$ at $\vx_1$
+constrains its values at nearby inputs, and --- more binding ---
+$\sigma_k$ is global to the expert, so shrinking it punishes
+\emph{every} sample the expert still claims. The spike now requires the
+expert to simultaneously memorize one point and shed responsibility
+everywhere else: reachable in principle, but no longer downhill from
+generic initializations. Harder, not impossible --- hence the belt
+(\code{sigma\_init}) \emph{and} suspenders (\code{sigma\_freeze\_steps}).
+
+\paragraph{Solution to Exercise \ref{ex:4-numpy}.}
+Expected findings. (a) The per-iteration $\ell$ differences are
+non-negative to machine precision (assert $\ge -10^{-10}$); plot them
+and watch the geometric tail of EM near convergence. (b) Both routes
+land at $\hat\sigma \approx (0.5, 2.5)$ up to permutation and sampling
+error; the package run needs the \code{uniform} prior (so the comparison
+is weights-fixed, like your numpy EM with $\pi$ frozen) and benefits
+from the moment warm start for symmetry's sake. (c) EM converges in tens
+of iterations and milliseconds --- closed forms, full-batch, no learning
+rate; SGD takes hundreds of steps and hyperparameters. What SGD buys is
+exactly what this problem doesn't need and the thesis model cannot live
+without: emissions with no closed-form M-step, minibatch scaling, and
+one code path from the toy to the full model. The comparison is the
+cheapest possible demonstration that the package's trainer is ``EM by
+other means,'' and that the other means are paid for in tuning.
+
+\paragraph{Solution to Exercise \ref{ex:4-kl}.}
+The E-step: $\mathrm{KL}(q \| r) \ge 0$ with equality iff $q = r$, so
+the minimizer over unrestricted $q$ is the posterior. For $n$
+independent observations the joint posterior over $z_{1:n}$ factorizes,
+$p(z_{1:n} \mid y_{1:n}, \theta) = \prod_j p(z_j \mid y_j, \theta)$, so
+restricting $q$ to product form excludes nothing: coordinate ascent
+within the mean-field family attains the exact per-observation
+posteriors and the bound still touches. For the HMM, the latent states
+are \emph{a posteriori} dependent through the chain (observing
+$y_{t+1}$ moves beliefs about $S_t$), so the product family no longer
+contains the true posterior, mean-field E-steps leave a strictly
+positive KL gap, and exact inference requires the chain-respecting
+recursions of Chapter~\ref{ch:hmm} --- which is precisely why the
+forward filter, not a factorized approximation, sits inside the
+Variation-3 trainer.
+
+\section*{Chapter 5}
+
+\paragraph{Solution to Exercise \ref{ex:5-verify}.}
+\begin{lstlisting}
+z  = torch.randn(1, 3, requires_grad=True)
+mu = torch.randn(1, 3); y = torch.randn(1)
+log_pi  = torch.log_softmax(z, -1)
+log_lik = -0.5*math.log(2*math.pi) - 0.5*(y.unsqueeze(-1) - mu)**2
+nll = -torch.logsumexp(log_pi + log_lik, -1).mean()
+nll.backward()
+r = torch.softmax((log_pi + log_lik).detach(), -1)
+assert torch.allclose(z.grad, torch.softmax(z, -1).detach() - r)
+\end{lstlisting}
+The $\mu$ and $\log\sigma$ checks are the same pattern against
+\eqref{eq:mugrad}--\eqref{eq:siggrad}. Replacing the mixture with
+\code{torch.where(z.argmax(-1, keepdim=True) == torch.arange(3), ...)}
+routing and backpropagating any loss of the selected output leaves
+\code{z.grad} \code{None}/zero: the graph from loss to \code{z} passes
+only through an integer. Both halves of the package's defect-1
+regression test, reproduced.
+
+\paragraph{Solution to Exercise \ref{ex:5-sumzero}.}
+$\sum_k (\pi_k - r_k) = 1 - 1 = 0$. Adding $c$ to every logit leaves
+softmax unchanged, so the loss is constant along the all-ones direction
+and its gradient must be orthogonal to it --- the sum-zero property is
+the differential form of shift invariance. Consequently the gate learns
+only logit \emph{differences}; the common level is unconstrained by the
+objective and would drift as a random walk under noisy gradients. In
+the package the drift is bounded benignly: the gate's
+\code{LayerNorm} standardizes the head's input scale, and weight decay
+on the gate's linear weight (the one decayed parameter group,
+Chapter~9's optimizer hygiene) shrinks the map --- together anchoring
+the logit scale without touching the differences that carry routing.
+
+\paragraph{Solution to Exercise \ref{ex:5-variance}.}
+Condition on the component index $Z$: $\Var(y) = \E[\Var(y \mid Z)] +
+\Var(\E[y \mid Z]) = \sum_k \pi_k \sigma_k^2 + \bigl(\sum_k \pi_k
+\mu_k^2 - \hat y^2\bigr)$. Balanced case: $\hat y = 0$, within $= 1$,
+between $= 1$: total $2$, half of it regime disagreement. Confident
+case: $\hat y = 0.9$, within $= 1$, between $= 1 - 0.81 = 0.19$. The
+balanced case is the one the risk manager must hear about --- the model
+itself is saying ``this name's expected return is $+1$ or $-1$ and I
+cannot tell which,'' a coin flip with magnitude --- and $\hat y = 0$
+alone would file it, indistinguishably, next to a name the model finds
+genuinely neutral. Only the decomposition separates ``no signal'' from
+``two strong opposed signals,'' which is the practical content of
+carrying a density.
+
+\paragraph{Solution to Exercise \ref{ex:5-calibration}.}
+At fixed $\vh$ the randomness left is in $y$ (through $r$); taking
+expectations in \eqref{eq:pir}: $\E[\partial \NLL/\partial \vz \mid
+\vh] = \pi(\vh) - \E[r \mid \vh]$. Stationarity of the expected
+gradient at every reachable $\vh$ is exactly $\pi(\vh) = \E[r \mid
+\vh]$: the prior equals the conditionally-averaged posterior --- a
+calibration identity, learned because the gradient is its residual.
+Chapter~18's reliability diagram is this identity evaluated on held-out
+data: bin dates by gate confidence, compare against average realized
+responsibility. Training enforces the identity in-sample at
+convergence, so an out-of-sample violation indicates the
+$\vh \mapsto$ regime relationship shifted between fit and test ---
+drift, the environment's signature (Section~\ref{sec:hostile}) --- and
+the honest response is recalibration or refit, not a debugger.
+
+\paragraph{Solution to Exercise \ref{ex:5-decisionA}.}
+With $\mu_k = \mu_k([\vx; \vh])$, the chain rule through both consumers
+of $\vh$ gives
+\[
+  \frac{\partial\,\NLL}{\partial \vh}
+  = \underbrace{\Bigl(\frac{\partial \vz}{\partial \vh}\Bigr)^{\!\top}
+    (\pi - r)}_{\text{gate path}}
+  \;+\;
+  \underbrace{\sum_k r_k\, \frac{\mu_k - y}{\sigma_k^2}\,
+    \frac{\partial \mu_k}{\partial \vh}}_{\text{expert path}} .
+\]
+In the prototype, defect 1 zeroed $\pi - r$'s route (no gradient through
+the routing) and defect 6 removed the expert path at the source (experts
+read a raw slice, not $\vh$): total encoder gradient from the prediction
+task, \emph{exactly zero} --- four million parameters trained by nothing
+but an auxiliary classification loss, if that. The corrected default
+keeps the expert path severed \emph{on purpose}: snapshot-only experts
+mean the encoder's sole gradient is the gate path, so its learned
+representation answers one question --- ``what in the recent sequence
+helps predict which regime we are in?'' --- rather than a blend of
+regime detection and per-name curve fitting. Interpretability of the
+encoder is a property of the gradient topology, decided by
+\code{input\_mode} in config: Decision A, stated as calculus.
+
+\paragraph{Solution to Exercise \ref{ex:5-jjnh}.}
+The committee gradient is identical for both experts,
+$\partial L/\partial b_i = -\E[(y - \tfrac{b_1 + b_2}{2}x)\,x]/1 =
+\tfrac{b_1 + b_2}{2}\E[x^2]$ (using $\E[yx] = 0$ on the sign-flip
+world). Gradient descent therefore drives the \emph{sum} $b_1 + b_2 \to
+0$ while leaving the \emph{difference} $b_1 - b_2$ untouched: from
+$(0.8, -0.6)$ the blend converges to slopes $\approx (0.7, -0.7)$ ---
+residual asymmetry frozen where it started, no force growing it toward
+$\pm\beta = \pm 1.5$, and the ensemble prediction $\tfrac12(b_1 +
+b_2)x \to 0$: functionally the pooled model. The mixture NLL from the
+same start produces informative responsibilities (the $b_1 > 0$ expert
+better explains $S = +1$ samples), whose weighting pushes the slopes
+\emph{apart} until they reach $\pm\beta$. The precise moral is sharper
+than ``cooperation homogenizes'': cooperation leaves specialization
+\emph{neutrally stable} --- unrewarded, unrestored, eroded by any noise
+--- while the likelihood's competition makes specialization an
+attractor. Architecture identical; objective decides.
+
+\section*{Chapter 6}
+
+\paragraph{Solution to Exercise \ref{ex:6-bound}.}
+With $m = \max_k a_k$: $e^m \le \sum_k e^{a_k} \le K e^m$; take logs.
+Extremes: one term dominating (gap $\to \infty$) gives $\LSE \to m$;
+all terms equal gives $\LSE = m + \log K$. The hard surrogate is thus
+at most $\log 2 \approx 0.69$ nats loose for $K = 2$ but $\log 8
+\approx 2.08$ for $K = 8$ --- and the slack is largest exactly when
+components disagree least, i.e.\ early in training, which compounds
+hard routing's cold-start fragility as $K$ grows.
+
+\paragraph{Solution to Exercise \ref{ex:6-hardgrad}.}
+For fixed $k^\ast$, only $\log\pi_{k^\ast} = z_{k^\ast} - \LSE(\vz)$
+depends on $\vz$ (the selected log-likelihood does not), giving
+$\partial(-\log\pi_{k^\ast})/\partial z_k = \pi_k - \delta_{kk^\ast}$;
+the expected update raises $z_{k^\ast}$ and lowers the rest ---
+reinforcement of the incumbent. With frozen experts the dynamics are
+pure self-training: any state whose argmax is $k^\ast$ flows toward
+higher confidence in $k^\ast$; stationarity requires $\pi =
+\bm{e}_{k^\ast}$, approached asymptotically, never crossed. Since a
+cold gate is near-uniform, its initial argmax is decided by
+initialization noise, and that arbitrary choice is then amplified ---
+the generic outcome, not misfortune. The escape routes are exactly the
+ones the likelihood term provides in full training: a selected expert
+that explains its samples \emph{worse} than a rival shifts which branch
+wins on those samples, which is why hard-EM works at all --- and why
+it works best warm.
+
+\paragraph{Solution to Exercise \ref{ex:6-topk}.}
+\begin{lstlisting}
+z = torch.tensor([[1.0, 0.4, -0.2]], requires_grad=True)
+keep = torch.zeros_like(z, dtype=torch.bool).scatter_(
+    1, z.topk(k, -1).indices, True)
+log_pi = torch.log_softmax(z.masked_fill(~keep, float("-inf")), -1)
+nll = -torch.logsumexp(log_pi + log_lik, -1).mean(); nll.backward()
+\end{lstlisting}
+$k = 1$: \code{z.grad} is exactly zero (the kept entry's renormalized
+log-weight is $\log 1 = 0$, a constant); $k = 2$: nonzero gradient in
+the two kept coordinates. No smooth repair exists downstream because
+the composite map $\vz \mapsto \tilde\pi$ is \emph{constant} on each
+region of fixed argmax: whatever differentiable machinery consumes
+$\tilde\pi$ is consuming a locally constant function of $\vz$, and the
+chain rule multiplies by its zero Jacobian. The information ``how much
+better was the winner than the runner-up'' --- the only $\vz$-content
+that could carry gradient --- was destroyed by normalizing a singleton.
+Retention of at least two competitors is not a tuning preference; it is
+the existence condition for the training signal.
+
+\paragraph{Solution to Exercise \ref{ex:6-gumbelproof}.}
+Density: $\frac{d}{dt}e^{-e^{-t}} = e^{-t}e^{-e^{-t}}$. Conditioning:
+independence of the $g_l$ makes the win probability given $g_j = t$ a
+product of CDFs at the shifted points $z_j - z_l + t$. Including
+$l = j$ multiplies by $e^{-e^{-t}}$, which is exactly the density's own
+exponential factor --- that bookkeeping is what collapses the product
+into $\exp(-c_j e^{-t})$ with $c_j = \sum_l e^{-(z_j - z_l)}$.
+Substituting $u = e^{-t}$ turns the integral into $\int_0^\infty
+e^{-c_j u}\,du = 1/c_j = e^{z_j}/\sum_l e^{z_l}$. Shifting all logits
+by $c$ shifts every perturbed logit equally, leaving every pairwise
+comparison --- hence the argmax law --- unchanged, the sampling
+counterpart of softmax shift invariance; and Exercise
+\ref{ex:5-sumzero} is its differential shadow: a loss invariant along
+the all-ones direction has sum-zero gradients. One symmetry, three
+appearances.
+
+\paragraph{Solution to Exercise \ref{ex:6-tau}.}
+(a) The difference of two independent Gumbels is standard logistic, so
+$\pi_1^{(\tau)} = \sigma\bigl((\Delta z + \Delta g)/\tau\bigr)$ with
+$\Delta g$ logistic. As $\tau \to 0$ the sigmoid hardens to
+$\ind{\Delta z + \Delta g > 0}$, whose expectation is $\Prob(\Delta g >
+-\Delta z) = \sigma(\Delta z)$ --- exact categorical sampling, the
+lemma again. As $\tau \to \infty$ the argument collapses to $0$ and
+$\E \to \tfrac12$. (b) Simulation shows the gradient
+$\sigma'(\cdot)/\tau$ is negligible for most draws (saturation) but of
+size $\sim 1/(4\tau)$ for draws near the boundary: the variance of the
+per-sample gradient grows roughly like $1/\tau$ --- few, huge
+contributions. The anneal walks from low-variance/high-bias (warm,
+blended) toward low-bias/high-variance (cold, near-discrete), spending
+the variance budget only once routing is roughly right. (c) With noise
+on, the held-out NLL is an average over injected randomness whose
+magnitude depends on $\tau$: two models at different temperatures
+differ in \emph{evaluation-time noise}, not only in fit, and the
+comparison confounds the two. Deterministic eval
+($\operatorname{log\_softmax}(\vz)$, the package's eval branch) grades
+what was learned.
+
+\paragraph{Solution to Exercise \ref{ex:6-lb}.}
+(a) $f_k = 1/K$ gives $\mathcal{L}_{\mathrm{lb}} = K\sum_k \bar p_k/K =
+\sum_k \bar p_k = 1$ for \emph{any} gate matrix --- rows may be
+arbitrarily one-hot; only the marginal enters. (b) Expected shape of
+results. Unbalanced, no aux: the head-started expert's utilization
+climbs to $\approx 1$, its rival's responsibilities and gradients decay
+together --- rich-get-richer to starvation. Per-batch $f$ on
+regime-pure batches: utilization balances \emph{within every batch},
+which on one-sided batches means the gate is punished into
+$\approx (0.5, 0.5)$ on dates where the truth is one-sided --- sharp
+routing destroyed, the gate drifts toward \code{uniform}. Buffered $f$
+across both regimes: the marginal balances (the starving expert is
+rescued early) while per-date routing stays sharp --- calm dates route
+calm, turbulent dates route turbulent, and the buffer's window is what
+made ``balanced overall, decisive locally'' expressible. The package's
+default then turns the rescued mechanism \emph{off} anyway --- an
+ablation lever, not baseline seasoning --- and the buffer keeps running
+for the dashboard.
+
+\section*{Chapter 7}
+
+\paragraph{Solution to Exercise \ref{ex:7-smoother}.}
+$\beta_t(j) = p(\vy_{t+1:T} \mid S_t = j) = \sum_k \Prob(S_{t+1} = k
+\mid S_t = j)\, p(\vy_{t+1} \mid S_{t+1} = k)\, p(\vy_{t+2:T} \mid
+S_{t+1} = k) = \sum_k A_{jk}\, \ell_{t+1}(k)\, \beta_{t+1}(k)$, with
+$\beta_T \equiv 1$ (empty product). Then $\Prob(S_t = k \mid \vy_{1:T})
+\propto \Prob(S_t = k \mid \vy_{1:t})\, p(\vy_{t+1:T} \mid S_t = k) =
+r_t(k)\beta_t(k)$, normalized by $\sum_j r_t(j)\beta_t(j)$ (which
+equals $p(\vy_{t+1:T} \mid \vy_{1:t})$). The recursion for $\beta_t$
+starts at $T$ and runs \emph{backward}: computing any smoothed marginal
+requires every future date's emission likelihood --- look-ahead is not
+a side effect of smoothing, it is its definition.
+
+\paragraph{Solution to Exercise \ref{ex:7-counter}.}
+Take stay probability $0.9$, $\sigma = (1, 3)$, $\pi_0 = (\tfrac12,
+\tfrac12)$, $y_1 = 0$, $y_2 = 6$. Filtered at $t = 1$:
+$\ell_1 = (0.399, 0.133)$, so $r_1 = (0.75, 0.25)$ --- the quiet day
+favors the calm state. Backward: $\ell_2(1) = \gauss(6; 0, 1) \approx
+6.1\times 10^{-9}$, $\ell_2(2) = \gauss(6; 0, 9) \approx 0.018$;
+$\beta_1(1) = 0.9\,\ell_2(1) + 0.1\,\ell_2(2) \approx 1.8\times10^{-3}$,
+$\beta_1(2) = 0.1\,\ell_2(1) + 0.9\,\ell_2(2) \approx 1.62\times
+10^{-2}$. Smoothed $\propto r_1 \cdot \beta_1 = (1.35, 4.05)\times
+10^{-3}$: $\Prob(S_1 = 2 \mid \vy_{1:2}) = 0.75$. One loud tomorrow
+flipped the belief about a quiet today from $75{:}25$ calm to $75{:}25$
+turbulent. A backtest positioning at date 1 on the smoothed belief has
+classified date 1 using date 2's crash --- it traded on tomorrow's
+news, in one arithmetic line.
+
+\paragraph{Solution to Exercise \ref{ex:7-gradA}.}
+Chain through $\pi_t(k) = \sum_j A_{jk} r_{t-1}(j)$ and $A =
+\operatorname{row\_softmax}(L)$: $\partial(-\log\sum_k \pi_t \ell_t) /
+\partial \pi_t(k) = -r_t(k)/\pi_t(k)$, $\partial \pi_t(k)/\partial
+A_{jk} = r_{t-1}(j)$, and $\partial A_{jk}/\partial L_{jm} =
+A_{jk}(\delta_{km} - A_{jm})$. Assembling,
+\[
+  \frac{\partial\,(-\log p_t)}{\partial L_{jm}}
+  = -\,r_{t-1}(j)\, A_{jm}\!\left(\frac{r_t(m)}{\pi_t(m)}
+    - \sum_k A_{jk}\, \frac{r_t(k)}{\pi_t(k)}\right).
+\]
+Reading: $r_t(k)/\pi_t(k)$ is destination $k$'s \emph{surprise ratio}
+(posterior over prior --- how much better than expected $k$ explained
+today). Row $j$'s update moves mass toward destinations whose surprise
+beats the row's $A_j$-weighted average surprise, all scaled by
+yesterday's belief $r_{t-1}(j)$ in the source. The $\pi - r$ pattern
+reappears within the row: defining the row's ``posterior'' $\tilde
+r_j(m) \propto A_{jm} r_t(m)/\pi_t(m)$ (which is $\Prob(S_t = m \mid
+S_{t-1} = j, \vy_{1:t})$), the bracket is proportional to $\tilde
+r_j - A_j$ --- transitions are trained toward their own conditional
+posterior, exactly as the gate was.
+
+\paragraph{Solution to Exercise \ref{ex:7-hamilton}.}
+With constant $(\mu_k, \sigma_k)$, \eqref{eq:hmmemission} is a product
+of fixed Gaussians and \eqref{eq:preddecomp} is precisely the
+prediction-error-decomposed likelihood Hamilton maximized (he ran the
+same filter; his numerical maximization is our gradient ascent on $L,
+\mu, \sigma$). The package's recovery test generates a sticky two-state
+scale mixture, fits \code{classical} $\times$ \code{hmm}, and checks
+$\hat A$'s diagonal and $\hat\sigma$'s ordering --- a synthetic
+Hamilton replication run by the same \code{Trainer} as the neural
+model. Rank-IC is meaningless because per date every name receives the
+same prediction $\sum_k \pi_t(k)\mu_k$ --- a constant cross-section has
+no ranking; the harness raises \code{ValueError} with exactly this
+explanation, and the model is graded on held-out NLL, filtered-state
+AUC against the planted regime, and parameter recovery.
+
+\paragraph{Solution to Exercise \ref{ex:7-numpy}.}
+The 20-line filter is the chapter's
+\eqref{eq:predict}--\eqref{eq:update} with \code{logaddexp};
+agreement with \code{evaluate\_sequence} lands at $10^{-6}$-level
+(float32 vs float64) once the same parameters are loaded. The
+causality perturbation --- flip the final date's returns --- changes
+the last filtered entry only; every earlier row is bit-identical
+(\code{np.array\_equal}), because the recursion consumed only past
+values. That bitwise assertion, not a statistical one, is the correct
+form for a causality test: leakage is a structural property of the
+computation graph, and the package's test asserts it structurally.
+
+\paragraph{Solution to Exercise \ref{ex:7-chunk}.}
+(a) Detaching modifies only the backward graph; forward values are
+computed identically, so filtered beliefs, predictions, and NLLs are
+unchanged by $C$. (b) The transition logits: their gradient's value
+comes from multi-date chains --- belief shaped at $t$ paying off at
+$t + s$ --- and truncation at $C$ discards all credit at ranges beyond
+the chunk. Plant a chain with high persistence and \emph{weak per-date
+evidence} (small vol separation), so correct filtering must integrate
+evidence across many dates; measure $\hat A$'s stay-probability bias as
+$C$ shrinks. Expected signature: persistence underestimated for small
+$C$, recovering as $C$ passes the evidence-integration length.
+(c) Mean-per-date normalization makes each chunk's loss (and gradient
+scale) independent of its length, so the ragged final chunk neither
+dominates nor vanishes --- a two-character choice (\code{mean} vs
+\code{sum}) that determines whether late-sample dates are
+systematically over- or under-weighted.
+
+\section*{Chapter 8}
+
+\paragraph{Solution to Exercise \ref{ex:8-stationary}.}
+At $(b_1, b_2) = (0,0)$ with a uniform gate, autograd returns gate
+gradients that are \emph{exactly} zero (the equality $r = \pi$ is
+algebraic, not statistical) and expert gradients equal to
+$-\tfrac12\widehat{\E}[yx]/\sigma^2$ --- zero only up to sampling
+noise. Quantify: $\Var(yx) = \beta^2\E[x^4] + \sigma_\varepsilon^2 =
+3\beta^2 + \sigma_\varepsilon^2 \approx 6.9$ for $\beta = 1.5,
+\sigma_\varepsilon = 0.4$, so the empirical moment's sd is
+$\sqrt{6.9/n}$ --- at $n = 4{,}000$ about $0.04$, comfortably
+distinguishable from a genuine gradient of order $\beta$. The
+instructive contrast: one gradient vanishes identically (structure),
+the other statistically (sampling) --- and only the first kind defines
+the trap.
+
+\paragraph{Solution to Exercise \ref{ex:8-invariant}.}
+With $b_1 = b_2 = b$ the densities coincide, so $r(\vh) = \pi(\vh)$
+pointwise and the gate is frozen wherever it is. The expert gradients
+become $\partial/\partial b_i = \E[\pi_i(\vh)\,(bx - y)x]/\sigma^2$:
+\emph{exactly} proportional only when $\pi$ is constant across samples
+(uniform gate); for a frozen $\vh$-dependent gate,
+$\tfrac{d}{dt}(b_1 - b_2) \propto \E[(\pi_1(\vh) -
+\pi_2(\vh))(bx - y)x]$, which is nonzero only insofar as the
+\emph{untrained} gate's fluctuations correlate with the regime-flipped
+residual moment. At random initialization that correlation is $O$(init
+scale) --- so the exact invariant set is ``equal experts + gate
+uncorrelated with regime,'' and its neighborhood exhibits the same
+slow-bootstrap escape as Section~\ref{sec:seedsfail}: the refinement
+softens the theorem and preserves the phenomenon. Within the invariant
+set the gate converges to nothing at all (zero gradient), which is what
+makes the collapse quiet: a frozen gate looks identical to a converged
+one in the loss curve.
+
+\paragraph{Solution to Exercise \ref{ex:8-escape}.}
+The transverse dynamics near the diagonal are $\dot\delta \approx
+c\,\delta$ ($c$ set by the responsivity of $r$ to expert separation),
+so escape to a fixed threshold takes $t \approx \tfrac1c
+\log(\beta/\delta)$: the log--log plot of escape steps against
+$\delta$ is linear with slope $-1/c$ in $\log\delta$ --- each decade of
+smaller initial asymmetry costs a \emph{constant additive} number of
+steps. The simulation shows exactly this line (with saturation at
+large $\delta$, where the linearization fails), making the abstract
+claim ``seeds are $\varepsilon$-symmetric, hence plateau-bound''
+quantitative: a seed-scale $\delta \sim 10^{-2}$ costs several times
+the entire training budget of the warm-started run.
+
+\paragraph{Solution to Exercise \ref{ex:8-classical}.}
+Slice $k$'s closed-form warm start is $\hat\mu_k = \bar y_{(k)}$,
+$\hat\sigma_k^2 = \overline{(y - \bar y)^2}_{(k)}$. In the scale world
+the sort key (window vol) is positively correlated with the latent
+state, so the top slice over-represents the turbulent regime:
+$\Prob(\text{high} \mid \text{top slice}) > \Prob(\text{high} \mid
+\text{bottom slice})$, and each slice's expected sample variance is the
+corresponding mixture of $\sigma_1^2 < \sigma_2^2$ --- ordered
+strictly, with the gap governed by the proxy--state correlation and
+concentrating by the law of large numbers as the window grows. The
+property doing \emph{all} the work is that single positive correlation:
+the proxy need not identify the regime, only tilt the slices --- an
+importantly weak requirement, since any observable that genuinely
+identified the regime would raise the question of why the model is
+needed.
+
+\paragraph{Solution to Exercise \ref{ex:8-permcount}.}
+Exact symmetries: the $K!$ expert relabelings (acting jointly on gate
+output coordinates, emissions, scales, and for Variation 3 on $\pi_0$
+and both axes of $A$); within each expert MLP, hidden-unit permutations
+($h!$ per layer) and, for ReLU units, positive input--output rescalings
+--- a continuous symmetry. The intra-expert symmetries are harmless for
+reporting: no reported statistic attaches to a hidden unit, and two
+weight-space-different but function-identical experts produce identical
+tables. The dangerous group is exactly the one whose orbits cross
+\emph{reported labels} --- expert relabeling, because per-expert
+$\sigma_k$, utilization, and alignment rows are published. The
+$\sigma$-sort canonicalization picks one representative per orbit of
+that group (well-defined off the measure-zero tie set), which is
+precisely sufficient: canonicalize what you report, ignore what you
+don't.
+
+\paragraph{Solution to Exercise \ref{ex:8-detector}.}
+Static statistics all admit false positives or negatives: output
+correlation $\approx 1$ and equal $\hat\sigma$ are the \emph{correct}
+end state on regime-free data (the mixture should collapse there);
+responsibility--proxy AUC needs a proxy; gate-gradient norm vanishes at
+any convergence. The detector hardest to fool is therefore
+\emph{paired and counterfactual}: declare collapse when (i) the
+mixture's held-out NLL is statistically indistinguishable from the
+pooled single-model baseline's, \emph{and} (ii) a warm-started refit on
+the same window improves held-out NLL by a pre-registered margin.
+Condition (ii) is the crux --- it distinguishes ``the world is
+regime-free'' (warm start helps nothing; detector silent, correctly,
+on the regime-free synthetic world) from ``the optimizer sat down at
+the saddle'' (warm start unlocks the improvement; detector fires, as
+it must on the sign-flip world's plain-seed runs). Collapse, properly
+defined, is not a property of the trained model alone but of the model
+\emph{relative to what training could have found} --- which is why the
+honest detector must run the counterfactual.

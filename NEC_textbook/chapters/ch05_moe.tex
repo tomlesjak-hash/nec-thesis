@@ -1,0 +1,359 @@
+\chapter{Mixture of Experts}\label{ch:moe}
+
+\begin{quote}\itshape
+One substitution turns Chapter~\ref{ch:em}'s mixture into the thesis
+model: let the parameters be functions of the observables. The weights
+become a gate evaluated on the encoded market state; the means become
+expert networks evaluated on the characteristics. This chapter derives
+what that substitution does to training --- above all the gate-logit
+gradient $\pi - r$, the two-symbol formula that repairs the prototype's
+central defect and that you should be able to reproduce on a napkin for
+the rest of your career.
+\end{quote}
+
+\section{From mixture to conditional mixture}\label{sec:conditionalmoe}
+
+Chapter~\ref{ch:em} fit one global mixture: every observation faced the
+same weights $\pi_k$ and the same component means $\mu_k$. The thesis
+model (Definition~\ref{def:nec}) makes both \emph{conditional}:
+\begin{equation}\label{eq:moedensity}
+  p(y_{i,t} \mid \vx_{i,t}, \vh_t)
+  \;=\; \sum_{k=1}^{K} \pi_k(\vh_t)\;
+  \gauss\!\bigl(y_{i,t};\, \mu_k(\vx_{i,t}),\, \sigma_k^2\bigr),
+\end{equation}
+with the three modules of Chapter~\ref{ch:regimes}'s blueprint:
+\begin{itemize}[leftmargin=1.6em, itemsep=1pt]
+\item the \emph{gate} produces logits $\vz = g(\vh_t) \in \R^K$ from the
+  encoded market state and weights $\pi = \operatorname{softmax}(\vz)$
+  --- the regime \emph{prior} before seeing the outcome;
+\item the \emph{experts} produce means $\mu_k(\vx_{i,t})$ from the
+  name-level characteristics --- $K$ regime-conditional prediction
+  functions;
+\item the \emph{scales} $\sigma_k$ are per-expert free parameters
+  (as $\log\sigma_k$), not functions --- each regime carries its own
+  noise level, which Chapter~\ref{ch:regimes} argued is most of what a
+  regime \emph{is}.
+\end{itemize}
+Everything in Chapter~\ref{ch:em} survives the substitution wholesale,
+because none of its derivations used the fact that $\pi_k$ and $\mu_k$
+were free scalars: responsibilities are still \eqref{eq:resp} with
+$\pi_k(\vh_t)$ and $\mu_k(\vx_{i,t})$ inserted; the ELBO decomposition,
+Fisher's identity, and the GEM interpretation hold verbatim. What changes
+is \emph{where gradients go next}: after the chain rule reaches
+$\partial/\partial \pi_k$ and $\partial/\partial \mu_k$, it continues into
+network weights instead of stopping at scalars. The new mathematics of
+this chapter is entirely about that continuation.
+
+\section{The objective, fused}\label{sec:fusedobjective}
+
+Define per-sample joint scores and the loss exactly as the package
+computes them:
+\begin{equation}\label{eq:fused}
+  a_k \;=\; \log \pi_k \;+\; \log \gauss(y; \mu_k, \sigma_k^2),
+  \qquad
+  \NLL \;=\; -\LSE_k(a_k) \;=\; -\log \sum_k e^{a_k},
+\end{equation}
+with $\log \pi = \operatorname{log\_softmax}(\vz)$ and the Gaussian
+log-density expanded in the log domain,
+\[
+  \log \gauss(y; \mu_k, \sigma_k^2)
+  = -\tfrac12 \log 2\pi - \log \sigma_k
+    - \frac{(y - \mu_k)^2}{2\sigma_k^2}.
+\]
+Numerically, $\LSE$ subtracts the row maximum before exponentiating, so
+the pipeline never materializes a density --- only densities' logs ---
+and never underflows. The responsibilities emerge from the same tensor:
+$\log r_k = a_k - \LSE(a)$, i.e.\ $r = \operatorname{softmax}(a)$. One
+fused computation yields objective and posterior; Chapter~\ref{ch:em}'s
+E-step is literally a by-product of evaluating the loss.
+
+\begin{whatbreaks}[the prototype's separated pipeline]
+The prototype (defect 3) placed \code{nn.Softmax} \emph{inside} the model
+and attached a separate cross-entropy loss to the gate. Two distinct
+failures follow. Numerical: probabilities near 0 or 1 followed by a
+downstream $\log$ is catastrophic cancellation by design ---
+$\log(\operatorname{softmax})$ loses precision exactly where confident
+routing lives; the fused $\operatorname{log\_softmax}$/$\LSE$ path is
+algebraically identical and numerically stable everywhere. Statistical:
+a gate trained by its own auxiliary loss against external labels is no
+longer maximizing \eqref{eq:moedensity}'s likelihood --- the mixture's
+components stop negotiating through a shared objective, and the ``prior''
+stops being the quantity the likelihood needs it to be. One model, one
+objective, one log domain --- the entire fix.
+\end{whatbreaks}
+
+\section{The gate gradient}\label{sec:gategradient}
+
+Here is the book's most important derivation. It is four lines.
+
+\begin{theorem}[The gate learns $\pi - r$]\label{thm:pir}
+For the fused objective \eqref{eq:fused} with
+$\pi = \operatorname{softmax}(\vz)$,
+\begin{equation}\label{eq:pir}
+  \frac{\partial\, \NLL}{\partial z_k} \;=\; \pi_k - r_k .
+\end{equation}
+\end{theorem}
+
+\begin{proof}
+Two softmax Jacobian passes, chained. First, $\NLL = -\LSE(a)$ gives
+$\partial \NLL / \partial a_j = -\operatorname{softmax}(a)_j = -r_j$.
+Second, $a_j = z_j - \LSE(\vz) + \log \gauss_j$ (writing
+$\log\pi_j = z_j - \LSE(\vz)$), so
+$\partial a_j / \partial z_k = \delta_{jk} - \pi_k$, which does not
+depend on the likelihood term. Chain and use $\sum_j r_j = 1$:
+\[
+  \frac{\partial \NLL}{\partial z_k}
+  = \sum_j (-r_j)\,(\delta_{jk} - \pi_k)
+  = -r_k + \pi_k \sum_j r_j
+  = \pi_k - r_k. \qedhere
+\]
+\end{proof}
+
+Every property of this formula deserves a sentence.
+
+\emph{It is a Bayes update, imposed as a gradient.} The gate's output
+$\pi$ is the prior over regimes; $r$ is the posterior after the outcome
+$y$ is seen. Gradient descent moves the logits to shrink $\pi - r$: the
+gate is perpetually trained toward \emph{its own posterior}. The
+mixture teaches its prior to predict what its likelihood will conclude
+--- self-distillation of Bayes' rule, with no labels anywhere.
+Decision~B (the gate stays unsupervised) is not an abstinence; it is the
+recognition that \eqref{eq:pir} already supplies the supervision, and
+that any external label would overwrite the only training signal that
+makes ``do the learned regimes mean anything?'' an open, testable
+question.
+
+\emph{It is softmax cross-entropy with soft targets.} Classification
+training gives logit gradients $p - \bm{e}_{y}$ (predicted probabilities
+minus the one-hot label). Formula \eqref{eq:pir} is the same expression
+with the hard label replaced by the responsibility vector: the experts
+jointly manufacture the label the gate is trained against, each date, each
+name. Everything known about cross-entropy training --- calibration at
+the optimum, gradient boundedness, saturation behavior --- transfers.
+
+\emph{It vanishes exactly at calibration.} $\partial \NLL / \partial
+\vz = 0$ iff $\pi = r$: the stationary gate is the one whose prior
+already matches the posterior on average
+(Exercise~\ref{ex:5-calibration} makes the ``on average'' precise). A
+well-trained gate is thus a \emph{calibrated} regime predictor by
+construction --- the property Chapter~18's reliability diagnostics test
+empirically.
+
+\emph{It is what the prototype destroyed.} Route through
+$\operatorname{argmax}$ instead of the mixture and the entire derivation
+collapses at line one: the loss ceases to depend on $\vz$ except through
+a piecewise-constant selection, and the gradient is zero almost
+everywhere (Chapter~\ref{ch:autopsy}, defect 1;
+Chapter~\ref{ch:routing} proves the subtler renormalized variant). The
+package's regression test \code{test\_gate\_receives\_gradient} asserts
+\eqref{eq:pir} is alive after one backward pass --- and its companion
+asserts the argmax double is exactly dead. The two-line formula is
+guarded by a two-assertion test.
+
+\section{The expert and scale gradients}\label{sec:expertgradients}
+
+Differentiating \eqref{eq:fused} with respect to the remaining outputs
+(Exercise~\ref{ex:5-verify} checks all of these against autograd):
+\begin{align}
+  \frac{\partial\, \NLL}{\partial \mu_k}
+  &= r_k\, \frac{\mu_k - y}{\sigma_k^2},
+  \label{eq:mugrad}\\[2pt]
+  \frac{\partial\, \NLL}{\partial \log \sigma_k}
+  &= r_k \left(1 - \frac{(y - \mu_k)^2}{\sigma_k^2}\right).
+  \label{eq:siggrad}
+\end{align}
+Equation \eqref{eq:mugrad} is \emph{responsibility-weighted regression}:
+expert $k$ receives an ordinary squared-error pull toward $y$, scaled by
+how responsible the posterior holds it. Experts with $r_k \approx 0$ on a
+sample are untouched by it --- specialization is not just permitted but
+enforced by the gradient's structure. Equation \eqref{eq:siggrad} is
+stationary when $\sigma_k^2$ equals the responsibility-weighted mean
+squared residual \emph{of expert $k$'s own samples}: each regime's noise
+level is estimated from the data that regime claims. Summing over a batch
+and setting to zero recovers exactly Chapter~\ref{ch:em}'s M-step
+\eqref{eq:mstep} --- as it must, by Fisher's identity.
+
+The full division of labor, in one table:
+
+\begin{center}
+\small
+\begin{tabular}{@{}llll@{}}
+\toprule
+quantity & gradient & EM reading & failure if broken \\
+\midrule
+gate logits $\vz$ & $\pi - r$ & prior $\to$ posterior
+  & defect 1 (dead gate) \\
+means $\mu_k$ & $r_k(\mu_k - y)/\sigma_k^2$ & weighted M-step
+  & pooled experts (Ch.~\ref{ch:symmetry}) \\
+scales $\log\sigma_k$ & $r_k\bigl(1 - (y-\mu_k)^2/\sigma_k^2\bigr)$
+  & weighted variance & spikes / flat $r$ (Ch.~\ref{ch:em}) \\
+responsibilities $r$ & (not a parameter) & E-step, in the forward pass
+  & --- \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{origins}[Adaptive mixtures of local experts]
+The architecture and the competitive-training insight are from Jacobs,
+Jordan, Nowlan and Hinton, ``Adaptive Mixtures of Local Experts''
+(\emph{Neural Computation}, 1991). Their central observation is worth
+retelling because it is a loss-design lesson. An earlier ``committee''
+objective, $\bigl(y - \sum_k \pi_k \mu_k\bigr)^2$, trains the
+\emph{blended} prediction: each expert's target is the residual left by
+the blend, every expert ends up correcting every other, and the ensemble
+\emph{cooperates} into homogeneity. Switching to the mixture
+(log-)likelihood --- $\sum_k \pi_k \exp(-\tfrac12(y-\mu_k)^2)$ in their
+Gaussian case --- makes experts \emph{compete} for responsibility on each
+case, and specialization follows. The moral, which recurs in
+Chapter~\ref{ch:routing}: with mixtures, the difference between an
+architecture that specializes and one that homogenizes is not the wiring
+but the objective. Jordan and Jacobs (1994) supplied the EM view and
+hierarchical gates; Shazeer et al.\ (2017) scaled sparse variants to
+language models, whose load-balancing pathologies reappear in our
+Section~\ref{sec:routing-family} context. The thesis model is the 1991
+design, taken seriously with 2020s hygiene.
+\end{origins}
+
+\section{Prediction and uncertainty}\label{sec:prediction}
+
+Training maximizes a density; the desk needs numbers. The model's point
+prediction is the mixture mean,
+\begin{equation}\label{eq:yhat}
+  \hat y \;=\; \E[y \mid \vx, \vh]
+  \;=\; \sum_k \pi_k\, \mu_k(\vx),
+\end{equation}
+--- the posterior-weighted blend, \emph{not} the best expert's output.
+Selecting $\mu_{\argmax_k \pi_k}$ discards the model's own uncertainty
+about the regime and reintroduces a discontinuity (as the gate wavers
+across $0.5$, predictions jump), for zero statistical benefit: under
+squared error the conditional mean is optimal, and under rank-IC grading
+any monotone transform of it scores identically.
+
+The predictive \emph{variance} decomposes by the law of total variance
+(Exercise~\ref{ex:5-variance}):
+\begin{equation}\label{eq:totalvar}
+  \Var(y \mid \vx, \vh)
+  = \underbrace{\sum_k \pi_k \sigma_k^2}_{\text{within-regime noise}}
+  \;+\;
+  \underbrace{\sum_k \pi_k\, \mu_k^2 - \hat y^{\,2}}_{
+    \text{between-regime disagreement}} .
+\end{equation}
+The second term is zero exactly when the experts agree; it is the model's
+self-reported ``the regimes disagree about this name'' signal ---
+information a single-Gaussian model structurally cannot emit, and one of
+the concrete payoffs of carrying a full conditional density rather than a
+point estimate (Section~\ref{sec:whatisresult}'s argument, now with a
+formula).
+
+\section{The interface: log-prior versus training weights}
+\label{sec:interface}
+
+One design decision in the package's loss layer belongs to the theory and
+must be stated now. The fused objective \eqref{eq:fused} consumes
+\emph{some} log-weight vector alongside the expert log-likelihoods. For
+the soft gate the choice is unambiguous: the log-prior
+$\operatorname{log\_softmax}(\vz)$, both for training and for held-out
+evaluation. Chapter~\ref{ch:routing}'s hard-routing variant will need the
+two roles to \emph{differ}: the quantity that makes its objective
+trainable (a hard-EM surrogate) is not the quantity that honestly states
+its predictive distribution (the selected expert's density). The
+package's \code{PriorOutput} therefore carries \code{log\_prior} always,
+and optionally \code{log\_train\_weights}; the trainer uses the training
+weights when present \emph{for the loss only}, and every held-out NLL in
+every table of Part~V is computed under \code{log\_prior} --- the model's
+honest predictive stance. This is a small interface with a large moral:
+\emph{when a training surrogate and a predictive distribution diverge,
+name both, and never grade on the surrogate.}
+
+\begin{codewalk}[nec\_moe/model.py + likelihood.py --- assembly]
+The forward pass assembles \eqref{eq:moedensity} in five steps, each one
+module, each module owning exactly one formula of this chapter:
+\begin{lstlisting}
+h_t = self.encoder(x_seq)                  # (B, n)   market state
+z   = self.gate(h_t)                       # (B, K)   logits -- no softmax!
+out = self.prior(z, ctx)                   # log pi   (pluggable, Ch. 6-7)
+mu, log_sigma = self.experts(x_exp)        # (B, K), (K,)
+log_lik = expert_log_likelihood(mu, log_sigma, y)     # (B, K)
+nll_out = mixture_nll(out.log_prior, log_lik)         # fused (Ch. 4)
+\end{lstlisting}
+The gate module ends at logits --- the softmax lives inside the fused
+loss (defect-3 fix, enforced by the architecture rather than by
+discipline). \code{expert\_log\_likelihood} is a pure, parameter-free
+function computing the Gaussian log-density directly in log domain; its
+purity is what makes ``same likelihood, different prior'' literally true
+when Chapter~\ref{ch:hmm} swaps the prior box. And the un-fused
+alternative --- \code{prob.log()} after a softmax, densities
+exponentiated then logged --- is not merely discouraged: no code path in
+the package can express it.
+\end{codewalk}
+
+\exercisehead
+
+\begin{exercise}\label{ex:5-verify}
+(Hands-on.) Build a tiny mixture forward pass in raw torch (no package):
+random $\vz \in \R^{1\times 3}$ with \code{requires\_grad}, fixed
+$\mu \in \R^{1 \times 3}$, $\sigma = 1$, scalar $y$. Compute the fused
+NLL and \code{backward()}. Verify numerically that \code{z.grad} equals
+$\pi - r$, that \code{mu.grad} equals \eqref{eq:mugrad}, and (promoting
+$\log\sigma$ to a parameter) that its gradient matches
+\eqref{eq:siggrad}. Then break it: recompute with
+\code{torch.where(argmax(z)...)} routing and confirm \code{z.grad} is
+zero --- you have reproduced both halves of the package's defect-1
+regression test.
+\end{exercise}
+
+\begin{exercise}\label{ex:5-sumzero}
+Show from \eqref{eq:pir} that $\sum_k \partial \NLL/\partial z_k = 0$
+for every sample. Connect this to the softmax's invariance under adding a
+constant to all logits, and explain why the gate's logits therefore never
+receive a signal about their overall level --- only about their
+differences. What (harmless) consequence does this have for the learned
+logits over a long training run, and how does the gate head's
+\code{LayerNorm} + weight decay (Chapter~9) keep it tidy?
+\end{exercise}
+
+\begin{exercise}\label{ex:5-variance}
+Derive \eqref{eq:totalvar} from the law of total variance conditioning
+on the component index. Then compute both terms for a two-expert model
+with $\pi = (0.5, 0.5)$, $\mu = (+1, -1)$, $\sigma = (1, 1)$ and for
+$\pi = (0.95, 0.05)$, same $\mu, \sigma$. Which situation would a risk
+manager rather know about, and which summary --- $\hat y$ alone or
+\eqref{eq:totalvar}'s split --- reveals it?
+\end{exercise}
+
+\begin{exercise}\label{ex:5-calibration}
+Define the gate's \emph{calibration residual} as
+$\E\bigl[r \mid \vh\bigr] - \pi(\vh)$. Show that the expected gate-logit
+gradient at fixed $\vh$ is exactly its negative, so a stationary gate
+satisfies $\pi(\vh) = \E[r \mid \vh]$: the prior equals the average
+posterior, conditionally. Explain (two sentences) why this is precisely
+the property that Chapter~18's reliability diagram tests on held-out
+data, and why finding it \emph{violated} out-of-sample is evidence of
+regime drift rather than a training bug.
+\end{exercise}
+
+\begin{exercise}\label{ex:5-decisionA}
+(Decision A's gradient anatomy.) Suppose the experts read the
+concatenation $[\vx; \vh_t]$ (\code{input\_mode="snapshot\_plus\_hidden"})
+instead of $\vx$ alone. Write the gradient of the per-sample NLL with
+respect to the encoder state $\vh_t$ as a sum of a gate path and an
+expert path, and show the expert path is
+$\sum_k r_k \frac{\mu_k - y}{\sigma_k^2}\,
+\partial \mu_k / \partial \vh_t$. In the prototype, defect 1 killed the
+gate path and defect 6 severed the expert path --- conclude what total
+gradient its four-million-parameter encoder received from the prediction
+task, and why the corrected default (snapshot-only experts) makes the
+gate path the encoder's \emph{sole}, and therefore interpretable,
+training signal.
+\end{exercise}
+
+\begin{exercise}\label{ex:5-jjnh}
+Reproduce the 1991 cooperation/competition contrast in numpy: two linear
+experts, a fixed uniform gate, data from the sign-flip world
+(Proposition~\ref{prop:signflip}). Train once on the committee loss
+$\bigl(y - \tfrac12(\mu_1 + \mu_2)\bigr)^2$ and once on the mixture NLL,
+from the same asymmetric initialization $(b_1, b_2) = (0.8, -0.6)$.
+Report the terminal slopes. One objective drives both experts to the
+pooled solution; the other preserves specialization. Explain each
+outcome from the two losses' gradients.
+\end{exercise}

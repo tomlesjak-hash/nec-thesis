@@ -8,7 +8,7 @@ Hamilton corner (§7); this module supplies the single-model side:
 - :class:`RidgeBaseline` — closed-form ridge on the snapshot features
   (Module 4 conventions: intercept not penalized). The "many weak correlated
   signals" default.
-- :class:`MLPBaseline` — one :class:`~nec_moe.experts.ExpertMLP` (the *same*
+- :class:`MLPBaseline` — one :class:`~nec_moe.networks.MLPBlock` (the *same*
   network class as a single NEC expert, deliberately: capacity-matched to one
   expert) plus a scalar learnable noise sigma, trained on the same Gaussian
   NLL family as the NEC — so held-out NLLs are directly comparable.
@@ -33,8 +33,8 @@ import torch
 from torch import Tensor
 
 from .data import Panel
-from .experts import ExpertMLP
 from .likelihood import expert_log_likelihood
+from .networks import MLPBlock
 
 __all__ = ["BaselineModel", "RidgeBaseline", "MLPBaseline"]
 
@@ -110,8 +110,9 @@ class MLPBaseline(BaselineModel):
         self,
         input_dim: int,
         *,
-        hidden_dim: int = 64,
+        hidden_dims: tuple[int, ...] = (64, 32),
         dropout: float = 0.05,
+        activation: str = "relu",
         lr: float = 1e-3,
         steps: int = 400,
         batch_size: int = 256,
@@ -119,19 +120,23 @@ class MLPBaseline(BaselineModel):
         seed: int = 0,
     ) -> None:
         self.input_dim = input_dim
-        self.hidden_dim = hidden_dim
+        self.hidden_dims = tuple(hidden_dims)
         self.dropout = dropout
+        self.activation = activation
         self.lr = lr
         self.steps = steps
         self.batch_size = batch_size
         self.sigma_init = sigma_init
         self.seed = seed
-        self._net: ExpertMLP | None = None
+        self._net: MLPBlock | None = None
         self._log_sigma: Tensor | None = None
 
     def fit(self, train: Panel) -> None:
         torch.manual_seed(self.seed)
-        net = ExpertMLP(self.input_dim, self.hidden_dim, self.dropout)
+        net = MLPBlock(
+            self.input_dim, self.hidden_dims,
+            dropout=self.dropout, activation=self.activation,
+        )
         log_sigma = torch.tensor([math.log(self.sigma_init)], requires_grad=True)
         opt = torch.optim.AdamW(
             [*net.parameters(), log_sigma], lr=self.lr, weight_decay=1e-4

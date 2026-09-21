@@ -41,6 +41,7 @@ import pandas as pd
 import torch
 from torch import Tensor
 
+from .base import BaseCache
 from .baselines import BaselineModel
 from .config import NECConfig
 from .data import Panel
@@ -181,6 +182,31 @@ def _metrics_from_result(res: WalkForwardResult) -> dict[str, float]:
     )
     if live is not None:
         m["live_param_count"] = float(live)
+    # Residual design (brief 02 §5): the base's own out-of-sample score beside
+    # every result, the improvement over it as the primary quantity, and the
+    # correction magnitude actually used.
+    scored = [f for f in res.folds if f.base_ic is not None]
+    if scored:
+        m["base_mean_ic"] = statistics.fmean(f.base_ic.mean_ic for f in scored)  # type: ignore[union-attr]
+        m["base_icir"] = statistics.fmean(f.base_ic.icir for f in scored)  # type: ignore[union-attr]
+        m["ic_improvement"] = statistics.fmean(
+            f.ic_improvement for f in scored if f.ic_improvement is not None
+        )
+        with_nll = [f for f in scored if f.base_nll is not None]
+        if with_nll:
+            m["base_nll"] = statistics.fmean(f.base_nll for f in with_nll)  # type: ignore[misc]
+            m["nll_improvement"] = statistics.fmean(
+                f.nll_improvement for f in with_nll if f.nll_improvement is not None
+            )
+        with_pf = [f for f in scored if f.base_portfolio is not None]
+        if with_pf:
+            m["base_net_ir"] = statistics.fmean(f.base_portfolio.ir_net for f in with_pf)  # type: ignore[union-attr]
+    per_corr: dict[str, list[float]] = {}
+    for fold in res.folds:
+        for key, value in fold.correction:
+            per_corr.setdefault(key, []).append(value)
+    for key, values in per_corr.items():
+        m[key] = statistics.fmean(values)
     # Chain persistence, averaged over folds in canonical state order (each
     # fold is an independent refit, so this is a mean of per-window estimates).
     per_key: dict[str, list[float]] = {}
@@ -208,6 +234,7 @@ def run_sweep(
     cost_rate: float = 0.0,
     verbose: bool = True,
     resume_dir: str | Path | None = None,
+    base_cache: BaseCache | None = None,
 ) -> SweepReport:
     """Run every arm over every seed through the shared harness; log; summarize.
 
@@ -231,6 +258,11 @@ def run_sweep(
     if len(set(names)) != len(names):
         raise ValueError(f"duplicate arm names: {sorted(names)}")
 
+    # One cache for the whole sweep: the frozen base depends on (base config,
+    # window, seed) and *not* on the gate, so every arm of a window and seed
+    # shares one fitted base — the amortisation the compute budget assumes,
+    # and the stricter comparison (identical floor, not merely a similar one).
+    base_cache = base_cache if base_cache is not None else BaseCache()
     resume = Path(resume_dir) if resume_dir is not None else None
     completed: dict[tuple[str, int], dict[str, float]] = {}
     if resume is not None:
@@ -269,6 +301,8 @@ def run_sweep(
                         if resume is not None
                         else None
                     ),
+                    base_cache=base_cache,
+                    seed=seed,
                 )
             else:
                 assert build_baseline is not None

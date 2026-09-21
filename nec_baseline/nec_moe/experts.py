@@ -34,6 +34,7 @@ import torch.nn as nn
 from torch import Tensor
 
 from .config import ExpertConfig
+from .networks import MLPBlock
 from .utils import assert_shape
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -41,7 +42,6 @@ if TYPE_CHECKING:  # pragma: no cover
 
 __all__ = [
     "Emission",
-    "ExpertMLP",
     "ExpertBank",
     "ClassicalGaussianEmission",
     "EMISSION_REGISTRY",
@@ -80,43 +80,15 @@ class Emission(nn.Module, ABC):
         """
 
 
-def _seeded_linear_init(linear: nn.Linear, g: torch.Generator) -> None:
-    """Default nn.Linear init (uniform ±1/sqrt(fan_in)) from a private generator."""
-    fan_in = linear.weight.shape[1]
-    bound = 1.0 / math.sqrt(fan_in)
-    with torch.no_grad():
-        linear.weight.uniform_(-bound, bound, generator=g)
-        if linear.bias is not None:
-            linear.bias.uniform_(-bound, bound, generator=g)
-
-
-class ExpertMLP(nn.Module):
-    """One expert: ``d -> h -> h//2 -> 1`` ReLU funnel with dropout."""
-
-    def __init__(self, input_dim: int, hidden_dim: int, dropout: float) -> None:
-        super().__init__()
-        self.input_dim = input_dim
-        self.l1 = nn.Linear(input_dim, hidden_dim)
-        self.l2 = nn.Linear(hidden_dim, hidden_dim // 2)
-        self.l3 = nn.Linear(hidden_dim // 2, 1)
-        self.drop = nn.Dropout(dropout)
-        self.act = nn.ReLU()
-
-    def reset_parameters_seeded(self, seed: int) -> None:
-        """Per-expert seeded re-init: the symmetry-breaking device (§4.3)."""
-        g = torch.Generator().manual_seed(seed)
-        for lin in (self.l1, self.l2, self.l3):
-            _seeded_linear_init(lin, g)
-
-    def forward(self, x: Tensor) -> Tensor:
-        assert_shape(x, (None, self.input_dim), "expert input")
-        h = self.drop(self.act(self.l1(x)))
-        h = self.drop(self.act(self.l2(h)))
-        return self.l3(h).squeeze(-1)  # (B,)
-
-
 class ExpertBank(Emission):
-    """K diversified :class:`ExpertMLP`s + per-expert learnable ``log_sigma``."""
+    """K diversified :class:`MLPBlock` experts + per-expert learnable ``log_sigma``.
+
+    In ``correction_mode`` each expert's output is a *correction* to a frozen
+    base rather than a full forecast, and ``zero_init_head`` zeroes every
+    expert's output layer so the correction starts identically zero. The
+    symmetry-breaking seeded re-init still runs on the hidden layers, and the
+    head is re-zeroed afterwards — diversified interiors, zero outputs.
+    """
 
     def __init__(
         self,
@@ -128,12 +100,20 @@ class ExpertBank(Emission):
         super().__init__()
         self.n_experts = cfg.n_experts
         self.input_dim = input_dim
+        self.correction_mode = cfg.correction_mode
+        zero_head = cfg.correction_mode and cfg.zero_init_head
         experts = [
-            ExpertMLP(input_dim, cfg.hidden_dim, cfg.dropout)
+            MLPBlock(
+                input_dim,
+                cfg.hidden_dims,
+                dropout=cfg.dropout,
+                activation=cfg.activation,
+                zero_init_head=zero_head,
+            )
             for _ in range(cfg.n_experts)
         ]
         for k, expert in enumerate(experts):
-            expert.reset_parameters_seeded(seed + 7919 * (k + 1))
+            expert.reset_parameters_seeded(seed + 7919 * (k + 1), zero_head=zero_head)
         self.experts = nn.ModuleList(experts)
         self.log_sigma = nn.Parameter(
             torch.full((cfg.n_experts,), math.log(sigma_init))

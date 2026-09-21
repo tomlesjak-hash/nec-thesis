@@ -45,6 +45,8 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from nec_moe import (  # noqa: E402
+    BaseCache,
+    BaseConfig,
     DataConfig,
     EncoderConfig,
     ExpertConfig,
@@ -60,6 +62,7 @@ from nec_moe import (  # noqa: E402
     TrainConfig,
     Trainer,
     TrialRegistry,
+    base_and_correction,
     baseline_arm,
     build_context,
     build_stage_b_panel,
@@ -69,6 +72,7 @@ from nec_moe import (  # noqa: E402
     fit_temperature,
     gate_regime_alignment,
     gate_reliability,
+    ic_summary,
     load_french_factors,
     load_sp500_universe,
     load_vix,
@@ -80,8 +84,10 @@ from nec_moe import (  # noqa: E402
     plot_sweep_report,
     plot_training_dashboard,
     plot_transition_matrix,
+    rank_ic_by_date,
     run_sweep,
     universe_coverage_report,
+    walk_forward_folds,
 )
 
 # =========================================================================== #
@@ -118,11 +124,12 @@ class Experiment:
     # ---------------- model ----------------
     prior: str = "soft"             # soft|uniform|hard|topk|gumbel|hmm
     emission: str = "mlp"           # "mlp" (neural experts) | "classical" (Hamilton-style)
-    n_experts: int = 2
+    n_experts: int = 2              # Ye & Borde ablate K in {2, 4, 6}
     encoder_hidden: int = 32
     encoder_layers: int = 1
-    expert_hidden: int = 64
+    expert_hidden_dims: tuple[int, ...] = (64, 32)  # depth AND width; see pyramid_dims
     expert_dropout: float = 0.05
+    expert_activation: str = "relu"  # relu|gelu|tanh|silu|elu (registry key)
     input_mode: str = "snapshot"    # "snapshot" | "snapshot_plus_hidden" (Decision A)
     top_k: int = 2                  # topk prior only
     tau_init: float = 1.0           # gumbel prior only …
@@ -139,6 +146,30 @@ class Experiment:
     warmstart: bool = True          # expert warm-start (keep on; handbook I.11)
     warmstart_channel: int | None = None  # seq channel of the vol proxy; None = auto
     chunk_len: int = 50             # HMM truncated-BPTT chunk (dates per step)
+
+    # ---------------- residual mode: frozen base + corrections (brief 02) ----
+    # y_hat = f0(x) + sum_k pi_k r_k(x). All defaults off, so existing
+    # behaviour is unchanged until you turn it on. None of these values is
+    # chosen yet — they are what the experiment programme sweeps.
+    base_enabled: bool = False        # fit f0 per fold and freeze it
+    correction_mode: bool = False     # experts emit corrections, not forecasts
+    zero_init_head: bool = True       # start exactly at the base (Ye & Borde)
+    freeze_gate: bool = False         # freeze encoder+gate+prior (Q19)
+    base_hidden_dims: tuple[int, ...] = (64, 32)
+    base_dropout: float = 0.0
+    base_activation: str = "relu"
+    base_lr: float = 1e-3
+    base_weight_decay: float = 1e-4
+    base_steps: int = 1000
+    base_batch_size: int = 128
+    base_early_stopping_patience: int | None = None
+    base_val_fraction: float = 0.2    # tail of the TRAINING block only
+    base_seed_offset: int = 0
+    # alpha of the correction-magnitude penalty. Ye & Borde do not report
+    # theirs: select on the training block, log every candidate as a trial,
+    # and publish the sensitivity curve (brief 02 §3).
+    aux_correction_penalty: bool = False
+    correction_penalty_weight: float = 0.0
 
     # ---------------- checkpointing / resume ----------------
     checkpoint_every: int = 0       # save training state every N steps (0 = off);
@@ -227,19 +258,65 @@ def _nec_config(exp: Experiment, panel: Panel, sigma_init: float) -> NECConfig:
     return NECConfig(
         data=data_cfg,
         encoder=EncoderConfig(hidden_dim=exp.encoder_hidden, num_layers=exp.encoder_layers),
-        experts=ExpertConfig(n_experts=exp.n_experts, hidden_dim=exp.expert_hidden,
+        experts=ExpertConfig(n_experts=exp.n_experts,
+                             hidden_dims=tuple(exp.expert_hidden_dims),
                              dropout=exp.expert_dropout,
+                             activation=exp.expert_activation,
                              input_mode=exp.input_mode,  # type: ignore[arg-type]
-                             kind=exp.emission),  # type: ignore[arg-type]
+                             kind=exp.emission,  # type: ignore[arg-type]
+                             correction_mode=exp.correction_mode,
+                             zero_init_head=exp.zero_init_head),
         prior=PriorConfig(kind=exp.prior, top_k=exp.top_k, tau_init=exp.tau_init,
                           tau_anneal_steps=exp.tau_anneal_steps,
                           transition_diag_bias=exp.transition_diag_bias),
+        base=BaseConfig(enabled=exp.base_enabled,
+                        hidden_dims=tuple(exp.base_hidden_dims),
+                        dropout=exp.base_dropout,
+                        activation=exp.base_activation,
+                        lr=exp.base_lr,
+                        weight_decay=exp.base_weight_decay,
+                        steps=exp.base_steps,
+                        batch_size=exp.base_batch_size,
+                        early_stopping_patience=exp.base_early_stopping_patience,
+                        val_fraction=exp.base_val_fraction,
+                        seed_offset=exp.base_seed_offset),
         train=TrainConfig(lr=exp.lr, batch_size=exp.batch_size, steps=exp.steps,
                           sigma_init=sigma_init,
                           sigma_freeze_steps=exp.sigma_freeze_steps,
                           sequence_ordered=(exp.prior == "hmm"),
-                          checkpoint_every=exp.checkpoint_every),
+                          checkpoint_every=exp.checkpoint_every,
+                          freeze_gate=exp.freeze_gate,
+                          aux_correction_penalty=exp.aux_correction_penalty,
+                          correction_penalty_weight=exp.correction_penalty_weight),
     )
+
+
+def _auto_sigma(exp: Experiment, cfg_panel: Panel, train: Panel,
+                cache: BaseCache | None = None,
+                window: object = "sigma") -> float:
+    """``sigma_init``: the scale of what the experts actually model.
+
+    Without a base the experts model ``y``, so its std is the right scale.
+    In correction mode they model the **residual** ``y - f0(x)``, which is
+    smaller — often much smaller, since the base is expected to capture most
+    of a signal that is only ~0.4% monthly R-squared to begin with. Starting
+    sigma at std(y) there would tell the model the noise is far larger than
+    it is and flatten the responsibilities at step 0. So the default is the
+    residual's std, measured on the training block by fitting the base once
+    (through ``cache``, so the fold that needs the same base reuses it rather
+    than refitting). Documented default, not a hidden adjustment; sigma is
+    learnable from there.
+    """
+    if exp.sigma_init is not None:
+        return exp.sigma_init
+    if not exp.base_enabled:
+        return float(train.y.std())
+    probe = _nec_config(exp, cfg_panel, sigma_init=1.0)  # sigma irrelevant here
+    cache = cache if cache is not None else BaseCache()
+    fit = cache.get_or_fit(train, probe.base, window=window, seed=exp.seeds[0])
+    with torch.no_grad():
+        resid = train.y - fit.model(train.x_snap)
+    return max(float(resid.std()), 1e-6)
 
 
 def _proxy_channel(exp: Experiment) -> int:
@@ -256,22 +333,38 @@ def _warm_key(exp: Experiment):
 def _quick(exp: Experiment, panel: Panel, purge: int, out: Path,
            registry: TrialRegistry) -> dict:
     train, test = panel.split_by_date(exp.quick_train_frac)
-    sigma = exp.sigma_init or float(train.y.std())
+    cache = BaseCache()
+    window = ("quick", int(train.date.min()), int(train.date.max()))
+    sigma = _auto_sigma(exp, panel, train, cache, window)
     cfg = _nec_config(exp, panel, sigma)
     ckpt = (out / "checkpoints" / "trainer.pt"
             if (exp.checkpoint_every or exp.resume) else None)
-    if exp.resume and ckpt is not None and ckpt.exists():
-        trainer = Trainer.load(ckpt)
+    resumed = exp.resume and ckpt is not None and ckpt.exists()
+    if resumed:
+        trainer = Trainer.load(ckpt)  # type: ignore[arg-type]
         remaining = max(exp.steps - trainer.step_count, 0)
         print(f"[resume] {ckpt} at step {trainer.step_count:,} — "
               f"{remaining:,} steps remaining")
     else:
         torch.manual_seed(exp.seeds[0])
         trainer = Trainer(NECModel(cfg))
-        key = _warm_key(exp)
-        if key is not None:
-            trainer.warmstart_experts(train.full_batch(), sort_key=key(train))
         remaining = exp.steps
+    # gate frozen at construction -> base fitted on the training block and
+    # frozen -> only then the experts train (brief 02 §4 ordering). On resume
+    # the base weights come back with the checkpoint, and the warm-start must
+    # NOT rerun: it already happened before step 0.
+    if exp.base_enabled and not resumed:
+        base_fit = cache.get_or_fit(train, cfg.base, window=window, seed=exp.seeds[0])
+        trainer.model.attach_base(base_fit.model)
+        print(f"[base] frozen f0: val MSE {base_fit.val_loss:.5f} after "
+              f"{base_fit.steps_run} steps"
+              f"{' (early stop)' if base_fit.stopped_early else ''}; "
+              f"sigma_init={sigma:.4f}")
+    key = _warm_key(exp)
+    if key is not None and not resumed and not (
+        exp.correction_mode and exp.zero_init_head
+    ):
+        trainer.warmstart_experts(train.full_batch(), sort_key=key(train))
 
     if exp.prior == "hmm":
         trainer.fit_sequence(train.time_sequence(), steps=remaining,
@@ -326,6 +419,25 @@ def _quick(exp: Experiment, panel: Panel, purge: int, out: Path,
     # every trial carries the parameter-count confound and, where the prior
     # has a transition matrix, how sticky the fitted chain actually is
     trial: dict[str, float] = {"nll": nll}
+    # §5: the base's own out-of-sample score beside every result, the
+    # improvement over it, and the correction magnitude actually applied
+    if trainer.model.base is not None:
+        b_pred, b_nll, corr = base_and_correction(trainer, test)
+        if b_pred is not None and b_nll is not None:
+            trial["base_nll"] = b_nll
+            trial["nll_improvement"] = b_nll - nll
+            try:
+                _, b_ics = rank_ic_by_date(b_pred, test.y, test.date)
+                b_ic = ic_summary(b_ics).mean_ic
+                trial["base_mean_ic"] = b_ic
+                _, m_ics = rank_ic_by_date(pred, test.y, test.date)
+                trial["ic_improvement"] = ic_summary(m_ics).mean_ic - b_ic
+            except ValueError as e:  # constant cross-section: no ranking
+                print(f"[base] IC comparison skipped: {e}")
+        trial |= dict(corr)
+        print(f"[base] held-out NLL {trial.get('base_nll', float('nan')):.4f} "
+              f"vs mixture {nll:.4f}; correction |.| mean "
+              f"{trial.get('correction_mean_abs', float('nan')):.4f}")
     if trainer.live_param_count is not None:
         trial["live_param_count"] = float(trainer.live_param_count)
     transition = getattr(trainer.model.prior, "transition_matrix", None)
@@ -343,15 +455,28 @@ def _quick(exp: Experiment, panel: Panel, purge: int, out: Path,
 
 def _evaluate(exp: Experiment, panel: Panel, purge: int, out: Path,
               registry: TrialRegistry) -> dict:
-    sigma = exp.sigma_init or float(panel.y.std())
+    # One cache for the whole sweep, seeded with the sigma probe: the base of
+    # the earliest training window is fitted once here and reused by fold 0
+    # of every arm rather than refitted.
+    cache = BaseCache()
+    first = walk_forward_folds(
+        panel.date, n_folds=exp.n_folds,
+        test_dates_per_fold=exp.test_dates_per_fold, purge_dates=purge,
+    )[0]
+    first_train = panel.subset_dates(first.train_dates)
+    window = (int(first.train_dates.min()), int(first.train_dates.max()))
+    sigma = _auto_sigma(exp, panel, first_train, cache, window)
     cfg = _nec_config(exp, panel, sigma)
-    arms = [nec_arm(exp.prior, cfg, warmstart_key=_warm_key(exp))]
+    warm = _warm_key(exp)
+    if exp.correction_mode and exp.zero_init_head:
+        warm = None  # would make the heads nonzero; see Trainer.warmstart_experts
+    arms = [nec_arm(exp.prior, cfg, warmstart_key=warm)]
     d_snap = panel.x_snap.shape[1]
     if exp.include_ridge:
         arms.append(baseline_arm("ridge", lambda seed: RidgeBaseline(l2=1.0)))
     if exp.include_mlp:
         arms.append(baseline_arm("mlp", lambda seed: MLPBaseline(
-            input_dim=d_snap, hidden_dim=exp.expert_hidden,
+            input_dim=d_snap, hidden_dims=tuple(exp.expert_hidden_dims),
             steps=exp.steps, seed=seed)))
 
     resume_dir = (out / "checkpoints"
@@ -360,7 +485,8 @@ def _evaluate(exp: Experiment, panel: Panel, purge: int, out: Path,
                        steps=exp.steps, n_folds=exp.n_folds,
                        test_dates_per_fold=exp.test_dates_per_fold, purge_dates=purge,
                        backtest_quantiles=exp.backtest_quantiles,
-                       cost_rate=exp.cost_rate, resume_dir=resume_dir)
+                       cost_rate=exp.cost_rate, resume_dir=resume_dir,
+                       base_cache=cache)
     frame = report.to_frame().round(4)
     print("\n[evaluate] mean ± seed-std per arm:\n", frame.to_string())
     frame.to_csv(out / "report.csv")

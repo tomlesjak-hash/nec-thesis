@@ -93,7 +93,7 @@ def test_nec_arm_seeding_is_real_and_deterministic():
     a0 = arm.build_trainer(0).model
     a0_again = arm.build_trainer(0).model
     a1 = arm.build_trainer(1).model
-    w = lambda m: m.experts.experts[0].l1.weight  # noqa: E731
+    w = lambda m: m.experts.experts[0].head.weight  # noqa: E731
     assert torch.equal(w(a0), w(a0_again))  # same seed -> identical init
     assert not torch.equal(w(a0), w(a1))  # different seed -> different init
     assert a0.cfg.train.seed == 0 and a1.cfg.train.seed == 1  # planted in config

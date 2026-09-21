@@ -238,7 +238,7 @@ def test_run_experiment_quick_checkpoint_resume(tmp_path: Path):
 
     exp = rx.Experiment(
         tag="ckq", mode="quick", data="synthetic", out_dir=str(tmp_path),
-        synth_dates=120, synth_entities=8, encoder_hidden=16, expert_hidden=16,
+        synth_dates=120, synth_entities=8, encoder_hidden=16, expert_hidden_dims=(16, 8),
         expert_dropout=0.0, steps=40, lr=3e-3, sigma_freeze_steps=20,
         checkpoint_every=10, figures=False, calibration=False,
     )

@@ -48,6 +48,7 @@ __all__ = [
     "LoadBalanceBuffer",
     "load_balance_aux",
     "expert_decorrelation_aux",
+    "correction_penalty_aux",
 ]
 
 
@@ -142,6 +143,31 @@ def load_balance_aux(gate_probs: Tensor, fractions: Tensor) -> Tensor:
     k = gate_probs.shape[-1]
     p_bar = gate_probs.mean(dim=0)  # (K,)
     return k * (fractions.detach() * p_bar).sum()
+
+
+def correction_penalty_aux(gate_probs: Tensor, corrections: Tensor) -> Tensor:
+    """``mean_b ( sum_k pi_bk r_bk )^2`` — shrinkage toward the frozen base.
+
+    The correction-magnitude penalty of the residual design (Ye & Borde,
+    arXiv:2608.12251). It penalises the magnitude of the **combined**
+    correction, not each expert separately: experts are free to disagree
+    sharply as long as the routed result stays near the base, which is the
+    behaviour wanted from a regime-conditional correction and is *not* what a
+    per-expert penalty ``sum_k pi_k r_k^2`` would produce.
+
+    ``gate_probs`` ``(B, K)`` and ``corrections`` ``(B, K)``; returns a scalar.
+    Weighted by ``TrainConfig.correction_penalty_weight``, whose value is
+    unknown — Ye & Borde do not report theirs — and is therefore selected on
+    the training block, logged as a trial, and reported as a sensitivity
+    curve. A result that exists only at one value of an unreported knob is
+    not a result.
+    """
+    if gate_probs.shape != corrections.shape:
+        raise ValueError(
+            f"gate_probs {tuple(gate_probs.shape)} and corrections "
+            f"{tuple(corrections.shape)} must match"
+        )
+    return (gate_probs * corrections).sum(dim=-1).pow(2).mean()
 
 
 def expert_decorrelation_aux(mu: Tensor, eps: float = 1e-8) -> Tensor:

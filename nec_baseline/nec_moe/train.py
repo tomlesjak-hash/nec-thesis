@@ -62,6 +62,7 @@ from .likelihood import expert_log_likelihood
 from .losses import (
     LoadBalanceBuffer,
     MixtureNLLOutput,
+    correction_penalty_aux,
     expert_decorrelation_aux,
     load_balance_aux,
     mixture_nll,
@@ -169,6 +170,10 @@ class Trainer:
                 "(they are Variation-2 ablation levers); disable them for the "
                 "HMM prior"
             )
+        if t.freeze_gate:
+            self.freeze_gate()
+        # after any freezing: _param_groups filters on requires_grad, so a
+        # frozen regime path never reaches the optimizer in the first place
         self.opt = torch.optim.AdamW(self._param_groups(), lr=t.lr)
         self.lb_buffer = LoadBalanceBuffer(
             self.cfg.experts.n_experts, t.load_balance_buffer_batches
@@ -211,6 +216,46 @@ class Trainer:
             {"params": no_decay, "weight_decay": 0.0},
             {"params": default, "weight_decay": t.weight_decay},
         ]
+
+    def freeze_gate(self) -> None:
+        """Freeze the whole regime path: encoder, gate head, prior parameters.
+
+        Q19's design commitment. With the gate frozen every arm receives the
+        same regime assignment as an input it cannot influence, so the only
+        thing varying across arms is the regime process that produced it —
+        which is what makes the comparison attributable. The cost is accepted
+        deliberately: a jointly optimized gate does better on the fitted
+        objective (the DeepSeekMoE observation), but then a gain cannot be
+        credited to regime structure rather than to the freedom to move the
+        boundaries.
+
+        Called from ``__init__`` when ``TrainConfig.freeze_gate`` is set, i.e.
+        *before* the optimizer is constructed. Calling it afterwards would
+        leave the already-built parameter groups holding frozen tensors.
+        """
+        self.model.encoder.requires_grad_(False)
+        self.model.gate.requires_grad_(False)
+        self.model.prior.requires_grad_(False)
+        self._train_mode()
+
+    def _train_mode(self) -> None:
+        """``model.train()``, then put every frozen submodule back in ``eval()``.
+
+        ``nn.Module.train()`` recurses into children, so a plain
+        ``model.train()`` would switch the frozen base's dropout back on and
+        make its predictions a moving target with its weights pinned — a
+        silent failure, since nothing raises and the numbers merely become
+        wrong. Frozen means frozen in both senses: no gradient *and* no
+        train-mode stochasticity. (For a frozen Gumbel prior this is also
+        what makes the assignment deterministic, as a fixed gate must be.)
+        """
+        self.model.train()
+        if self.cfg.train.freeze_gate:
+            self.model.encoder.eval()
+            self.model.gate.eval()
+            self.model.prior.eval()
+        if self.model.base is not None:
+            self.model.base.eval()
 
     def _apply_sigma_schedule(self) -> None:
         frozen = self.step_count < self.cfg.train.sigma_freeze_steps
@@ -306,14 +351,33 @@ class Trainer:
             raise ValueError(
                 f"sort_key length {sort_key.shape[0]} != batch size {len(batch)}"
             )
-        self.model.train()
+        x = self.cfg.experts
+        if x.correction_mode and x.zero_init_head:
+            raise ValueError(
+                "warmstart_experts is incompatible with correction_mode + "
+                "zero_init_head: pre-training the experts as regressors makes "
+                "their heads nonzero, so the model would no longer start "
+                "exactly at the base. The frozen gate already breaks expert "
+                "symmetry (its per-date weights differ), so the warm-start's "
+                "job is done for it — the walk-forward harness skips it "
+                "automatically in this mode. Set zero_init_head=False to "
+                "warm-start against the residual instead (Ye & Borde's "
+                "random-init ablation)"
+            )
+        self._train_mode()
         with torch.no_grad():
             h_t = self.model.encoder(batch.x_seq)
             x_exp = self.model.expert_input(batch.x_snap, h_t)
+            # In correction mode the experts model y - f0(x), not y: warm-
+            # starting them on the raw target would teach them the base's job.
+            target = batch.y
+            if x.correction_mode:
+                assert self.model.base is not None
+                target = batch.y - self.model.base(batch.x_snap)
         order = torch.argsort(sort_key)
         slices = torch.chunk(order, self.cfg.experts.n_experts)
         self.model.experts.warmstart_slices(
-            x_exp, batch.y, slices, steps=steps, lr=lr
+            x_exp, target, slices, steps=steps, lr=lr
         )
 
     def _forward_nll(
@@ -390,7 +454,7 @@ class Trainer:
                 "train_step_sequence/fit_sequence with chronological batches"
             )
         t = self.cfg.train
-        self.model.train()
+        self._train_mode()
         self._apply_sigma_schedule()
         # step is threaded even on the memoryless path: annealed priors
         # (Gumbel temperature) schedule off it
@@ -407,11 +471,21 @@ class Trainer:
             )
         if t.aux_expert_decorrelation:
             loss = loss + t.aux_decorrelation_weight * expert_decorrelation_aux(out.mu)
+        loss = loss + self._correction_penalty(out)
         if out.prior.aux_loss is not None:
             loss = loss + out.prior.aux_loss
 
         self._optimize(loss)
         return self._metrics(loss, nll_out, out)
+
+    def _correction_penalty(self, out: NECOutput) -> Tensor:
+        """``alpha * mean_b (sum_k pi_k r_k)^2``, or exactly zero when off."""
+        t = self.cfg.train
+        if not t.aux_correction_penalty or out.corrections is None:
+            return out.mu.new_zeros(())
+        return t.correction_penalty_weight * correction_penalty_aux(
+            out.prior.log_prior.exp(), out.corrections
+        )
 
     def _next_fit_batch(self, data: Panel) -> Batch:
         """The next shuffled minibatch of the seeded epoch stream.
@@ -477,19 +551,23 @@ class Trainer:
         state for the caller to detach and carry into the next chunk
         (truncated BPTT over the regime posterior).
         """
-        self.model.train()
+        self._train_mode()
         self._apply_sigma_schedule()
         state = init_state
         per_sample: list[Tensor] = []
+        penalties: list[Tensor] = []
         last: tuple[NECOutput, MixtureNLLOutput] | None = None
         for batch in chunk:
             ctx = PriorContext(prev_filtered=state, step=self.step_count)
             out, nll_out = self._forward_nll(batch, ctx)
             per_sample.append(nll_out.per_sample_nll)
+            penalties.append(self._correction_penalty(out))
             state = nll_out.log_filtered  # attached: the recursion's state
             last = (out, nll_out)
         assert last is not None and state is not None
-        loss = torch.cat(per_sample).mean()
+        # mean over the chunk's dates, matching the per-sample NLL's scale so
+        # alpha means the same thing on both execution paths
+        loss = torch.cat(per_sample).mean() + torch.stack(penalties).mean()
         self._optimize(loss)
         self.lb_buffer.update(last[1].responsibilities)
         return self._metrics(loss, last[1], last[0]), state.detach()

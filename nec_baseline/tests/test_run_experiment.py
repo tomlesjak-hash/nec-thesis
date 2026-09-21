@@ -20,7 +20,7 @@ def _tiny(**overrides) -> Experiment:
         synth_entities=8,
         synth_vol_levels=(0.5, 2.5),
         encoder_hidden=16,
-        expert_hidden=16,
+        expert_hidden_dims=(16, 8),
         expert_dropout=0.0,
         steps=120,
         lr=3e-3,

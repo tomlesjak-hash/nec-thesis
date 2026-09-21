@@ -11,6 +11,7 @@ import torch
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from nec_moe import (  # noqa: E402
+    BaseConfig,
     DataConfig,
     EncoderConfig,
     ExpertConfig,
@@ -30,6 +31,10 @@ def small_config(
     prior_kind: str = "soft",
     expert_kind: str = "mlp",
     expert_dropout: float = 0.0,
+    expert_hidden_dims: tuple[int, ...] = (16, 8),
+    correction_mode: bool = False,
+    zero_init_head: bool = True,
+    base: BaseConfig | None = None,
     sigma_init: float = 1.0,
     seed: int = 0,
     **train_overrides,
@@ -44,12 +49,15 @@ def small_config(
         encoder=EncoderConfig(hidden_dim=16, num_layers=1),
         experts=ExpertConfig(
             n_experts=n_experts,
-            hidden_dim=16,
+            hidden_dims=expert_hidden_dims,
             dropout=expert_dropout,
             input_mode=input_mode,
             kind=expert_kind,
+            correction_mode=correction_mode,
+            zero_init_head=zero_init_head,
         ),
         prior=PriorConfig(kind=prior_kind),
+        base=base if base is not None else BaseConfig(),
         train=TrainConfig(
             sigma_init=sigma_init,
             seed=seed,
@@ -57,6 +65,13 @@ def small_config(
             **train_overrides,
         ),
     )
+
+
+def small_base_config(**overrides) -> BaseConfig:
+    """A tiny, fast frozen-base config for residual-mode tests."""
+    kw = dict(enabled=True, hidden_dims=(16, 8), steps=60, batch_size=64, lr=1e-2)
+    kw.update(overrides)
+    return BaseConfig(**kw)  # type: ignore[arg-type]
 
 
 @pytest.fixture(autouse=True)

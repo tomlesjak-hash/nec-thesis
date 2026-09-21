@@ -13,6 +13,7 @@ from .alignment import (
     gate_utilization_by_date,
     regime_alignment,
 )
+from .base import BaseCache, BaseFit, BaseModel, base_cache_key, fit_base
 from .baselines import BaselineModel, MLPBaseline, RidgeBaseline
 from .calibration import (
     ReliabilityReport,
@@ -21,6 +22,7 @@ from .calibration import (
     gate_reliability,
 )
 from .config import (
+    BaseConfig,
     DataConfig,
     EncoderConfig,
     ExpertConfig,
@@ -28,6 +30,7 @@ from .config import (
     NECConfig,
     PriorConfig,
     TrainConfig,
+    pyramid_dims,
 )
 from .context_data import build_context, load_french_factors, load_vix
 from .data import (
@@ -45,6 +48,7 @@ from .evaluation import (
     PortfolioSummary,
     WalkForwardFold,
     WalkForwardResult,
+    base_and_correction,
     ic_summary,
     long_short_by_date,
     portfolio_summary,
@@ -73,6 +77,7 @@ from .likelihood import expert_log_likelihood
 from .losses import (
     LoadBalanceBuffer,
     MixtureNLLOutput,
+    correction_penalty_aux,
     expert_decorrelation_aux,
     load_balance_aux,
     mixture_nll,
@@ -89,6 +94,7 @@ from .multiple_testing import (
     probabilistic_sharpe_ratio,
     sharpe_ratio,
 )
+from .networks import ACTIVATION_REGISTRY, MLPBlock, build_activation
 from .plots import (
     plot_gate_utilization,
     plot_ic_series,
@@ -122,7 +128,7 @@ from .sweep import (
     nec_arm,
     run_sweep,
 )
-from .train import SequenceEval, Trainer
+from .train import DeadParameterWarning, GradientAudit, SequenceEval, Trainer
 from .tuning import TuneResult, tune, validation_tail
 from .universe import (
     PointInTimeUniverse,
@@ -138,8 +144,10 @@ __all__ = [
     "GateConfig",
     "ExpertConfig",
     "PriorConfig",
+    "BaseConfig",
     "TrainConfig",
     "NECConfig",
+    "pyramid_dims",
     "FeatureSchema",
     "Batch",
     "SyntheticSpec",
@@ -153,6 +161,7 @@ __all__ = [
     "LoadBalanceBuffer",
     "load_balance_aux",
     "expert_decorrelation_aux",
+    "correction_penalty_aux",
     "NECModel",
     "NECOutput",
     "RegimePrior",
@@ -169,6 +178,16 @@ __all__ = [
     "Router",
     "Trainer",
     "SequenceEval",
+    "GradientAudit",
+    "DeadParameterWarning",
+    "BaseModel",
+    "BaseFit",
+    "BaseCache",
+    "fit_base",
+    "base_cache_key",
+    "MLPBlock",
+    "ACTIVATION_REGISTRY",
+    "build_activation",
     "WalkForwardFold",
     "walk_forward_folds",
     "rank_ic_by_date",
@@ -181,6 +200,7 @@ __all__ = [
     "WalkForwardResult",
     "walk_forward_evaluate",
     "walk_forward_evaluate_baseline",
+    "base_and_correction",
     "BaselineModel",
     "RidgeBaseline",
     "MLPBaseline",

@@ -74,11 +74,11 @@ def test_all_experts_enter_loss(k: int):
     base = _nll_value(model, x_seq, x_snap, y)
     for j in range(k):
         with torch.no_grad():
-            model.experts.experts[j].l3.bias.add_(1.0)
+            model.experts.experts[j].head.bias.add_(1.0)
         perturbed = _nll_value(model, x_seq, x_snap, y)
         assert perturbed != pytest.approx(base, abs=1e-6), f"expert {j} inert"
         with torch.no_grad():
-            model.experts.experts[j].l3.bias.sub_(1.0)
+            model.experts.experts[j].head.bias.sub_(1.0)
 
 
 # --------------------------------------------------------------------- defect 3

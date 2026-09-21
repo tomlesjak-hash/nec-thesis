@@ -21,6 +21,7 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
+from .base import BaseModel
 from .config import NECConfig
 from .encoder import GRUEncoder
 from .experts import build_emission
@@ -37,14 +38,33 @@ class NECOutput:
 
     gate_logits: Tensor  # (B, K)
     prior: PriorOutput  # log prior (B, K) + aux/info
-    mu: Tensor  # (B, K) expert means
+    mu: Tensor  # (B, K) expert means (base + correction in correction mode)
     log_sigma: Tensor  # (K,) expert noise scales
     y_hat: Tensor  # (B,) mixture-mean point prediction
     h_t: Tensor  # (B, n) encoder state
+    # Residual design (brief 02); None outside correction mode.
+    base_pred: Tensor | None = None  # (B,) f0(x), frozen
+    corrections: Tensor | None = None  # (B, K) per-expert corrections r_k(x)
+
+    @property
+    def correction(self) -> Tensor | None:
+        """``sum_k pi_k r_k`` ``(B,)`` — the correction actually applied.
+
+        The reported quantity of brief 02 §5: a model whose corrections are
+        numerically negligible has answered the thesis question in the
+        negative whatever its R-squared does.
+        """
+        if self.corrections is None:
+            return None
+        return (self.prior.log_prior.exp() * self.corrections).sum(dim=-1)
 
 
 class NECModel(nn.Module):
     """Corrected NEC: sequence encoder → regime gate → mixture of experts."""
+
+    #: registered buffer: has a fitted base been attached? (declared for the
+    #: type checker, the way Emission declares log_sigma)
+    base_fitted: Tensor
 
     def __init__(self, cfg: NECConfig) -> None:
         super().__init__()
@@ -54,6 +74,44 @@ class NECModel(nn.Module):
         self.gate = GateHead(cfg.encoder.hidden_dim, cfg.experts.n_experts, cfg.gate)
         self.prior = build_prior(cfg)
         self.experts = build_emission(cfg)
+        # Frozen base f0 of the residual design. Its *architecture* is fully
+        # determined by the config, so the module is built here and its
+        # fitted *weights* arrive later via attach_base — which is what lets
+        # state_dict round-trip (a checkpoint restores the exact floor a
+        # result was measured against) instead of failing on unexpected keys
+        # when Trainer.load rebuilds the model. The flag is a buffer so it
+        # round-trips too: a restored model knows whether it was fitted.
+        self.base: BaseModel | None = None
+        if cfg.base.enabled:
+            self.base = BaseModel(cfg.data.d_snap, cfg.base).freeze()
+        self.register_buffer("base_fitted", torch.zeros((), dtype=torch.bool))
+
+    # ------------------------------------------------------------ the base
+    def attach_base(self, base: BaseModel) -> NECModel:
+        """Load an already-fitted, already-frozen base's weights.
+
+        Frozen means ``requires_grad=False``, which is also what keeps the
+        base out of the optimizer: parameter groups are built by filtering on
+        that flag, so a frozen base is structurally unable to train even if
+        someone rebuilds the optimizer.
+        """
+        if self.base is None:
+            raise ValueError(
+                "attach_base requires base.enabled=True — attaching a base to "
+                "a config that does not declare one would make the fitted "
+                "model differ from its own recorded config"
+            )
+        if any(p.requires_grad for p in base.parameters()):
+            raise ValueError(
+                "the base must be frozen before it is attached (call "
+                "BaseModel.freeze(); fit_base returns a frozen model): a live "
+                "base would co-adapt with the experts and destroy the "
+                "attribution the frozen design exists to provide"
+            )
+        self.base.load_state_dict(base.state_dict())
+        self.base.freeze()
+        self.base_fitted.fill_(True)
+        return self
 
     def expert_input(self, x_snap: Tensor, h_t: Tensor) -> Tensor:
         """Build the expert input per Decision A's ``input_mode``.
@@ -82,6 +140,25 @@ class NECModel(nn.Module):
         x_exp = self.expert_input(x_snap, h_t)
         mu, log_sigma = self.experts(x_exp)
 
+        # Residual design: expert k's predictive mean for y is f0(x) + r_k(x),
+        # so adding the base here — rather than anywhere downstream — leaves
+        # the likelihood, the fused mixture NLL and y_hat untouched. Since
+        # sum_k pi_k = 1 for every prior, y_hat = sum_k pi_k (f0 + r_k)
+        # collapses to exactly f0 + sum_k pi_k r_k, the design equation.
+        base_pred, corrections = None, None
+        if self.cfg.experts.correction_mode:
+            if self.base is None or not bool(self.base_fitted):
+                raise RuntimeError(
+                    "correction_mode is on but no fitted base is attached: "
+                    "the experts' corrections would be corrections to an "
+                    "untrained random network. The walk-forward harness fits "
+                    "and attaches one per fold; a manual caller must call "
+                    "attach_base() with the result of fit_base()"
+                )
+            corrections = mu
+            base_pred = self.base(x_snap)
+            mu = base_pred.unsqueeze(-1) + corrections
+
         pi = prior.log_prior.exp()  # -inf -> exactly 0 for sparse priors
         y_hat = (pi * mu).sum(dim=-1)
         return NECOutput(
@@ -91,4 +168,6 @@ class NECModel(nn.Module):
             log_sigma=log_sigma,
             y_hat=y_hat,
             h_t=h_t,
+            base_pred=base_pred,
+            corrections=corrections,
         )

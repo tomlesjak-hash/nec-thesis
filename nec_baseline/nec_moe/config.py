@@ -31,12 +31,35 @@ __all__ = [
     "GateConfig",
     "ExpertConfig",
     "PriorConfig",
+    "BaseConfig",
     "TrainConfig",
     "NECConfig",
+    "pyramid_dims",
 ]
 
 ExpertInputMode = Literal["snapshot", "snapshot_plus_hidden"]
 EmissionKind = Literal["mlp", "classical"]
+
+
+def pyramid_dims(first_width: int, depth: int) -> tuple[int, ...]:
+    """Geometric-pyramid hidden widths: ``(w, w/2, w/4, ...)``, ``depth`` long.
+
+    The rule Gu, Kelly and Xiu (2020) use for their benchmark networks on a
+    characteristic panel (NN1--NN5 are 32; 32,16; 32,16,8; ... after Masters
+    1993), and the convenience form of Q8's settled architecture choice.
+    Widths floor at 1, so a deep pyramid from a narrow start degrades
+    gracefully rather than producing zero-width layers.
+
+    This is a *helper for writing* ``hidden_dims``; the explicit tuple stays
+    the authoritative config field, so any non-pyramid shape remains
+    expressible (a depth sweep is a sweep over tuple lengths).
+    """
+    if first_width < 1 or depth < 1:
+        raise ValueError(
+            f"pyramid_dims needs first_width >= 1 and depth >= 1, got "
+            f"{first_width}/{depth}"
+        )
+    return tuple(max(first_width // (2**i), 1) for i in range(depth))
 
 
 @dataclass(frozen=True)
@@ -79,15 +102,37 @@ class ExpertConfig:
     ``"mlp"`` — the baseline's neural expert bank; ``"classical"`` — per-regime
     constant Gaussians (learned ``mu_k, sigma_k`` scalars, features ignored).
     ``classical`` × ``prior.kind="hmm"`` is the classical Hamilton /
-    Gaussian-HMM baseline from the same skeleton. ``hidden_dim``, ``dropout``
-    and ``input_mode`` are ignored by ``classical``.
+    Gaussian-HMM baseline from the same skeleton. ``hidden_dims``, ``dropout``,
+    ``activation``, ``input_mode`` and the correction fields are ignored by
+    ``classical``.
+
+    ``hidden_dims`` carries depth *and* width in one field (default
+    ``(64, 32)`` — the two-hidden-layer block of Ye & Borde, arXiv:2608.12251,
+    and the geometric pyramid of Gu--Kelly--Xiu); :func:`pyramid_dims` builds
+    one from a width and a depth. It replaces the former scalar ``hidden_dim``
+    outright rather than living alongside it, so there is exactly one place a
+    layer shape can be written.
+
+    Correction (residual) fields, brief 02:
+
+    - ``correction_mode``: experts emit **corrections to a frozen base**
+      rather than full forecasts, giving
+      ``y_hat = f0(x) + sum_k pi_k r_k(x)``. Requires ``base.enabled``.
+    - ``zero_init_head``: zero the experts' final layer so the correction is
+      identically zero at step 0 and the model starts *exactly* at the base
+      (Ye & Borde's zero-initialization; their ablation shows random init
+      costs IC and destabilizes training). Only meaningful with
+      ``correction_mode``.
     """
 
     n_experts: int = 2
-    hidden_dim: int = 64
+    hidden_dims: tuple[int, ...] = (64, 32)
     dropout: float = 0.05
+    activation: str = "relu"  # registry key, never a hardcoded nn module
     input_mode: ExpertInputMode = "snapshot"
     kind: EmissionKind = "mlp"
+    correction_mode: bool = False
+    zero_init_head: bool = True
 
 
 @dataclass(frozen=True)
@@ -128,6 +173,49 @@ class PriorConfig:
 
 
 @dataclass(frozen=True)
+class BaseConfig:
+    """The frozen base predictor ``f0`` of the residual design (brief 02).
+
+    ``f0`` is an MLP on the characteristic snapshot, fitted on **each fold's
+    training block** (with a validation tail cut from that block only) and then
+    frozen — ``requires_grad_(False)`` and ``eval()``, so dropout and any
+    normalization statistics stop moving. The experts then learn a
+    regime-conditional *correction* on top of it.
+
+    Why frozen rather than jointly optimized (Q7, Q19): the measured quantity
+    is what a regime-conditional correction adds to a **fixed** baseline. A
+    jointly trained base would co-adapt with the experts and any improvement
+    could no longer be attributed to regime structure rather than to the base
+    quietly reorganizing around the mixture. The deliberate contrast is
+    DeepSeekMoE (arXiv:2401.06066), whose always-on *shared expert* is
+    optimized jointly with the routed experts: that configuration is the one
+    most likely to produce the best fitted objective, and it is out of scope
+    here on purpose. Attribution is being bought with performance.
+
+    Every value below is a config field because none of them is chosen yet;
+    they are set by experiment and swept from ``run_experiment.py``.
+
+    ``hidden_dims`` carries depth and width together (see
+    :func:`pyramid_dims`). ``val_fraction`` is the *tail* of the training
+    block held out for early stopping — never out-of-sample data. The base
+    seed is the run seed plus ``seed_offset``, so a base can be re-seeded
+    independently of the experts.
+    """
+
+    enabled: bool = False  # residual mode off: existing behaviour preserved
+    hidden_dims: tuple[int, ...] = (64, 32)
+    dropout: float = 0.0
+    activation: str = "relu"  # registry key, never a hardcoded nn module
+    lr: float = 1e-3
+    weight_decay: float = 1e-4
+    steps: int = 1000
+    batch_size: int = 128
+    early_stopping_patience: int | None = None  # None = train the full budget
+    val_fraction: float = 0.2  # tail of the TRAINING block only
+    seed_offset: int = 0
+
+
+@dataclass(frozen=True)
 class TrainConfig:
     """Optimization, regularization, aux-loss gating (§4.3).
 
@@ -148,6 +236,18 @@ class TrainConfig:
     load_balance_buffer_batches: int = 32  # MUST span many dates (arXiv:2501.11873)
     aux_expert_decorrelation: bool = False
     aux_decorrelation_weight: float = 1e-2
+    # Correction-magnitude penalty (brief 02 §3): alpha * mean_b (sum_k pi_k
+    # r_k)^2, shrinking the mixture toward the base. Ye & Borde use this form
+    # but do **not** report their alpha, which is why the weight is a config
+    # field selected on the training block and logged as a trial, and why a
+    # sensitivity curve against it is part of the reporting contract.
+    aux_correction_penalty: bool = False
+    correction_penalty_weight: float = 0.0  # value unknown; set by experiment
+    # Freeze the regime path (encoder, gate head, prior parameters) so only
+    # the experts and their noise scales train (Q19). The gate is then an
+    # input the experts cannot influence, which is what makes "what did the
+    # regime structure add?" attributable.
+    freeze_gate: bool = False
     seed: int = 0
     sequence_ordered: bool = False  # True required for the HMM prior
     log_every: int = 50
@@ -166,6 +266,7 @@ class NECConfig:
     gate: GateConfig = field(default_factory=GateConfig)
     experts: ExpertConfig = field(default_factory=ExpertConfig)
     prior: PriorConfig = field(default_factory=PriorConfig)
+    base: BaseConfig = field(default_factory=BaseConfig)
     train: TrainConfig = field(default_factory=TrainConfig)
 
     # ------------------------------------------------------------------ dims
@@ -179,6 +280,7 @@ class NECConfig:
     # ------------------------------------------------------------ validation
     def validate(self) -> NECConfig:
         d, e, x, p, t = self.data, self.encoder, self.experts, self.prior, self.train
+        b = self.base
 
         def bad(msg: str) -> ValueError:
             return ValueError(f"NECConfig invalid: {msg}")
@@ -215,10 +317,20 @@ class NECConfig:
         # experts
         if x.n_experts < 2:
             raise bad(f"n_experts must be >= 2 (a mixture), got {x.n_experts}")
-        if x.hidden_dim < 2:
-            raise bad(f"experts hidden_dim must be >= 2, got {x.hidden_dim}")
+        if not x.hidden_dims or any(h < 1 for h in x.hidden_dims):
+            raise bad(
+                f"experts hidden_dims must be a non-empty tuple of widths >= 1, "
+                f"got {x.hidden_dims}"
+            )
         if not 0.0 <= x.dropout < 1.0:
             raise bad(f"experts dropout must be in [0, 1), got {x.dropout}")
+        from .networks import ACTIVATION_REGISTRY  # late import: avoid cycle
+
+        if x.activation not in ACTIVATION_REGISTRY:
+            raise bad(
+                f"unknown experts.activation {x.activation!r}; registered: "
+                f"{sorted(ACTIVATION_REGISTRY)}"
+            )
         if x.input_mode not in ("snapshot", "snapshot_plus_hidden"):
             raise bad(f"unknown experts.input_mode {x.input_mode!r}")
         from .experts import EMISSION_REGISTRY  # late import: avoid cycle
@@ -279,6 +391,65 @@ class NECConfig:
             )
         if t.checkpoint_every < 0:
             raise bad(f"checkpoint_every must be >= 0, got {t.checkpoint_every}")
+        if t.correction_penalty_weight < 0:
+            raise bad(
+                f"correction_penalty_weight must be >= 0, got "
+                f"{t.correction_penalty_weight}"
+            )
+        if t.aux_load_balance and t.freeze_gate:
+            # Q19 consequence 3: with a frozen gate the mean gate probability
+            # has no trainable parameter behind it, so the Shazeer term's
+            # gradient is exactly zero. Silently optimizing an inert loss is
+            # the kind of no-op this codebase refuses to ship.
+            raise bad(
+                "aux_load_balance is inert when train.freeze_gate=True: the "
+                "load-balancing gradient flows only through the gate, which "
+                "has no trainable parameters here, so the term is exactly "
+                "zero. Disable one of the two (the contrast with Ye & Borde "
+                "and Shazeer et al., where the gate trains and the term does "
+                "work, is a methodological note, not a config)"
+            )
+
+        # base (brief 02)
+        if not b.hidden_dims or any(h < 1 for h in b.hidden_dims):
+            raise bad(
+                f"base hidden_dims must be a non-empty tuple of widths >= 1, "
+                f"got {b.hidden_dims}"
+            )
+        if not 0.0 <= b.dropout < 1.0:
+            raise bad(f"base dropout must be in [0, 1), got {b.dropout}")
+        if b.activation not in ACTIVATION_REGISTRY:
+            raise bad(
+                f"unknown base.activation {b.activation!r}; registered: "
+                f"{sorted(ACTIVATION_REGISTRY)}"
+            )
+        if b.lr <= 0 or b.batch_size < 1 or b.steps < 0:
+            raise bad(
+                f"base lr/batch_size/steps invalid: {b.lr}/{b.batch_size}/{b.steps}"
+            )
+        if b.weight_decay < 0:
+            raise bad(f"base weight_decay must be >= 0, got {b.weight_decay}")
+        if not 0.0 < b.val_fraction < 1.0:
+            raise bad(
+                f"base val_fraction must be in (0, 1) — it is a tail of the "
+                f"TRAINING block — got {b.val_fraction}"
+            )
+        if b.early_stopping_patience is not None and b.early_stopping_patience < 1:
+            raise bad(
+                f"base early_stopping_patience must be >= 1 or None, got "
+                f"{b.early_stopping_patience}"
+            )
+        if x.correction_mode and not b.enabled:
+            raise bad(
+                "experts.correction_mode=True requires base.enabled=True: a "
+                "correction is a correction *to* something, and with no base "
+                "the experts' zero-initialized heads would predict a constant 0"
+            )
+        if x.correction_mode and x.kind != "mlp":
+            raise bad(
+                f"experts.correction_mode is defined for the neural expert "
+                f"bank; experts.kind={x.kind!r} has no head to zero-initialize"
+            )
         return self
 
     # --------------------------------------------------------- serialization
@@ -299,7 +470,9 @@ class NECConfig:
             ),
             encoder=EncoderConfig(**d.get("encoder", {})),
             gate=GateConfig(**d.get("gate", {})),
-            experts=ExpertConfig(**d.get("experts", {})),
+            # hidden_dims round-trips through JSON as a list
+            experts=ExpertConfig(**_tupled(d.get("experts", {}), ("hidden_dims",))),
             prior=PriorConfig(**d.get("prior", {})),
+            base=BaseConfig(**_tupled(d.get("base", {}), ("hidden_dims",))),
             train=TrainConfig(**d.get("train", {})),
         )

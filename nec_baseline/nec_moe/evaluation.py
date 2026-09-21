@@ -30,6 +30,7 @@ training data precedes the test block by construction.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -38,6 +39,7 @@ from typing import TYPE_CHECKING, Any
 import torch
 from torch import Tensor
 
+from .base import BaseCache, BaseFit
 from .data import Panel
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -59,6 +61,7 @@ __all__ = [
     "WalkForwardResult",
     "walk_forward_evaluate",
     "walk_forward_evaluate_baseline",
+    "base_and_correction",
 ]
 
 
@@ -313,6 +316,28 @@ class FoldResult:
     # the parameter-count confound across prior kinds, measured per window.
     # None for single-model baselines, which never run the audit.
     live_param_count: int | None = None
+    # Residual design (brief 02 §5). The frozen base's OWN out-of-sample
+    # score on this fold, on the same metrics by the same code — the mixture's
+    # number is uninterpretable without the floor it is measured from — plus
+    # the correction magnitude actually applied out of sample.
+    base_ic: IcSummary | None = None
+    base_nll: float | None = None
+    base_portfolio: PortfolioSummary | None = None
+    correction: tuple[tuple[str, float], ...] = ()
+
+    @property
+    def ic_improvement(self) -> float | None:
+        """Mean rank-IC minus the base's — the thesis's primary quantity."""
+        if self.base_ic is None:
+            return None
+        return self.ic.mean_ic - self.base_ic.mean_ic
+
+    @property
+    def nll_improvement(self) -> float | None:
+        """Base NLL minus the mixture's: positive = the correction helped."""
+        if self.base_nll is None:
+            return None
+        return self.base_nll - self.nll
     # Chain persistence of this window's fitted prior, in canonical state
     # order; empty for priors with no transition matrix. Pairs, not a dict,
     # to match the file's frozen/hashable convention — read with ``dict(...)``.
@@ -352,6 +377,9 @@ class _FoldAccumulator:
         expert_order: tuple[int, ...] = (),
         live_param_count: int | None = None,
         persistence: tuple[tuple[str, float], ...] = (),
+        base_pred: Tensor | None = None,
+        base_nll: float | None = None,
+        correction: tuple[tuple[str, float], ...] = (),
     ) -> dict[str, Any]:
         """Score a freshly-evaluated fold. Returns the picklable payload that
         fold-level resume persists and :meth:`add_completed` re-ingests."""
@@ -365,6 +393,19 @@ class _FoldAccumulator:
                 n_quantiles=self.backtest_quantiles,
             )
             portfolio = portfolio_summary(gross, tno, self.cost_rate)
+        # The base scored through the identical code path — same dates, same
+        # ranking, same backtest — so "improvement over the base" is a
+        # difference of like-for-like numbers rather than of two protocols.
+        base_ic = base_portfolio = None
+        if base_pred is not None:
+            _, base_ics = rank_ic_by_date(base_pred, test.y, test.date)
+            base_ic = ic_summary(base_ics)
+            if self.backtest_quantiles is not None:
+                _, b_gross, b_tno = long_short_by_date(
+                    base_pred, test.y, test.date, test.entity,
+                    n_quantiles=self.backtest_quantiles,
+                )
+                base_portfolio = portfolio_summary(b_gross, b_tno, self.cost_rate)
         payload = {
             "fold_result": FoldResult(
                 fold=fold.fold,
@@ -376,6 +417,10 @@ class _FoldAccumulator:
                 expert_order=expert_order,
                 live_param_count=live_param_count,
                 persistence=persistence,
+                base_ic=base_ic,
+                base_nll=base_nll,
+                base_portfolio=base_portfolio,
+                correction=correction,
             ),
             "ics": ics,
             "gross": gross,
@@ -448,6 +493,73 @@ def _fold_predictions(
     return _predict_memoryless(trainer, test), trainer.evaluate(test.full_batch())
 
 
+def _attach_base(
+    trainer: Trainer,
+    train: Panel,
+    fold: WalkForwardFold,
+    cache: BaseCache | None,
+    seed: int,
+) -> BaseFit | None:
+    """Fit (or reuse) this fold's frozen base and attach it. No-op when off.
+
+    The window key is the fold's *training date range*, not its index: two
+    runs that slice the same panel differently must not share a base, and the
+    date range is what actually determines what the base saw.
+    """
+    if not trainer.cfg.base.enabled:
+        return None
+    window = (int(fold.train_dates.min()), int(fold.train_dates.max()))
+    cache = cache if cache is not None else BaseCache()
+    fit = cache.get_or_fit(train, trainer.cfg.base, window=window, seed=seed)
+    trainer.model.attach_base(fit.model)
+    return fit
+
+
+@torch.no_grad()
+def base_and_correction(
+    trainer: Trainer, test: Panel
+) -> tuple[Tensor | None, float | None, tuple[tuple[str, float], ...]]:
+    """The frozen base's own test predictions/NLL, and the correction applied.
+
+    Both are brief 02 §5 reporting requirements: the base's out-of-sample
+    performance is the floor every mixture number is measured from, and the
+    correction magnitude answers the thesis question directly — a model whose
+    corrections are numerically negligible has answered it in the negative
+    whatever the R-squared does. The base's NLL uses the mixture's own noise
+    scale (the responsibility-weighted sigma), so the two NLLs differ only in
+    the mean, which is the thing being compared.
+    """
+    model = trainer.model
+    if model.base is None:
+        return None, None, ()
+    model.eval()
+    base_pred = model.base(test.x_snap)
+    out = model(test.x_seq, test.x_snap)
+    pi = out.prior.log_prior.exp()
+    sigma = (pi * out.log_sigma.exp().unsqueeze(0)).sum(dim=-1)
+    resid = test.y - base_pred
+    base_nll = float(
+        (0.5 * math.log(2 * math.pi) + sigma.log() + 0.5 * (resid / sigma) ** 2).mean()
+    )
+    stats: tuple[tuple[str, float], ...] = ()
+    correction = out.correction
+    if correction is not None:
+        a = correction.abs()
+        stats = (
+            ("correction_mean_abs", float(a.mean())),
+            ("correction_std", float(correction.std(unbiased=True))),
+            ("correction_p95_abs", float(a.quantile(0.95))),
+            ("correction_max_abs", float(a.max())),
+            # scale-free: how big is the correction next to the base's own
+            # dispersion? 0.01 means the mixture barely moved the base.
+            (
+                "correction_rel_base_std",
+                float(a.mean() / base_pred.std(unbiased=True).clamp_min(1e-12)),
+            ),
+        )
+    return base_pred, base_nll, stats
+
+
 def walk_forward_evaluate(
     panel: Panel,
     make_trainer: Callable[[], Trainer],
@@ -461,6 +573,8 @@ def walk_forward_evaluate(
     backtest_quantiles: int | None = None,
     cost_rate: float = 0.0,
     resume_dir: str | Path | None = None,
+    base_cache: BaseCache | None = None,
+    seed: int = 0,
 ) -> WalkForwardResult:
     """Fit-once-per-window walk-forward evaluation (Decision D protocol).
 
@@ -486,6 +600,16 @@ def walk_forward_evaluate(
     (folds, steps, backtest) on the same panel — the directory stores results,
     not the data. Because ``make_trainer`` seeds deterministically (as the
     sweep arms do), a resumed run reproduces the uninterrupted one exactly.
+
+    **Residual mode** (``base.enabled``, brief 02): before the experts train,
+    each fold fits its frozen base ``f0`` on that fold's training block and
+    attaches it — order per fold is gate → base → experts → score.
+    ``base_cache`` amortizes that fit: the base never sees regime
+    information, so within one window and seed it is *identical* across every
+    gate arm, and reusing it both saves the compute budget and makes every arm
+    measure against literally the same floor. Pass one
+    :class:`~nec_moe.base.BaseCache` to every arm of a sweep (``run_sweep``
+    does); ``seed`` identifies the run, so two seeds get two bases.
     """
     folds = walk_forward_folds(
         panel.date,
@@ -513,10 +637,19 @@ def walk_forward_evaluate(
             # so it must NOT rerun — everything is in the checkpoint
             trainer = Trainer.load(fit_ckpt)
             remaining = max(steps - trainer.step_count, 0)
+            _attach_base(trainer, train, fold, base_cache, seed)
         else:
             trainer = make_trainer()
-            if warmstart_key is not None:
+            # Order matters (brief 02 §4): the gate is frozen at construction,
+            # the base is fitted on this fold's training block and frozen, and
+            # only then do the experts train against what is left.
+            base_fit = _attach_base(trainer, train, fold, base_cache, seed)
+            x = trainer.cfg.experts
+            if warmstart_key is not None and not (
+                x.correction_mode and x.zero_init_head
+            ):
                 trainer.warmstart_experts(train.full_batch(), warmstart_key(train))
+            del base_fit
             remaining = steps
         if trainer.model.prior.stateful:
             trainer.fit_sequence(
@@ -537,11 +670,15 @@ def walk_forward_evaluate(
             if transition is not None
             else ()
         )
+        base_pred, base_nll, correction = base_and_correction(trainer, test)
         payload = acc.add(
             fold, pred, train, test, nll,
             expert_order=order,
             live_param_count=trainer.live_param_count,
             persistence=persistence,
+            base_pred=base_pred,
+            base_nll=base_nll,
+            correction=correction,
         )
         if done_file is not None:
             payload = dict(

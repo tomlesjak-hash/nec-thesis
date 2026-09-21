@@ -89,12 +89,12 @@ def test_ridge_requires_fit():
 def test_mlp_baseline_learns_and_is_deterministic():
     panel = _regime_free_panel()
     train, test = panel.split_by_date(0.8)
-    mlp = MLPBaseline(input_dim=3, hidden_dim=16, dropout=0.0, steps=800, seed=0)
+    mlp = MLPBaseline(input_dim=3, hidden_dims=(16, 8), dropout=0.0, steps=800, seed=0)
     mlp.fit(train)
     corr = torch.corrcoef(torch.stack([mlp.predict(test), test.y_clean]))[0, 1]
     assert float(corr) > 0.9
     # deterministic given the seed
-    mlp2 = MLPBaseline(input_dim=3, hidden_dim=16, dropout=0.0, steps=800, seed=0)
+    mlp2 = MLPBaseline(input_dim=3, hidden_dims=(16, 8), dropout=0.0, steps=800, seed=0)
     mlp2.fit(train)
     assert torch.allclose(mlp.predict(test), mlp2.predict(test))
     # sigma moves the right way (Adam walks log-sigma slowly from init=1.0
@@ -137,7 +137,7 @@ def test_moe_beats_single_models_where_regimes_are_real():
     )
     mlp = walk_forward_evaluate_baseline(
         panel,
-        lambda: MLPBaseline(input_dim=3, hidden_dim=16, dropout=0.0, steps=200),
+        lambda: MLPBaseline(input_dim=3, hidden_dims=(16, 8), dropout=0.0, steps=200),
         **common,
     )
     assert nec.pooled_ic.mean_ic > 0.3, nec.pooled_ic

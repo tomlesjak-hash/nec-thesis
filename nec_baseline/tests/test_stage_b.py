@@ -219,7 +219,7 @@ def test_real_panel_runs_through_harness(cache_dir: Path):
     cfg = NECConfig(
         data=data_config_from_panel(panel),
         encoder=EncoderConfig(hidden_dim=8),
-        experts=ExpertConfig(hidden_dim=8, dropout=0.0),
+        experts=ExpertConfig(hidden_dims=(8, 4), dropout=0.0),
         train=TrainConfig(sigma_init=0.1, sigma_freeze_steps=0, batch_size=256),
     )
 

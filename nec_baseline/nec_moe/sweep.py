@@ -171,6 +171,24 @@ def _metrics_from_result(res: WalkForwardResult) -> dict[str, float]:
         m["net_ir"] = res.pooled_portfolio.ir_net
         m["mean_net"] = res.pooled_portfolio.mean_net
         m["mean_turnover"] = res.pooled_portfolio.mean_turnover
+    # The parameter-count confound, logged beside every result it could
+    # explain: under the HMM prior the encoder and gate head are dead
+    # parameters, under the soft prior they are live, so prior kinds are only
+    # comparable with this number in view. Every fold shares one architecture;
+    # the first audited fold speaks for the arm.
+    live = next(
+        (f.live_param_count for f in res.folds if f.live_param_count is not None), None
+    )
+    if live is not None:
+        m["live_param_count"] = float(live)
+    # Chain persistence, averaged over folds in canonical state order (each
+    # fold is an independent refit, so this is a mean of per-window estimates).
+    per_key: dict[str, list[float]] = {}
+    for fold in res.folds:
+        for key, value in fold.persistence:
+            per_key.setdefault(key, []).append(value)
+    for key, values in per_key.items():
+        m[key] = statistics.fmean(values)
     return m
 
 

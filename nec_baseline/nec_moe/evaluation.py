@@ -42,7 +42,7 @@ from .data import Panel
 
 if TYPE_CHECKING:  # pragma: no cover
     from .baselines import BaselineModel
-from .diagnostics import canonical_expert_order
+from .diagnostics import canonical_expert_order, persistence_metrics
 from .train import Trainer
 from .utils import atomic_torch_save
 
@@ -309,6 +309,14 @@ class FoldResult:
     # Decision D: canonical (sigma-sorted) order per fitted window; empty for
     # single-model baselines, which have no experts
     expert_order: tuple[int, ...] = ()
+    # Trainable elements connected to the loss (nec_moe.train.GradientAudit):
+    # the parameter-count confound across prior kinds, measured per window.
+    # None for single-model baselines, which never run the audit.
+    live_param_count: int | None = None
+    # Chain persistence of this window's fitted prior, in canonical state
+    # order; empty for priors with no transition matrix. Pairs, not a dict,
+    # to match the file's frozen/hashable convention — read with ``dict(...)``.
+    persistence: tuple[tuple[str, float], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -342,6 +350,8 @@ class _FoldAccumulator:
         test: Panel,
         nll: float,
         expert_order: tuple[int, ...] = (),
+        live_param_count: int | None = None,
+        persistence: tuple[tuple[str, float], ...] = (),
     ) -> dict[str, Any]:
         """Score a freshly-evaluated fold. Returns the picklable payload that
         fold-level resume persists and :meth:`add_completed` re-ingests."""
@@ -364,6 +374,8 @@ class _FoldAccumulator:
                 n_test=len(test),
                 portfolio=portfolio,
                 expert_order=expert_order,
+                live_param_count=live_param_count,
+                persistence=persistence,
             ),
             "ics": ics,
             "gross": gross,
@@ -514,10 +526,23 @@ def walk_forward_evaluate(
             trainer.fit(train, steps=remaining, checkpoint_path=fit_ckpt)
 
         pred, nll = _fold_predictions(trainer, train, test)
-        order = tuple(
-            int(i) for i in canonical_expert_order(trainer.model.experts.log_sigma)
+        canonical = canonical_expert_order(trainer.model.experts.log_sigma)
+        order = tuple(int(i) for i in canonical)
+        # Persistence of this window's chain, relabelled into canonical order
+        # so the same key means the same regime across independently refitted
+        # folds (Decision D); empty for priors with no transition matrix.
+        transition = getattr(trainer.model.prior, "transition_matrix", None)
+        persistence = (
+            tuple(persistence_metrics(transition.detach(), canonical).items())
+            if transition is not None
+            else ()
         )
-        payload = acc.add(fold, pred, train, test, nll, expert_order=order)
+        payload = acc.add(
+            fold, pred, train, test, nll,
+            expert_order=order,
+            live_param_count=trainer.live_param_count,
+            persistence=persistence,
+        )
         if done_file is not None:
             payload = dict(
                 payload,

@@ -41,8 +41,9 @@ Checkpointing (resume-exact):
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import torch
@@ -53,6 +54,7 @@ from .data import Batch, Panel
 from .diagnostics import (
     expert_output_correlation,
     gate_entropy,
+    persistence_metrics,
     sharpness,
     utilization,
 )
@@ -68,10 +70,19 @@ from .model import NECModel, NECOutput
 from .priors import PriorContext
 from .utils import atomic_torch_save
 
-__all__ = ["Trainer", "SequenceEval"]
+__all__ = [
+    "Trainer",
+    "SequenceEval",
+    "GradientAudit",
+    "DeadParameterWarning",
+]
 
 #: Bumped when the checkpoint payload layout changes incompatibly.
 CHECKPOINT_FORMAT = 1
+
+
+class DeadParameterWarning(UserWarning):
+    """Some parameters receive no gradient — see :class:`GradientAudit`."""
 
 
 @dataclass
@@ -82,6 +93,67 @@ class SequenceEval:
     log_filtered: Tensor  # (L, B, K) log-domain filtered posteriors
     log_prior: Tensor  # (L, B, K) log-domain priors (the predict step)
     y_hat: Tensor  # (L, B) causal point predictions
+
+
+@dataclass(frozen=True)
+class GradientAudit:
+    """Which parameters actually train — the parameter-count confound, measured.
+
+    Under ``prior.kind="hmm"`` the gate logits are used only for shape
+    inference, so with ``experts.input_mode="snapshot"`` the GRU encoder and
+    the gate head are **structurally disconnected** from the loss and never
+    train; under ``prior.kind="soft"`` the same tensors are live. Comparing
+    those two arms therefore compares different effective model sizes unless
+    the difference is measured and reported — which is what this is for.
+
+    Three disjoint categories, by cause (the causes need different readings):
+
+    - ``disconnected`` — ``requires_grad`` but ``grad is None`` after backward:
+      no autograd path from the loss exists at all. This is the structural
+      deadness above, and it is what ``live_param_count`` excludes.
+    - ``zero_grad`` — connected, but the gradient was all-zero on the audited
+      batch. This is **not** evidence of structural deadness and may be purely
+      transient: with the default zero-initialized gate head
+      (``GateConfig.zero_init``) the encoder's gradient is exactly zero on the
+      first backward pass and nonzero forever after, because the chain rule
+      runs through a weight that is still zero. Counted as live.
+    - ``frozen`` — ``requires_grad=False``: not trainable at this instant.
+      Includes ``log_sigma`` while the ``sigma_freeze_steps`` warm-start holds
+      it (it becomes live later), so read this list against the schedule.
+
+    ``live_param_count`` is the headline number: elements that are trainable
+    and connected to the loss. It is a snapshot taken at the first backward
+    pass of a fit; the categories above say what that snapshot can and cannot
+    be read to mean.
+    """
+
+    live_param_count: int
+    total_param_count: int
+    disconnected: tuple[str, ...] = ()
+    zero_grad: tuple[str, ...] = ()
+    frozen: tuple[str, ...] = ()
+    step: int = 0
+    #: numel by top-level module, for the disconnected tensors only
+    disconnected_by_group: dict[str, int] = field(default_factory=dict)
+
+    @property
+    def has_dead_parameters(self) -> bool:
+        return bool(self.disconnected)
+
+    def summary(self) -> str:
+        if not self.disconnected:
+            return (
+                f"all {self.total_param_count:,} parameters connected to the "
+                f"loss; live_param_count={self.live_param_count:,}"
+            )
+        groups = ", ".join(
+            f"{g} ({n:,} params)" for g, n in sorted(self.disconnected_by_group.items())
+        )
+        return (
+            f"{len(self.disconnected)} parameter tensor(s) receive no gradient: "
+            f"{groups}. live_param_count={self.live_param_count:,} of "
+            f"{self.total_param_count:,}"
+        )
 
 
 class Trainer:
@@ -103,6 +175,8 @@ class Trainer:
         )
         self.step_count = 0
         self.history: list[dict[str, float]] = []
+        #: Filled on the first backward pass (see :meth:`audit_gradients`).
+        self.grad_audit: GradientAudit | None = None
         # fit()'s sampler state — instance-owned (not fit-local) so a
         # checkpoint can freeze it mid-epoch and resume the exact stream
         self._fit_gen: torch.Generator | None = None
@@ -141,6 +215,68 @@ class Trainer:
     def _apply_sigma_schedule(self) -> None:
         frozen = self.step_count < self.cfg.train.sigma_freeze_steps
         self.model.experts.log_sigma.requires_grad_(not frozen)
+
+    @property
+    def live_param_count(self) -> int | None:
+        """Trainable elements connected to the loss; ``None`` before the audit."""
+        return None if self.grad_audit is None else self.grad_audit.live_param_count
+
+    # -------------------------------------------- the parameter-count confound
+    def audit_gradients(self) -> GradientAudit:
+        """Classify every parameter by whether it received gradient.
+
+        Call **after** a ``backward()`` and before the next ``zero_grad()``:
+        the trainer zeroes with ``set_to_none=True``, so ``grad is None`` after
+        a backward pass means precisely "no autograd path from the loss
+        reached this tensor". See :class:`GradientAudit` for how to read the
+        three categories.
+        """
+        disconnected, zero_grad, frozen = [], [], []
+        live = total = 0
+        by_group: dict[str, int] = {}
+        for name, p in self.model.named_parameters():
+            total += p.numel()
+            if not p.requires_grad:
+                frozen.append(name)
+                continue
+            if p.grad is None:
+                disconnected.append(name)
+                group = name.split(".")[0]
+                by_group[group] = by_group.get(group, 0) + p.numel()
+                continue
+            # connected: counts as live even if this batch's gradient is zero
+            live += p.numel()
+            if float(p.grad.abs().max()) == 0.0:
+                zero_grad.append(name)
+        return GradientAudit(
+            live_param_count=live,
+            total_param_count=total,
+            disconnected=tuple(disconnected),
+            zero_grad=tuple(zero_grad),
+            frozen=tuple(frozen),
+            step=self.step_count,
+            disconnected_by_group=by_group,
+        )
+
+    def _audit_once(self) -> None:
+        """Run the audit on the first backward pass and warn once if dead."""
+        if self.grad_audit is not None:
+            return
+        audit = self.grad_audit = self.audit_gradients()
+        if audit.has_dead_parameters:
+            warnings.warn(
+                f"prior.kind={self.cfg.prior.kind!r}, "
+                f"experts.input_mode={self.cfg.experts.input_mode!r}: "
+                f"{audit.summary()}. Those parameters have no autograd path "
+                "from the loss and will never train; any comparison across "
+                "prior kinds compares different effective model sizes unless "
+                "live_param_count is reported beside the result (it is logged "
+                "to the trial registry).",
+                DeadParameterWarning,
+                # _audit_once <- _optimize <- train_step[_sequence] <- fit[_sequence]
+                # <- caller: point at the user's fit() call, not at trainer internals
+                stacklevel=5,
+            )
 
     # ------------------------------------------------- expert warm-start
     def warmstart_experts(
@@ -205,6 +341,7 @@ class Trainer:
     def _optimize(self, loss: Tensor) -> None:
         self.opt.zero_grad(set_to_none=True)
         loss.backward()
+        self._audit_once()  # after backward, before the next zero_grad
         clip = self.cfg.train.grad_clip
         if clip is not None:
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), clip)
@@ -229,6 +366,17 @@ class Trainer:
                 "min_running_utilization": float(self.lb_buffer.fractions().min()),
                 "max_offdiag_expert_corr": float(off.abs().max()),
             }
+            # Persistence of the fitted chain, for any prior exposing a
+            # transition matrix (duck-typed, so a future prior gets it free).
+            # Logged every step rather than every log_every: a ragged history
+            # is a trap for anything that reads a column out of it, and the
+            # K x K solve is microseconds against a forward/backward pass.
+            # Raw (not canonical) state order here: within one fit the indices
+            # are stable, while a sigma-sort could swap mid-run and make the
+            # series jump between regimes. Cross-fit reporting canonicalizes.
+            transition = getattr(self.model.prior, "transition_matrix", None)
+            if transition is not None:
+                m |= persistence_metrics(transition.detach())
         self.history.append(m)
         return m
 
@@ -424,6 +572,9 @@ class Trainer:
             # dropout draws from the global RNG — without this, a resumed
             # trajectory silently diverges from the uninterrupted one
             "torch_rng": torch.get_rng_state(),
+            # so a fold resumed with zero remaining steps still reports
+            # live_param_count (the audit only reruns on a backward pass)
+            "grad_audit": self.grad_audit,
         }
         atomic_torch_save(payload, path)
 
@@ -449,6 +600,9 @@ class Trainer:
         trainer.step_count = payload["step_count"]
         trainer.history = payload["history"]
         trainer.lb_buffer.set_state(payload["lb_state"])
+        # .get: checkpoints written before the audit existed still load, and
+        # simply re-audit on their next backward pass
+        trainer.grad_audit = payload.get("grad_audit")
         if payload["fit_state"] is not None:
             gen = torch.Generator()
             gen.set_state(payload["fit_state"]["generator"])

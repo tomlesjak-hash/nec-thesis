@@ -323,7 +323,20 @@ def _quick(exp: Experiment, panel: Panel, purge: int, out: Path,
         print("[alignment] held-out gate-vs-context:\n", report.to_frame().round(3))
         report.to_frame().to_csv(out / "alignment.csv")
 
-    registry.log(exp.tag, {"nll": nll}, config={"mode": "quick",
+    # every trial carries the parameter-count confound and, where the prior
+    # has a transition matrix, how sticky the fitted chain actually is
+    trial: dict[str, float] = {"nll": nll}
+    if trainer.live_param_count is not None:
+        trial["live_param_count"] = float(trainer.live_param_count)
+    transition = getattr(trainer.model.prior, "transition_matrix", None)
+    if transition is not None:
+        from nec_moe.diagnostics import canonical_expert_order, persistence_metrics
+        trial |= persistence_metrics(
+            transition.detach(),
+            canonical_expert_order(trainer.model.experts.log_sigma),
+        )
+    results |= {k: v for k, v in trial.items() if k != "nll"}
+    registry.log(exp.tag, trial, config={"mode": "quick",
                  **dataclasses.asdict(exp)}, seed=exp.seeds[0])
     return results
 

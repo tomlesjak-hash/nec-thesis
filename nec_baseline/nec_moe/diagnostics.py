@@ -38,6 +38,7 @@ __all__ = [
     "utilization",
     "sharpness",
     "expert_output_correlation",
+    "pairwise_expert_distance",
     "binary_auc",
     "regime_recovery_auc",
     "canonical_expert_order",
@@ -70,6 +71,32 @@ def expert_output_correlation(mu: Tensor, eps: float = 1e-8) -> Tensor:
     norms = centered.norm(dim=0).clamp_min(eps)
     unit = centered / norms
     return unit.T @ unit
+
+
+def pairwise_expert_distance(values: Tensor) -> Tensor:
+    """``(K, K)`` RMS distance between experts' per-sample outputs.
+
+    ``d[j, k] = sqrt( mean_b (v_bj - v_bk)^2 )`` — the scale-carrying
+    companion to :func:`expert_output_correlation`, which is scale-free and
+    therefore blind to the failure that matters most in the residual design:
+    corrections that are *perfectly correlated in shape but numerically
+    negligible*, or experts that have collapsed onto each other while their
+    correlation still reads far from 1 because of noise. Correlation answers
+    "do they move together?"; this answers "are they actually different
+    numbers?", and a mixture needs both answers to be healthy.
+
+    In correction mode, pass the **corrections** ``r`` (see
+    :attr:`nec_moe.model.NECOutput.expert_signal`): distances computed on
+    ``mu_k = f0 + r_k`` are unaffected by the shared base — it cancels in the
+    difference — so they stay meaningful, but the corresponding *correlation*
+    does not, and the two are read together.
+
+    Diagonal entries are exactly zero; the matrix is symmetric.
+    """
+    if values.ndim != 2:
+        raise ValueError(f"values must be (B, K), got {tuple(values.shape)}")
+    diff = values.unsqueeze(2) - values.unsqueeze(1)  # (B, K, K)
+    return diff.pow(2).mean(dim=0).sqrt()
 
 
 def binary_auc(scores: Tensor, labels: Tensor) -> float:

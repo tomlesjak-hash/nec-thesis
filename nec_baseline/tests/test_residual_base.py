@@ -37,12 +37,16 @@ from nec_moe import (
     TrialRegistry,
     base_cache_key,
     correction_penalty_aux,
+    expert_decorrelation_aux,
+    expert_log_likelihood,
     fit_base,
+    mixture_nll,
     nec_arm,
     pyramid_dims,
     run_sweep,
     walk_forward_evaluate,
 )
+from nec_moe.diagnostics import expert_output_correlation, pairwise_expert_distance
 from nec_moe.train import DeadParameterWarning
 
 
@@ -151,7 +155,7 @@ def test_base_and_gate_tensors_are_unchanged_by_training():
     for name, old in before.items():
         assert torch.equal(dict(trainer.model.named_parameters())[name], old), name
     # ... while the experts did move, or the test proves nothing
-    assert float(trainer.model.experts.experts[0].head.weight.abs().max()) > 0.0
+    assert float(trainer.model.experts.experts[0].head.weight.detach().abs().max()) > 0.0
 
 
 def test_frozen_parameters_never_enter_the_optimizer():
@@ -261,6 +265,227 @@ def test_base_validation_split_is_a_tail_of_training_only():
 
 
 # --------------------------------------------------------------------------- #
+# Base and experts are separately parameterised networks
+# --------------------------------------------------------------------------- #
+
+
+def test_base_and_experts_take_independent_architectures():
+    """Both are MLPs, but nothing is shared between their configs: depth,
+    width, dropout and activation are set per network, and the base carries
+    its own optimiser knobs besides."""
+    cfg = small_config(
+        expert_hidden_dims=(12, 6, 3),
+        expert_dropout=0.2,
+        correction_mode=True,
+        base=small_base_config(
+            hidden_dims=(32, 8), dropout=0.05, activation="gelu",
+            lr=7e-3, weight_decay=0.0, steps=25, batch_size=16,
+        ),
+    )
+    cfg.validate()
+    torch.manual_seed(0)
+    model = NECModel(cfg)
+
+    assert model.base.net.hidden_dims == (32, 8)
+    assert model.experts.experts[0].hidden_dims == (12, 6, 3)
+    # activations differ, and neither is hardcoded
+    assert isinstance(model.base.net.hidden[1], torch.nn.GELU)
+    assert isinstance(model.experts.experts[0].hidden[1], torch.nn.ReLU)
+    # dropout rates differ
+    assert model.base.net.hidden[2].p == 0.05
+    assert model.experts.experts[0].hidden[2].p == 0.2
+    # the base is deeper-per-layer but shallower; parameter counts differ
+    base_n = sum(p.numel() for p in model.base.parameters())
+    expert_n = sum(p.numel() for p in model.experts.experts[0].parameters())
+    assert base_n != expert_n
+    # and the base's own optimiser settings are its own
+    assert cfg.base.lr == 7e-3 and cfg.train.lr != 7e-3
+
+
+def test_control_panel_exposes_every_base_field_separately():
+    """§2's constraint: each BaseConfig field is reachable from the settings
+    block, under a base_* name distinct from the expert_* one."""
+    import dataclasses
+
+    import run_experiment as rx
+
+    panel_fields = {f.name for f in dataclasses.fields(rx.Experiment)}
+    for f in dataclasses.fields(BaseConfig):
+        name = "base_enabled" if f.name == "enabled" else f"base_{f.name}"
+        assert name in panel_fields, name
+    # the expert-side twins exist and are distinct knobs
+    for name in ("expert_hidden_dims", "expert_dropout", "expert_activation"):
+        assert name in panel_fields, name
+
+    exp = rx.Experiment(
+        base_enabled=True, correction_mode=True,
+        base_hidden_dims=(32, 8), base_dropout=0.05, base_activation="gelu",
+        expert_hidden_dims=(12, 6), expert_dropout=0.2, expert_activation="tanh",
+    )
+    cfg = rx._nec_config(exp, _panel(40, 4), sigma_init=1.0)
+    assert cfg.base.hidden_dims == (32, 8) and cfg.experts.hidden_dims == (12, 6)
+    assert cfg.base.activation == "gelu" and cfg.experts.activation == "tanh"
+    assert cfg.base.dropout == 0.05 and cfg.experts.dropout == 0.2
+
+
+# --------------------------------------------------------------------------- #
+# Correction 1: between-expert statistics must read r, never mu
+# --------------------------------------------------------------------------- #
+
+
+def test_corrections_are_materialised_not_recovered_by_subtraction():
+    """`out.corrections` is the experts' raw output, captured before the base
+    is added — so it is exact, and it does not depend on f0 being re-read."""
+    panel = _panel(80, 6)
+    trainer = _fitted(_residual_cfg(zero_init_head=False), panel)
+    trainer.model.eval()
+    with torch.no_grad():
+        out = trainer.model(panel.x_seq, panel.x_snap)
+        raw = torch.stack(
+            [e(panel.x_snap) for e in trainer.model.experts.experts], dim=-1
+        )
+    assert torch.equal(out.corrections, raw)  # bitwise: it IS the expert output
+    assert out.expert_signal is out.corrections
+    # mu is the sum, and recovering r by subtraction is NOT bitwise equal —
+    # which is exactly why the forward pass materialises it instead
+    assert torch.allclose(out.mu - out.base_pred.unsqueeze(-1), out.corrections)
+
+
+def test_between_expert_statistics_ignore_the_shared_base():
+    """With mu_k = f0 + r_k the base is common to every column, so statistics
+    computed on mu measure f0. A dominant base drives the correlation toward
+    1 however the corrections behave; distances are immune (the base cancels
+    in a difference) and the correlation must be taken on r."""
+    b = 4096
+    torch.manual_seed(0)
+    r = torch.randn(b, 2) * 0.1  # INDEPENDENT corrections: the healthy state
+    base = 20.0 * torch.randn(b, 1)  # a base that dominates them
+    mu = base + r
+
+    corr_on_r = expert_output_correlation(r)
+    corr_on_mu = expert_output_correlation(mu)
+    assert abs(float(corr_on_r[0, 1])) < 0.05  # truly uncorrelated
+    assert float(corr_on_mu[0, 1]) > 0.99  # the base's correlation, not theirs
+
+    # The aux loss inherits the distortion, and this is the damaging direction:
+    # on r it correctly reports ~0 ("nothing to fix"), while on mu it reports
+    # the maximum ~2 for K=2 and demands a decorrelation that no change in r
+    # can deliver except by inflating r until it dominates f0. (Note the aux is
+    # ||R - I||_F^2, which squares: it is blind to the SIGN of the correlation,
+    # so anti-correlated corrections would score the same 2.0 as correlated
+    # ones — which is why this test uses independent corrections to separate
+    # the two readings.)
+    assert float(expert_decorrelation_aux(r)) < 0.05
+    assert float(expert_decorrelation_aux(mu)) > 1.9
+
+    # distances are unaffected by the shared base: it cancels in a difference
+    assert torch.allclose(
+        pairwise_expert_distance(mu), pairwise_expert_distance(r), atol=1e-4
+    )
+
+
+def test_trainer_diagnostics_and_aux_use_corrections():
+    """The wiring, end to end: the logged correlation and the decorrelation
+    penalty both read r in correction mode."""
+    panel = _panel(120, 8)
+    cfg = _residual_cfg(
+        zero_init_head=False, freeze_gate=False,
+        aux_expert_decorrelation=True, aux_decorrelation_weight=1e-2,
+    )
+    trainer = _fitted(cfg, panel)
+    history = trainer.fit(panel, steps=5)
+
+    trainer.model.eval()
+    with torch.no_grad():
+        out = trainer.model(panel.x_seq, panel.x_snap)
+    on_r = expert_output_correlation(out.corrections)
+    on_mu = expert_output_correlation(out.mu)
+    logged = history[-1]["max_offdiag_expert_corr"]
+    # the logged value tracks r, not mu (they differ once the base is fitted)
+    off = lambda c: float((c - torch.eye(2)).abs().max())  # noqa: E731
+    assert abs(logged - off(on_r)) < abs(logged - off(on_mu)) or off(on_r) == pytest.approx(
+        off(on_mu), abs=1e-3
+    )
+    # and the distance diagnostic is logged alongside it
+    assert {"min_pairwise_expert_distance", "mean_pairwise_expert_distance"} <= set(
+        history[-1]
+    )
+
+
+def test_pairwise_expert_distance_is_a_metric():
+    v = torch.tensor([[0.0, 1.0, 5.0], [0.0, 1.0, 5.0], [0.0, 3.0, 5.0]])
+    d = pairwise_expert_distance(v)
+    assert torch.equal(d.diagonal(), torch.zeros(3))
+    assert torch.allclose(d, d.T)
+    assert float(d[0, 2]) == pytest.approx(5.0)
+    # identical experts are at distance zero even when correlation is undefined
+    same = torch.stack([v[:, 0], v[:, 0]], dim=-1)
+    assert float(pairwise_expert_distance(same).max()) == 0.0
+    with pytest.raises(ValueError, match=r"\(B, K\)"):
+        pairwise_expert_distance(torch.zeros(3))
+
+
+# --------------------------------------------------------------------------- #
+# Correction 2: the prior must sum to one where f0's coefficient depends on it
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("prior_kind", ["soft", "uniform", "hard", "topk", "gumbel"])
+def test_every_prior_is_normalized_in_correction_mode(prior_kind: str):
+    """f0's coefficient is sum_k pi_k; the identity y_hat = f0 + sum_k pi_k r_k
+    holds only because that is exactly 1, so it is checked at the call site."""
+    panel = _panel(60, 6)
+    cfg = _residual_cfg(prior_kind=prior_kind, zero_init_head=False, freeze_gate=False)
+    trainer = _fitted(cfg, panel)
+    trainer.model.eval()
+    with torch.no_grad():
+        out = trainer.model(panel.x_seq, panel.x_snap)
+    lse = torch.logsumexp(out.prior.log_prior, dim=-1)
+    assert float(lse.abs().max()) < 1e-5
+    # the identity itself, which is what the assertion protects
+    assert torch.allclose(
+        out.y_hat, out.base_pred + out.correction, atol=1e-5
+    )
+
+
+def test_unnormalized_prior_is_refused():
+    """A prior whose rows do not sum to 1 would silently rescale the frozen
+    base rather than fail; the guard turns that into an exception."""
+    from nec_moe.model import _assert_normalized
+
+    _assert_normalized(torch.log(torch.tensor([[0.3, 0.7], [0.5, 0.5]])))  # fine
+    with pytest.raises(ValueError, match="rows must sum to 1"):
+        _assert_normalized(torch.log(torch.tensor([[0.3, 0.3], [0.5, 0.5]])))
+
+
+def test_posterior_equals_prior_at_initialisation():
+    """At init every expert predicts the base, so the likelihood carries no
+    information about which expert is responsible and Bayes returns the prior
+    unchanged. The mixture is degenerate at step 0 by construction — which is
+    what 'starts exactly at the base' means on the posterior side."""
+    panel = _panel(120, 8)
+    cfg = _residual_cfg(freeze_gate=False)  # a non-trivial (learned) prior
+    trainer = _fitted(cfg, panel)
+    trainer.model.eval()
+    with torch.no_grad():
+        out = trainer.model(panel.x_seq, panel.x_snap)
+        log_lik = expert_log_likelihood(out.mu, out.log_sigma, panel.y)
+        nll_out = mixture_nll(out.prior.log_prior, log_lik)
+
+    # the per-expert likelihoods are identical across k ...
+    assert torch.allclose(log_lik[:, 0], log_lik[:, 1], atol=1e-6)
+    # ... so the posterior is the prior. Not bitwise: log_filtered computes
+    # (log_prior + c) - logsumexp(log_prior + c), and float addition of the
+    # common constant c is not exactly invertible.
+    assert torch.allclose(
+        nll_out.log_filtered, out.prior.log_prior, atol=1e-5
+    )
+    assert torch.allclose(
+        nll_out.responsibilities, out.prior.log_prior.exp(), atol=1e-5
+    )
+
+
+# --------------------------------------------------------------------------- #
 # 4. The correction penalty
 # --------------------------------------------------------------------------- #
 
@@ -345,6 +570,73 @@ def test_residual_mixture_recovers_the_regime_conditional_part():
     corr = dict(fold.correction)
     assert corr["correction_mean_abs"] > 0.0
     assert corr["correction_rel_base_std"] > 0.01, corr
+
+
+def test_low_snr_residual_run_is_numerically_sane():
+    """The same arrangement at a realistic signal size — and the honest
+    assertion set that goes with it.
+
+    Test 5 plants a signal a model can actually find. Real cross-sectional
+    equity prediction is nowhere near that: Gu, Kelly and Xiu report a monthly
+    out-of-sample R-squared of roughly 0.4% for the benchmark network class,
+    and the base is expected to take most of even that, leaving the experts a
+    residual that may be indistinguishable from noise. This test sizes the
+    planted signal to R-squared ~= 0.005 and asserts **numerical sanity only**:
+    that training completes, that nothing becomes NaN or infinite, that the
+    corrections stay bounded rather than exploding against the frozen base,
+    and that the reported improvement is a finite number.
+
+    It deliberately does NOT assert recovery. A null is a real possible
+    outcome here (Q7 consequence 5), and a test that demanded a positive
+    improvement at this SNR would either be flaky or be silently tuned until
+    it passed — which is the failure mode this whole codebase is built to
+    avoid. What may be claimed at this SNR is 'the machinery ran and produced
+    finite numbers', and that is what is claimed.
+    """
+    import dataclasses
+
+    torch.manual_seed(0)
+    g = torch.Generator().manual_seed(11)
+    spec = SyntheticSpec(vol_levels=(1.0, 1.0), beta_scale=1.0, noise_std=1.0, seed=7)
+    panel = SyntheticRegimePanel(spec).generate(240, 12)
+
+    # rebuild y as: tiny signal + dominant noise, with R^2 fixed by construction.
+    # R^2 = var(signal) / (var(signal) + var(noise)) = 0.005  =>  s/n = sqrt(R2/(1-R2))
+    r2_target = 0.005
+    noise = torch.randn(len(panel.y), generator=g)
+    raw_signal = panel.x_snap[:, 0]
+    signal = raw_signal / raw_signal.std() * math.sqrt(r2_target / (1 - r2_target))
+    low_snr = dataclasses.replace(panel, y=signal + noise)
+
+    realized_r2 = float(signal.var() / low_snr.y.var())
+    assert 0.002 < realized_r2 < 0.01, realized_r2  # the construction itself
+
+    cfg = _residual_cfg(
+        freeze_gate=False, sigma_init=1.0, lr=1e-3,
+        base=small_base_config(steps=150, lr=3e-3),
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeadParameterWarning)
+        result = walk_forward_evaluate(
+            low_snr,
+            lambda: Trainer(NECModel(cfg)),
+            n_folds=2, test_dates_per_fold=20, purge_dates=5, steps=150,
+            base_cache=BaseCache(), seed=0,
+        )
+
+    for fold in result.folds:
+        assert math.isfinite(fold.nll), fold
+        assert fold.base_nll is not None and math.isfinite(fold.base_nll)
+        assert math.isfinite(fold.ic.mean_ic)
+        assert fold.ic_improvement is not None
+        assert math.isfinite(fold.ic_improvement)  # finite, sign unconstrained
+        corr = dict(fold.correction)
+        assert all(math.isfinite(v) for v in corr.values()), corr
+        # corrections must stay bounded: against an almost-pure-noise target
+        # an unconstrained mixture can chase noise without limit, and that
+        # would show up here long before it showed up in an IC
+        assert corr["correction_max_abs"] < 100.0, corr
+    assert math.isfinite(result.pooled_ic.mean_ic)
 
 
 def test_base_and_improvement_reach_the_registry(tmp_path: Path):

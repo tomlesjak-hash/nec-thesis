@@ -58,6 +58,45 @@ class NECOutput:
             return None
         return (self.prior.log_prior.exp() * self.corrections).sum(dim=-1)
 
+    @property
+    def expert_signal(self) -> Tensor:
+        """What the **experts themselves** contribute: ``r_k``, else ``mu_k``.
+
+        Every diagnostic and auxiliary loss that asks "how different are the
+        experts from each other?" must read this rather than ``mu``. In
+        correction mode ``mu_k = f0 + r_k`` shares one base across all K
+        columns, so any between-expert statistic computed on ``mu`` is
+        measuring the base: correlations are pulled toward 1 however the
+        experts behave, and a decorrelation penalty applied to ``mu`` can only
+        be satisfied by inflating ``r`` until it overwhelms ``f0`` — a
+        pressure directly opposed to the shrinkage the design wants.
+
+        ``corrections`` is materialised by the forward pass (the experts'
+        raw output, captured *before* the base is added), never recovered as
+        ``mu - f0``: a subtraction would be a lossy float round-trip and
+        would silently produce garbage if the base were ever changed between
+        the two reads.
+        """
+        return self.mu if self.corrections is None else self.corrections
+
+
+def _assert_normalized(log_prior: Tensor, atol: float = 1e-5) -> None:
+    """Raise unless every row of ``log_prior`` sums to 1 in probability domain.
+
+    Checked in the log domain (``logsumexp`` == 0), which is where sparse
+    priors live: ``hard`` and ``topk`` carry ``-inf`` entries that are exactly
+    0 after exponentiation, so a probability-domain sum would work but would
+    round-trip through ``exp`` for no reason.
+    """
+    err = torch.logsumexp(log_prior.detach(), dim=-1).abs().max()
+    if float(err) > atol:
+        raise ValueError(
+            f"prior rows must sum to 1 (max |logsumexp| = {float(err):.3e} > "
+            f"{atol:g}). The residual prediction f0 + sum_k pi_k r_k relies on "
+            "sum_k pi_k = 1; an unnormalized prior rescales the frozen base "
+            "instead, which no loss curve would show"
+        )
+
 
 class NECModel(nn.Module):
     """Corrected NEC: sequence encoder → regime gate → mixture of experts."""
@@ -158,6 +197,15 @@ class NECModel(nn.Module):
             corrections = mu
             base_pred = self.base(x_snap)
             mu = base_pred.unsqueeze(-1) + corrections
+            # The residual identity is y_hat = sum_k pi_k (f0 + r_k)
+            #                                = f0 * (sum_k pi_k) + sum_k pi_k r_k,
+            # which collapses to the design equation ONLY because sum_k pi_k = 1.
+            # Every registered prior normalizes, but that is a property of each
+            # prior rather than of this call site, so it is checked here, where
+            # the base's coefficient depends on it. A prior that silently failed
+            # to normalize would scale f0 by sum_k pi_k and shift every
+            # prediction — visible in no loss curve and in no gradient.
+            _assert_normalized(prior.log_prior)
 
         pi = prior.log_prior.exp()  # -inf -> exactly 0 for sparse priors
         y_hat = (pi * mu).sum(dim=-1)

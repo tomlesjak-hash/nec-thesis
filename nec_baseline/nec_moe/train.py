@@ -54,6 +54,7 @@ from .data import Batch, Panel
 from .diagnostics import (
     expert_output_correlation,
     gate_entropy,
+    pairwise_expert_distance,
     persistence_metrics,
     sharpness,
     utilization,
@@ -418,8 +419,14 @@ class Trainer:
         with torch.no_grad():
             probs = out.prior.log_prior.exp()
             r = nll_out.responsibilities
-            corr = expert_output_correlation(out.mu.detach())
+            # expert_signal, not mu: with a shared frozen base, mu_k = f0 + r_k
+            # and the homogenization watch would read the base's correlation
+            # (-> 1) whatever the experts did. See NECOutput.expert_signal.
+            signal = out.expert_signal.detach()
+            corr = expert_output_correlation(signal)
             off = corr - torch.eye(corr.shape[0])
+            dist = pairwise_expert_distance(signal)
+            off_dist = dist[~torch.eye(dist.shape[0], dtype=torch.bool)]
             m = {
                 "step": float(self.step_count),
                 "loss": float(loss),
@@ -429,6 +436,12 @@ class Trainer:
                 "min_batch_utilization": float(utilization(r).min()),
                 "min_running_utilization": float(self.lb_buffer.fractions().min()),
                 "max_offdiag_expert_corr": float(off.abs().max()),
+                # scale-carrying companion to the correlation: two experts can
+                # be perfectly correlated and numerically far apart, or
+                # uncorrelated and identical to four decimals. The minimum is
+                # the alarm — the closest pair is the one about to collapse.
+                "min_pairwise_expert_distance": float(off_dist.min()),
+                "mean_pairwise_expert_distance": float(off_dist.mean()),
             }
             # Persistence of the fitted chain, for any prior exposing a
             # transition matrix (duck-typed, so a future prior gets it free).
@@ -470,7 +483,13 @@ class Trainer:
                 out.prior.log_prior.exp(), self.lb_buffer.fractions()
             )
         if t.aux_expert_decorrelation:
-            loss = loss + t.aux_decorrelation_weight * expert_decorrelation_aux(out.mu)
+            # expert_signal, not mu: in correction mode mu_k = f0 + r_k shares
+            # one base across all K columns, and decorrelating THAT can only be
+            # achieved by inflating the corrections until they dominate the
+            # base — the opposite of what the shrinkage penalty is asking for.
+            loss = loss + t.aux_decorrelation_weight * expert_decorrelation_aux(
+                out.expert_signal
+            )
         loss = loss + self._correction_penalty(out)
         if out.prior.aux_loss is not None:
             loss = loss + out.prior.aux_loss

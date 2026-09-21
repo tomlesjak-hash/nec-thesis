@@ -1,0 +1,107 @@
+TREXQUANT GP ALPHAS — ordered by held-out valid_ir
+==============================================================================
+
+--- Alpha 1  (csv rank 22, seed 19)
+    valid_ir 1.887 | daily_ir 0.1019 | tvr 0.102 | net_ir 1.31 | numstk 325 | max_corr 0.40
+
+alpha = (((at_signlog(ts_mean_exp(-(ts_corr_binary(ret1, ret1_spx, 60)), 60, 0.5)) - -((((close - ts_min(low, 20)) / at_zero2nan(ts_max(high, 20) - ts_min(low, 20))) - (cs_rank(ts_mean(close * volume, 60)) - 1)))) - (ts_std((ts_std(((close * volume) / at_zero2nan(ts_mean(close * volume, 60))), 60) * cs_zscore(((close - ts_min(low, 20)) / at_zero2nan(ts_max(high, 20) - ts_min(low, 20))))), 60) * cs_zscore(((close - ts_min(low, 20)) / at_zero2nan(ts_max(high, 20) - ts_min(low, 20)))))) - cs_zscore(cs_zscore((cs_rank(ts_mean(close * volume, 60)) - 1))))
+
+--- Alpha 2  (csv rank 17, seed 12)
+    valid_ir 1.391 | daily_ir 0.0868 | tvr 0.058 | net_ir 1.12 | numstk 317 | max_corr 0.42
+
+alpha = ts_mean_exp((ts_median((cs_rank(ts_std(ts_max(at_signlog((((close * volume) / at_zero2nan(ts_mean(close * volume, 60))) + (close / at_zero2nan(ts_mean(close, 60))))), 60), 60)) - 1), 20) - at_signsqrt(((close - ts_min(low, 20)) / at_zero2nan(ts_max(high, 20) - ts_min(low, 20))))), 10, 0.5)
+
+--- Alpha 3  (csv rank 29, seed 8)
+    valid_ir 1.305 | daily_ir 0.1306 | tvr 0.206 | net_ir 1.19 | numstk 325 | max_corr 0.37
+
+alpha = ts_mean_exp((((-(ts_zscore(((close - ts_min(low, 20)) / at_zero2nan(ts_max(high, 20) - ts_min(low, 20))), 5)) - ((close - ts_min(low, 20)) / at_zero2nan(ts_max(high, 20) - ts_min(low, 20)))) - ts_corr_binary(ts_corr_binary(ret1, ret1_spx, 60), ts_corr_binary(ts_corr_binary(ret1, ret1_spx, 60), ((open - ts_delay(close, 1)) / at_zero2nan(ts_delay(close, 1))), 20), 20)) - ts_corr_binary(ts_corr_binary(ret1, ret1_spx, 60), ((open - ts_delay(close, 1)) / at_zero2nan(ts_delay(close, 1))), 20)), 20, 0.5)
+
+--- Alpha 4  (csv rank 26, seed 11)
+    valid_ir 1.197 | daily_ir 0.1240 | tvr 0.176 | net_ir 1.25 | numstk 322 | max_corr 0.34
+
+alpha = ts_sum((-(ts_zscore(((close - ts_min(low, 20)) / at_zero2nan(ts_max(high, 20) - ts_min(low, 20))), 10)) - (((ts_median(cs_zscore((volume / at_zero2nan(ts_mean(volume, 20)))), 10) - ts_mean(ret20, 10)) + ts_skew((((volume / at_zero2nan(ts_mean(volume, 20))) - ts_delay((volume / at_zero2nan(ts_mean(volume, 20))), 10)) - ts_delay(((volume / at_zero2nan(ts_mean(volume, 20))) - ts_delay((volume / at_zero2nan(ts_mean(volume, 20))), 10)), 10)), 20)) - ts_mean((-(ts_median(ts_skew(((close - open) / at_zero2nan(open)), 60), 60)) - ts_mean(ret20, 10)), 10))), 10)
+
+--- Alpha 5  (csv rank 21, seed 28)
+    valid_ir 1.196 | daily_ir 0.1423 | tvr 0.199 | net_ir 1.50 | numstk 311 | max_corr 0.32
+
+alpha = (-(ts_mean_exp(ts_zscore(((close / at_zero2nan(ts_mean(close, 20))) + ts_max((close / at_zero2nan(ts_mean(close, 60))), 60)), 10), 20, 0.5)) - ts_mean_exp((cs_rank((ts_zscore(ts_std(((close / at_zero2nan(ts_mean(close, 60))) - ts_delay((close / at_zero2nan(ts_mean(close, 60))), 60)), 20), 60) + ts_mean_exp(((close - ts_min(low, 20)) / at_zero2nan(ts_max(high, 20) - ts_min(low, 20))), 20, 0.5))) - 1), 10, 0.5))
+
+--- Alpha 6  (csv rank 12, seed 14)
+    valid_ir 1.187 | daily_ir 0.0881 | tvr 0.045 | net_ir 1.17 | numstk 326 | max_corr 0.12
+
+alpha = -(ts_sum(ts_std(ts_min(ts_corr_binary((ret20 - (cs_rank(ts_mean(close * volume, 60)) - 1)), ((close - ts_min(low, 20)) / at_zero2nan(ts_max(high, 20) - ts_min(low, 20))), 5), 10), 60), 20))
+
+--- Alpha 7  (csv rank 18, seed 3)
+    valid_ir 1.098 | daily_ir 0.0887 | tvr 0.062 | net_ir 1.11 | numstk 318 | max_corr 0.11
+
+alpha = ts_sum(-(at_signlog(ts_corr_binary(ret20, (ts_corr_binary(ts_skew(ts_corr_binary(ret1, ret1_spx, 60), 10), at_signsqrt(((close * volume) / at_zero2nan(ts_mean(close * volume, 60)))), 60) - (-(ts_delay((close / at_zero2nan(ts_mean(close, 20))), 20)) - ts_mean_exp(at_signsqrt(((close * volume) / at_zero2nan(ts_mean(close * volume, 60)))), 20, 0.5))), 60))), 10)
+
+--- Alpha 8  (csv rank 25, seed 24)
+    valid_ir 1.094 | daily_ir 0.1317 | tvr 0.190 | net_ir 1.27 | numstk 328 | max_corr 0.38
+
+alpha = (ts_mean((ts_zscore(((-(((close - ts_min(low, 20)) / at_zero2nan(ts_max(high, 20) - ts_min(low, 20)))) / at_zero2nan(ts_mean((cs_rank(ts_std(ret1, 20)) - 1), 20))) / at_zero2nan(ts_mean(ts_mean((((close - ts_min(low, 20)) / at_zero2nan(ts_max(high, 20) - ts_min(low, 20))) + (cs_rank(ts_mean(close * volume, 60)) - 1)), 10), 20))), 10) - (cs_rank(ts_mean(close * volume, 60)) - 1)), 10) - (cs_rank((((close - ts_min(low, 20)) / at_zero2nan(ts_max(high, 20) - ts_min(low, 20))) + ((ts_skew(ts_median(((close - open) / at_zero2nan(open)), 20), 60) + ((cs_rank(ts_mean(close * volume, 60)) - 1) + ret5)) + ts_min(ts_mean(ts_mean(ts_mean((cs_rank(ts_mean(close * volume, 60)) - 1), 10), 20), 20), 20)))) - 1))
+
+--- Alpha 9  (csv rank 27, seed 29)
+    valid_ir 1.013 | daily_ir 0.0750 | tvr 0.066 | net_ir 0.92 | numstk 330 | max_corr 0.49
+
+alpha = (((-(ts_corr_binary(ret20, (cs_rank(ts_mean(close * volume, 60)) - 1), 60)) - (cs_rank(ts_mean(close * volume, 60)) - 1)) - ts_sum((close / at_zero2nan(ts_mean(close, 20))), 5)) - ts_max((cs_rank(ts_mean(close * volume, 60)) - 1), 5))
+
+--- Alpha 10  (csv rank 16, seed 12)
+    valid_ir 0.709 | daily_ir 0.0825 | tvr 0.051 | net_ir 1.12 | numstk 317 | max_corr 0.31
+
+alpha = ts_mean_exp((ts_median((cs_rank(ts_std(ts_max((ts_mean_exp(((open - ts_delay(close, 1)) / at_zero2nan(ts_delay(close, 1))), 20, 0.5) / at_zero2nan(ts_sum(((close * volume) / at_zero2nan(ts_mean(close * volume, 60))), 60))), 60), 60)) - 1), 5) - at_signsqrt(((close - ts_min(low, 20)) / at_zero2nan(ts_max(high, 20) - ts_min(low, 20))))), 20, 0.5)
+
+--- Alpha 11  (csv rank 14, seed 26)
+    valid_ir 0.685 | daily_ir 0.0871 | tvr 0.057 | net_ir 1.14 | numstk 324 | max_corr 0.21
+
+alpha = (ts_max(ts_mean(ts_max(ts_corr_binary((ts_mean(ts_std(ret1, 20), 20) - ts_zscore(ts_std(ret1, 20), 10)), ret20, 60), 10), 20), 5) - (close / at_zero2nan(ts_mean(close, 20))))
+
+--- Alpha 12  (csv rank 11, seed 27)
+    valid_ir 0.669 | daily_ir 0.0907 | tvr 0.050 | net_ir 1.22 | numstk 323 | max_corr 0.22
+
+alpha = (((cs_rank(ts_mean(close * volume, 60)) - 1) + ts_mean_exp((-((cs_rank(ts_mean(close * volume, 60)) - 1)) + ts_mean_exp(((((cs_rank(ts_mean(close * volume, 60)) - 1) - ((close - open) / at_zero2nan(open))) + (cs_rank(ts_mean(close * volume, 60)) - 1)) + ((((close - ts_min(low, 20)) / at_zero2nan(ts_max(high, 20) - ts_min(low, 20))) * ((close - ts_min(low, 20)) / at_zero2nan(ts_max(high, 20) - ts_min(low, 20)))) + (cs_rank(ts_mean(close * volume, 60)) - 1))), 10, 0.5)), 60, 0.5)) * ts_min((ts_skew(ts_mean_exp((((close - ts_min(low, 20)) / at_zero2nan(ts_max(high, 20) - ts_min(low, 20))) + (cs_rank(ts_mean(close * volume, 60)) - 1)), 60, 0.5), 5) * ts_skew(-((cs_rank(ts_mean(close * volume, 60)) - 1)), 5)), 60))
+
+--- Alpha 13  (csv rank 10, seed 22)
+    valid_ir 0.647 | daily_ir 0.0985 | tvr 0.053 | net_ir 1.41 | numstk 306 | max_corr 0.27
+
+alpha = ts_std(ts_median((((close / at_zero2nan(ts_mean(close, 20))) - ts_delay((close / at_zero2nan(ts_mean(close, 20))), 10)) + ((ts_min(ts_mean_exp((ts_corr_binary(ret1, ret1_spx, 60) - ts_delay(ts_corr_binary(ret1, ret1_spx, 60), 10)), 60, 0.5), 60) - ts_min(-((close / at_zero2nan(ts_mean(close, 20)))), 60)) + (at_signlog(ts_min((ts_corr_binary(ret1, ret1_spx, 60) - ts_delay(ts_corr_binary(ret1, ret1_spx, 60), 10)), 10)) + (close / at_zero2nan(ts_mean(close, 20)))))), 60), 60)
+
+--- Alpha 14  (csv rank 8, seed 15)
+    valid_ir 0.576 | daily_ir 0.1015 | tvr 0.023 | net_ir 1.52 | numstk 303 | max_corr 0.07
+
+alpha = ts_sum(ts_std(ts_max(ts_max(ts_delay(((close / at_zero2nan(ts_mean(close, 60))) * ts_skew(((close / at_zero2nan(ts_mean(close, 60))) * ((open - ts_delay(close, 1)) / at_zero2nan(ts_delay(close, 1)))), 20)), 60), 10), 20), 60), 60)
+
+--- Alpha 15  (csv rank 19, seed 2)
+    valid_ir 0.559 | daily_ir 0.1592 | tvr 0.204 | net_ir 1.64 | numstk 322 | max_corr 0.21
+
+alpha = (ts_mean((ts_corr_binary(((-(((close - ts_min(low, 20)) / at_zero2nan(ts_max(high, 20) - ts_min(low, 20)))) + ((open - ts_delay(close, 1)) / at_zero2nan(ts_delay(close, 1)))) - ts_delay(((close * volume) / at_zero2nan(ts_mean(close * volume, 60))), 20)), ts_corr_binary(ts_mean(ts_corr_binary(ret1, ret1_spx, 60), 60), ((open - ts_delay(close, 1)) / at_zero2nan(ts_delay(close, 1))), 10), 10) - ts_zscore((close / at_zero2nan(ts_mean(close, 20))), 5)), 10) + ts_mean((ts_mean((ts_corr_binary(ts_std(ret1, 20), ts_zscore((close / at_zero2nan(ts_mean(close, 20))), 10), 10) - ts_zscore(((close * volume) / at_zero2nan(ts_mean(close * volume, 60))), 60)), 5) - (ts_std(ret1, 20) - ts_delay(((close * volume) / at_zero2nan(ts_mean(close * volume, 60))), 10))), 20))
+
+--- Alpha 16  (csv rank 28, seed 11)
+    valid_ir 0.515 | daily_ir 0.1292 | tvr 0.196 | net_ir 1.20 | numstk 330 | max_corr 0.49
+
+alpha = ts_sum((-(ts_zscore(((close - ts_min(low, 20)) / at_zero2nan(ts_max(high, 20) - ts_min(low, 20))), 10)) - (((ts_median(cs_zscore((volume / at_zero2nan(ts_mean(volume, 20)))), 20) - ts_mean(ret20, 10)) + ts_skew(((volume / at_zero2nan(ts_mean(volume, 20))) - ts_delay((volume / at_zero2nan(ts_mean(volume, 20))), 5)), 20)) - ts_mean((-(((close - ts_min(low, 20)) / at_zero2nan(ts_max(high, 20) - ts_min(low, 20)))) - ts_median((ts_std(ret1, 20) / at_zero2nan(ret20)), 5)), 10))), 10)
+
+--- Alpha 17  (csv rank 9, seed 15)
+    valid_ir 0.506 | daily_ir 0.0995 | tvr 0.033 | net_ir 1.55 | numstk 307 | max_corr 0.27
+
+alpha = ts_sum(ts_std(ts_max(ts_delay((((ts_std(ret1, 20) - ts_delay(ts_std(ret1, 20), 10)) * ts_zscore(((close - open) / at_zero2nan(open)), 60)) * (ts_zscore((close / at_zero2nan(ts_mean(close, 60))), 5) * ((open - ts_delay(close, 1)) / at_zero2nan(ts_delay(close, 1))))), 60), 60), 5), 60)
+
+--- Alpha 18  (csv rank 20, seed 26)
+    valid_ir 0.467 | daily_ir 0.0821 | tvr 0.055 | net_ir 1.07 | numstk 319 | max_corr 0.15
+
+alpha = (ts_mean(ts_max(at_signlog(ts_delay(ts_corr_binary(ts_corr_binary(ret1, ret1_spx, 60), ((close - ts_min(low, 20)) / at_zero2nan(ts_max(high, 20) - ts_min(low, 20))), 20), 10)), 20), 60) - at_signlog((close / at_zero2nan(ts_mean(close, 20)))))
+
+--- Alpha 19  (csv rank 15, seed 18)
+    valid_ir 0.386 | daily_ir 0.0915 | tvr 0.063 | net_ir 1.17 | numstk 311 | max_corr 0.33
+
+alpha = (ts_min(ts_min(ts_min(ts_zscore(ts_min(ts_min(ts_zscore(ret5, 60), 20), 10), 60), 60), 5), 60) - cs_zscore(ts_mean_exp(cs_zscore((ts_mean_exp(((close - ts_min(low, 20)) / at_zero2nan(ts_max(high, 20) - ts_min(low, 20))), 5, 0.5) + (cs_rank((cs_rank((cs_rank(ts_mean(close * volume, 60)) - 1)) - 1)) - 1))), 5, 0.5)))
+
+--- Alpha 20  (csv rank 23, seed 10)
+    valid_ir 0.129 | daily_ir 0.0830 | tvr 0.073 | net_ir 0.99 | numstk 316 | max_corr 0.13
+
+alpha = ts_corr_binary(ts_max((ts_mean(ts_std(ret1, 20), 60) / at_zero2nan(ts_std(ret1, 20))), 60), ts_mean_exp(ts_mean_exp(ts_std(ret1, 20), 60, 0.5), 60, 0.5), 60)
+
+--- Alpha 21  (csv rank 13, seed 5)
+    valid_ir 0.035 | daily_ir 0.1077 | tvr 0.077 | net_ir 1.38 | numstk 323 | max_corr 0.10
+
+alpha = ts_mean_exp(((ret5 + ts_corr_binary(ts_median(-(ret20), 60), (close / at_zero2nan(ts_mean(close, 20))), 60)) * -(((close - ts_min(low, 20)) / at_zero2nan(ts_max(high, 20) - ts_min(low, 20))))), 20, 0.5)

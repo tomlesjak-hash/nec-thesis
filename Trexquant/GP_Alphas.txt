@@ -1,0 +1,37 @@
+TREXQUANT GP ALPHAS — ordered by held-out valid_ir
+==============================================================================
+
+--- Alpha 1  (csv rank 6, seed 3)
+    valid_ir 0.966 | daily_ir 0.0840 | tvr 0.088 | net_ir 1.15 | numstk 364 | max_corr 0.42
+
+alpha = (ts_max(ts_zscore(ts_skew(((close - open) / at_zero2nan(open)), 5), 60), 60) + (((open - ts_delay(close, 1)) / at_zero2nan(ts_delay(close, 1))) + -((close / at_zero2nan(ts_mean(close, 20))))))
+
+--- Alpha 2  (csv rank 0, seed 24)
+    valid_ir 0.822 | daily_ir 0.0952 | tvr 0.053 | net_ir 1.42 | numstk 373 | max_corr 0.00
+
+alpha = -((((close / at_zero2nan(ts_mean(close, 20))) * ts_sum(at_signlog((cs_rank(ts_mean(close * volume, 60)) - 1)), 20)) * (close / at_zero2nan(ts_mean(close, 20)))))
+
+--- Alpha 3  (csv rank 5, seed 28)
+    valid_ir 1.068 | daily_ir 0.0720 | tvr 0.052 | net_ir 1.03 | numstk 350 | max_corr 0.43
+
+alpha = ts_median(ts_delay(ts_delay(ts_std(ts_corr_binary(((close - open) / at_zero2nan(open)), ((open - ts_delay(close, 1)) / at_zero2nan(ts_delay(close, 1))), 10), 20), 60), 60), 60)
+
+--- Alpha 4  (csv rank 1, seed 9)
+    valid_ir 0.969 | daily_ir 0.0874 | tvr 0.032 | net_ir 1.34 | numstk 356 | max_corr 0.40
+
+alpha = (((close / at_zero2nan(ts_mean(close, 60))) / at_zero2nan((cs_rank(ts_mean(close * volume, 60)) - 1))) + ts_sum(ts_corr_binary(ts_skew(ts_corr_binary(ret1, ret1_spx, 60), 60), ts_mean(((open - ts_delay(close, 1)) / at_zero2nan(ts_delay(close, 1))), 10), 60), 60))
+
+--- Alpha 5  (csv rank 7, seed 3)
+    valid_ir 0.658 | daily_ir 0.0771 | tvr 0.074 | net_ir 1.04 | numstk 364 | max_corr 0.44
+
+alpha = (ts_max(ts_zscore(ts_std(ts_skew(((close - open) / at_zero2nan(open)), 5), 5), 60), 60) + (((open - ts_delay(close, 1)) / at_zero2nan(ts_delay(close, 1))) + -((close / at_zero2nan(ts_mean(close, 20))))))
+
+--- Alpha 6  (csv rank 4, seed 23)
+    valid_ir 0.169 | daily_ir 0.0750 | tvr 0.042 | net_ir 1.13 | numstk 364 | max_corr 0.38
+
+alpha = ts_mean(ts_max(ts_mean_exp(((ts_corr_binary(ret1, ret1_spx, 60) - ts_delay(ts_corr_binary(ret1, ret1_spx, 60), 5)) - ((close * volume) / at_zero2nan(ts_mean(close * volume, 60)))), 10, 0.5), 60), 10)
+
+--- Alpha 7  (csv rank 2, seed 9)
+    valid_ir 0.013 | daily_ir 0.0836 | tvr 0.040 | net_ir 1.31 | numstk 356 | max_corr 0.50
+
+alpha = (((close / at_zero2nan(ts_mean(close, 60))) / at_zero2nan((cs_rank(ts_mean(close * volume, 60)) - 1))) + ts_mean(ts_min(ts_skew(ts_max(ts_corr_binary(ret1, ret1_spx, 60), 60), 60), 60), 5))

@@ -1,0 +1,37 @@
+# --- features (rank-normalised, matching training) ----------
+f_amihud = cs_rank(((at_signsqrt(ret1) * 0 + abs(ret1)) / at_zero2nan(close*volume) * 1e9)) - 1.5
+f_beta60 = cs_rank(ts_corr_binary(ret1, ret1_spx, 60)) - 1.5
+f_c_ma20 = cs_rank((close / at_zero2nan(ts_mean(close, 20)))) - 1.5
+f_c_ma60 = cs_rank((close / at_zero2nan(ts_mean(close, 60)))) - 1.5
+f_co = cs_rank(((close - open) / at_zero2nan(open))) - 1.5
+f_dv_adv = cs_rank(((close*volume) / at_zero2nan(ts_mean(close*volume, 60)))) - 1.5
+f_gap = cs_rank(((open - ts_delay(close,1)) / at_zero2nan(ts_delay(close,1)))) - 1.5
+f_hi52 = cs_rank((close / at_zero2nan(ts_max(close, 252)))) - 1.5
+f_hl = cs_rank((high / at_zero2nan(low))) - 1.5
+f_ret1 = cs_rank(ret1) - 1.5
+f_ret20 = cs_rank(ret20) - 1.5
+f_ret5 = cs_rank(ret5) - 1.5
+f_size = cs_rank((cs_rank(ts_mean(close*volume, 60)) - 1)) - 1.5
+f_stoch = cs_rank(((close - ts_min(low,20)) / at_zero2nan(ts_max(high,20) - ts_min(low,20)))) - 1.5
+f_v_ma20 = cs_rank((volume / at_zero2nan(ts_mean(volume, 20)))) - 1.5
+f_vol20 = cs_rank(ts_std(ret1, 20)) - 1.5
+
+# --- learned ridge weights ----------------------------------
+score = ( -0.000960 * f_amihud \
+      + -0.000038 * f_beta60 \
+      + -0.001394 * f_c_ma20 \
+      + +0.000326 * f_c_ma60 \
+      + -0.002540 * f_co \
+      + +0.000511 * f_dv_adv \
+      + -0.002239 * f_gap \
+      + +0.001632 * f_hi52 \
+      + -0.002515 * f_hl \
+      + -0.003583 * f_ret1 \
+      + -0.000266 * f_ret20 \
+      + -0.001998 * f_ret5 \
+      + -0.001152 * f_size \
+      + -0.001128 * f_stoch \
+      + +0.001171 * f_v_ma20 \
+      + -0.001832 * f_vol20 )
+
+alpha = at_zero2nan(cs_winsor(score, 0.01, remove_extreme=False))

@@ -1,0 +1,28 @@
+# --- features (rank-normalised, matching training) ----------
+f_amihud = cs_rank(((at_signsqrt(ret1) * 0 + abs(ret1)) / at_zero2nan(close*volume) * 1e9)) - 1.5
+f_beta60 = cs_rank(ts_corr_binary(ret1, ret1_spx, 60)) - 1.5
+f_c_ma20 = cs_rank((close / at_zero2nan(ts_mean(close, 20)))) - 1.5
+f_c_ma60 = cs_rank((close / at_zero2nan(ts_mean(close, 60)))) - 1.5
+f_co = cs_rank(((close - open) / at_zero2nan(open))) - 1.5
+f_dv_adv = cs_rank(((close*volume) / at_zero2nan(ts_mean(close*volume, 60)))) - 1.5
+f_gap = cs_rank(((open - ts_delay(close,1)) / at_zero2nan(ts_delay(close,1)))) - 1.5
+f_hi52 = cs_rank((close / at_zero2nan(ts_max(close, 252)))) - 1.5
+f_hl = cs_rank((high / at_zero2nan(low))) - 1.5
+f_ret1 = cs_rank(ret1) - 1.5
+f_ret20 = cs_rank(ret20) - 1.5
+f_ret5 = cs_rank(ret5) - 1.5
+f_size = cs_rank((cs_rank(ts_mean(close*volume, 60)) - 1)) - 1.5
+f_stoch = cs_rank(((close - ts_min(low,20)) / at_zero2nan(ts_max(high,20) - ts_min(low,20)))) - 1.5
+f_v_ma20 = cs_rank((volume / at_zero2nan(ts_mean(volume, 20)))) - 1.5
+f_vol20 = cs_rank(ts_std(ret1, 20)) - 1.5
+
+# --- hidden layer (ReLU) ------------------------------------
+h0 = np.maximum(0.0, +0.03779*f_amihud + -0.18924*f_beta60 + -0.24321*f_c_ma20 + -0.80767*f_c_ma60 + -0.20067*f_co + -0.03512*f_dv_adv + +0.32015*f_gap + -0.14590*f_hi52 + -0.06529*f_hl + -0.23895*f_ret1 + -0.43511*f_ret20 + +0.08606*f_ret5 + +0.63608*f_size + +0.00448*f_stoch + +0.16363*f_v_ma20 + -0.17085*f_vol20 -0.01426)
+h1 = np.maximum(0.0, -0.03913*f_amihud + +0.12892*f_beta60 + -0.44560*f_c_ma20 + -0.08207*f_c_ma60 + -0.10103*f_co + +0.47939*f_dv_adv + +0.03197*f_gap + +0.07169*f_hi52 + +0.19643*f_hl + -0.03566*f_ret1 + +0.53318*f_ret20 + -0.10330*f_ret5 + +0.45988*f_size + +0.23390*f_stoch + +0.24229*f_v_ma20 + -0.40756*f_vol20 -0.02583)
+h2 = np.maximum(0.0, +0.16757*f_amihud + +0.43280*f_beta60 + -0.21024*f_c_ma20 + -0.37028*f_c_ma60 + +0.06784*f_co + -0.17277*f_dv_adv + -0.23497*f_gap + -0.25313*f_hi52 + +0.00495*f_hl + +0.20991*f_ret1 + +0.50590*f_ret20 + +0.45149*f_ret5 + +0.13341*f_size + -0.43433*f_stoch + -0.34729*f_v_ma20 + +0.50558*f_vol20 -0.41230)
+h3 = np.maximum(0.0, -0.02667*f_amihud + +0.30710*f_beta60 + -0.03189*f_c_ma20 + -0.25208*f_c_ma60 + +0.26579*f_co + +0.13636*f_dv_adv + -0.29936*f_gap + -0.03881*f_hi52 + +0.07441*f_hl + +0.43576*f_ret1 + +0.25502*f_ret20 + +0.60417*f_ret5 + -0.38547*f_size + +0.09940*f_stoch + -0.21166*f_v_ma20 + -0.22446*f_vol20 -0.30395)
+
+# --- output layer -------------------------------------------
+score = +0.16765*h0 + -0.11257*h1 + +0.96277*h2 + +0.77412*h3 -0.07266
+
+alpha = at_zero2nan(cs_winsor(score, 0.01, remove_extreme=False))

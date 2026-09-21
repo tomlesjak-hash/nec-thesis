@@ -26,3 +26,8 @@ NEC_textbook/*.log
 NEC_textbook/*.aux
 NEC_textbook/*.toc
 NEC_textbook/*.out
+
+# Other workspaces: code is tracked, derived data is not
+Trexquant/cache/
+Trexquant/panel/
+MLFB/

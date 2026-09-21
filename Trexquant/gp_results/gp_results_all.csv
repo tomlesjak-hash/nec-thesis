@@ -1,0 +1,451 @@
+formula,fitness,terminals,seed,max_corr
+"signlog(neg(mul(size, c_ma20)))",5.276807718673314,"beta60,c_ma20,c_ma60,dv_adv,gap,hl,ret20,size,v_ma20",7,0.9046
+"signlog(mul(neg(c_ma20), ts_min(size, w20)))",5.144488706863994,"beta60,c_ma20,c_ma60,dv_adv,gap,hl,ret20,size,v_ma20",7,0.9158
+"signlog(neg(mul(c_ma60, mul(size, c_ma60))))",5.039804977262294,"beta60,c_ma20,c_ma60,dv_adv,gap,hl,ret20,size,v_ma20",7,0.8767
+"signlog(neg(mul(mul(size, c_ma60), c_ma60)))",5.039804977262294,"beta60,c_ma20,c_ma60,dv_adv,gap,hl,ret20,size,v_ma20",7,0.8767
+"signlog(neg(mul(size, c_ma60)))",5.021465755800182,"beta60,c_ma20,c_ma60,dv_adv,gap,hl,ret20,size,v_ma20",7,0.889
+"signlog(neg(mul(mul(size, c_ma60), ts_min(c_ma60, w60))))",5.010275265374273,"beta60,c_ma20,c_ma60,dv_adv,gap,hl,ret20,size,v_ma20",7,0.7723
+"signlog(neg(mul(ts_min(c_ma60, w60), mul(size, c_ma60))))",5.010275265374273,"beta60,c_ma20,c_ma60,dv_adv,gap,hl,ret20,size,v_ma20",7,0.7723
+"signlog(neg(mul(mul(size, c_ma60), ts_min(hl, w60))))",4.923086910025923,"beta60,c_ma20,c_ma60,dv_adv,gap,hl,ret20,size,v_ma20",7,0.8906
+"signlog(neg(mul(mul(size, c_ma60), ts_min(hl, w_id(w60)))))",4.902659163511292,"beta60,c_ma20,c_ma60,dv_adv,gap,hl,ret20,size,v_ma20",7,0.8906
+"signlog(neg(add(ts_delta(c_ma20, w10), size)))",4.739434084389464,"beta60,c_ma20,c_ma60,dv_adv,gap,hl,ret20,size,v_ma20",7,0.8393
+"signlog(neg(mul(mul(size, ts_min(c_ma60, w10)), c_ma60)))",4.638959513464252,"beta60,c_ma20,c_ma60,dv_adv,gap,hl,ret20,size,v_ma20",7,0.836
+"div(ts_max(ts_delay(div(size, mul(size, c_ma60)), w60), w60), mul(size, c_ma60))",4.605213108415876,"beta60,c_ma20,c_ma60,dv_adv,gap,hl,ret20,size,v_ma20",7,0.7685
+"signlog(neg(mul(mul(mul(size, c_ma60), c_ma60), c_ma60)))",4.535651560766169,"beta60,c_ma20,c_ma60,dv_adv,gap,hl,ret20,size,v_ma20",7,0.7773
+"signlog(neg(add(ts_delta(c_ma20, w20), size)))",4.521351408994322,"beta60,c_ma20,c_ma60,dv_adv,gap,hl,ret20,size,v_ma20",7,0.8607
+"div(ts_min(ts_delay(ts_max(ts_corr(beta60, hl, w60), w60), w60), w_id(w_id(w20))), size)",4.485915782011515,"beta60,c_ma20,c_ma60,dv_adv,gap,hl,ret20,size,v_ma20",7,0.7293
+"ts_max(ts_mean(add(ts_delta(ts_skew(ret1, w20), w20), ts_delta(beta60, w60)), w_id(w20)), w60)",4.603005041313516,"beta60,c_ma20,dv_adv,gap,ret1,ret20,ret5,stoch,v_ma20",6,0.735
+"ts_std(ts_mean(add(ts_delta(beta60, w60), add(dv_adv, ts_delta(beta60, w20))), w20), w60)",4.513948029377797,"beta60,c_ma20,dv_adv,gap,ret1,ret20,ret5,stoch,v_ma20",6,0.6259
+"ts_std(ts_mean(add(add(dv_adv, ts_delta(beta60, w20)), ts_delta(beta60, w60)), w20), w60)",4.513948029377797,"beta60,c_ma20,dv_adv,gap,ret1,ret20,ret5,stoch,v_ma20",6,0.6259
+"ts_std(ts_mean(add(ts_delta(beta60, w20), add(dv_adv, ts_delta(beta60, w60))), w20), w60)",4.513947757794442,"beta60,c_ma20,dv_adv,gap,ret1,ret20,ret5,stoch,v_ma20",6,0.6259
+"ts_std(ts_mean(add(add(dv_adv, ts_delta(beta60, w60)), ts_delta(beta60, w20)), w20), w60)",4.513947757794442,"beta60,c_ma20,dv_adv,gap,ret1,ret20,ret5,stoch,v_ma20",6,0.6259
+"ts_std(ts_mean(add(ts_delta(beta60, w60), add(dv_adv, ts_delta(beta60, w20))), w20), w_id(w60))",4.494901835161014,"beta60,c_ma20,dv_adv,gap,ret1,ret20,ret5,stoch,v_ma20",6,0.6259
+"ts_std(ts_mean(add(add(dv_adv, ts_delta(beta60, w20)), ts_delta(beta60, w60)), w20), w_id(w60))",4.494901835161014,"beta60,c_ma20,dv_adv,gap,ret1,ret20,ret5,stoch,v_ma20",6,0.6259
+"ts_std(ts_mean(add(dv_adv, ts_delta(ts_max(beta60, w20), w60)), w20), w_id(w60))",4.485551215893938,"beta60,c_ma20,dv_adv,gap,ret1,ret20,ret5,stoch,v_ma20",6,0.6141
+"ts_std(ts_mean(add(add(dv_adv, ts_delta(beta60, w20)), ts_delta(beta60, w60)), w_id(w_id(w20))), w60)",4.475855640944229,"beta60,c_ma20,dv_adv,gap,ret1,ret20,ret5,stoch,v_ma20",6,0.6259
+"ts_std(ts_mean(add(add(dv_adv, ts_delta(beta60, w20)), ts_delta(beta60, w60)), w20), w_id(w_id(w60)))",4.475855640944229,"beta60,c_ma20,dv_adv,gap,ret1,ret20,ret5,stoch,v_ma20",6,0.6259
+"ts_std(ts_mean(add(ts_delta(beta60, w60), dv_adv), w20), w60)",4.380753092056618,"beta60,c_ma20,dv_adv,gap,ret1,ret20,ret5,stoch,v_ma20",6,0.6185
+"ts_std(ts_mean(add(dv_adv, ts_delta(beta60, w60)), w20), w60)",4.380753092056618,"beta60,c_ma20,dv_adv,gap,ret1,ret20,ret5,stoch,v_ma20",6,0.6185
+"ts_std(ts_mean(add(ts_delta(beta60, w60), dv_adv), w20), w_id(w60))",4.362575693334391,"beta60,c_ma20,dv_adv,gap,ret1,ret20,ret5,stoch,v_ma20",6,0.6185
+"ts_std(ts_mean(add(dv_adv, ts_delta(beta60, w60)), w_id(w20)), w60)",4.362575693334391,"beta60,c_ma20,dv_adv,gap,ret1,ret20,ret5,stoch,v_ma20",6,0.6185
+"ts_std(ts_mean(add(dv_adv, ts_delta(beta60, w_id(w60))), w20), w60)",4.362575693334391,"beta60,c_ma20,dv_adv,gap,ret1,ret20,ret5,stoch,v_ma20",6,0.6185
+"add(div(c_ma60, size), ts_sum(ts_corr(ts_skew(beta60, w60), ts_mean(gap, w10), w60), w60))",5.856897056228896,"beta60,c_ma60,dv_adv,gap,ret1,ret20,ret5,size,v_ma20",9,0.4009
+"add(div(c_ma60, size), ts_sum(ts_corr(ts_skew(beta60, w60), ts_mean(gap, w_id(w10)), w60), w60))",5.832079695821147,"beta60,c_ma60,dv_adv,gap,ret1,ret20,ret5,size,v_ma20",9,1.0
+"add(div(c_ma60, size), ts_sum(ts_corr(ts_skew(beta60, w60), ts_mean(gap, w10), w_id(w60)), w60))",5.832079695821147,"beta60,c_ma60,dv_adv,gap,ret1,ret20,ret5,size,v_ma20",9,1.0
+"add(div(c_ma60, size), ts_sum(ts_corr(ts_skew(beta60, w60), ts_mean(gap, w10), w60), w_id(w60)))",5.832079695821147,"beta60,c_ma60,dv_adv,gap,ret1,ret20,ret5,size,v_ma20",9,1.0
+"add(div(c_ma60, size), ts_sum(ts_corr(ts_skew(beta60, w60), ts_mean(gap, w10), w60), w_id(w_id(w60))))",5.807262335413397,"beta60,c_ma60,dv_adv,gap,ret1,ret20,ret5,size,v_ma20",9,1.0
+"add(div(c_ma60, size), ts_sum(ts_corr(ts_skew(beta60, w_id(w60)), ts_mean(gap, w10), w60), w_id(w60)))",5.807262335413397,"beta60,c_ma60,dv_adv,gap,ret1,ret20,ret5,size,v_ma20",9,1.0
+"add(div(signlog(c_ma60), size), ts_sum(ts_corr(ts_skew(beta60, w60), ts_mean(gap, w10), w60), w_id(w60)))",5.777876175236929,"beta60,c_ma60,dv_adv,gap,ret1,ret20,ret5,size,v_ma20",9,0.9741
+"add(div(c_ma60, size), ts_sum(ts_corr(ts_skew(beta60, w60), ts_mean(gap, w20), w60), w60))",5.719878366580848,"beta60,c_ma60,dv_adv,gap,ret1,ret20,ret5,size,v_ma20",9,0.8478
+"add(div(c_ma60, size), ts_sum(ts_corr(ts_skew(beta60, w60), ts_mean(gap, w20), w60), w_id(w60)))",5.695641593841098,"beta60,c_ma60,dv_adv,gap,ret1,ret20,ret5,size,v_ma20",9,0.8478
+"add(div(c_ma60, size), ts_sum(ts_corr(ts_skew(beta60, w60), ts_mean(gap, w_id(w20)), w60), w60))",5.695641593841098,"beta60,c_ma60,dv_adv,gap,ret1,ret20,ret5,size,v_ma20",9,0.8478
+"add(div(c_ma60, size), ts_sum(ts_corr(ts_skew(beta60, w60), ts_mean(gap, w_id(w20)), w60), w_id(w_id(w60))))",5.6471680483616,"beta60,c_ma60,dv_adv,gap,ret1,ret20,ret5,size,v_ma20",9,0.8478
+"add(div(c_ma60, size), ts_mean(ts_min(ts_skew(ts_max(beta60, w60), w60), w60), w_id(w_id(w5))))",5.5789645559001455,"beta60,c_ma60,dv_adv,gap,ret1,ret20,ret5,size,v_ma20",9,0.4961
+"add(div(c_ma60, size), ts_mean(ts_min(ts_skew(ts_max(beta60, w60), w60), w20), w_id(w_id(w60))))",5.489164694787533,"beta60,c_ma60,dv_adv,gap,ret1,ret20,ret5,size,v_ma20",9,0.95
+"sub(div(signlog(signlog(c_ma60)), size), signlog(ts_sum(ts_corr(ts_delta(dv_adv, w20), c_ma60, w60), w60)))",5.441249941974006,"beta60,c_ma60,dv_adv,gap,ret1,ret20,ret5,size,v_ma20",9,0.8123
+"add(div(c_ma60, size), ts_sum(ts_corr(ts_skew(beta60, w60), ts_mean(gap, w_id(w5)), w60), w60))",5.387751449158721,"beta60,c_ma60,dv_adv,gap,ret1,ret20,ret5,size,v_ma20",9,0.9527
+"add(ts_max(ts_zscore(ts_skew(co, w5), w60), w60), add(gap, neg(c_ma20)))",4.2878470298948175,"beta60,c_ma20,c_ma60,co,dv_adv,gap,ret1,ret20,ret5",3,0.4245
+"add(ts_max(ts_zscore(ts_skew(co, w5), w60), w_id(w60)), add(gap, neg(c_ma20)))",4.269830865903662,"beta60,c_ma20,c_ma60,co,dv_adv,gap,ret1,ret20,ret5",3,1.0
+"add(ts_max(ts_zscore(ts_skew(co, w5), w_id(w60)), w60), add(gap, neg(c_ma20)))",4.269830865903662,"beta60,c_ma20,c_ma60,co,dv_adv,gap,ret1,ret20,ret5",3,1.0
+"add(ts_max(ts_zscore(ts_skew(co, w5), w60), w_id(w_id(w60))), add(gap, neg(c_ma20)))",4.251814701912508,"beta60,c_ma20,c_ma60,co,dv_adv,gap,ret1,ret20,ret5",3,1.0
+"add(ts_max(ts_zscore(ts_skew(co, w5), w_id(w_id(w60))), w60), add(gap, neg(c_ma20)))",4.251814701912508,"beta60,c_ma20,c_ma60,co,dv_adv,gap,ret1,ret20,ret5",3,1.0
+"add(ts_max(ts_zscore(ts_std(ts_skew(co, w5), w5), w60), w60), add(gap, neg(c_ma20)))",4.241736903061938,"beta60,c_ma20,c_ma60,co,dv_adv,gap,ret1,ret20,ret5",3,0.4449
+"add(ts_max(ts_zscore(ts_skew(co, w5), w60), w60), add(ts_max(ts_mean(ret5, w20), w_id(w60)), neg(c_ma20)))",4.225433646600263,"beta60,c_ma20,c_ma60,co,dv_adv,gap,ret1,ret20,ret5",3,0.9421
+"add(ts_max(ts_zscore(ts_std(ts_skew(co, w5), w_id(w5)), w60), w60), add(gap, neg(c_ma20)))",4.223763441608286,"beta60,c_ma20,c_ma60,co,dv_adv,gap,ret1,ret20,ret5",3,1.0
+"add(ts_max(ts_zscore(ts_std(ts_skew(co, w5), w5), w_id(w60)), w60), add(gap, neg(c_ma20)))",4.223763441608286,"beta60,c_ma20,c_ma60,co,dv_adv,gap,ret1,ret20,ret5",3,1.0
+"add(ts_max(ts_zscore(ts_std(ts_skew(co, w5), w5), w60), w_id(w60)), add(gap, neg(c_ma20)))",4.223763441608286,"beta60,c_ma20,c_ma60,co,dv_adv,gap,ret1,ret20,ret5",3,1.0
+"add(ts_max(ts_zscore(ts_std(ts_skew(co, w5), w_id(w5)), w60), w_id(w60)), add(gap, neg(c_ma20)))",4.205789980154633,"beta60,c_ma20,c_ma60,co,dv_adv,gap,ret1,ret20,ret5",3,1.0
+"add(ts_max(ts_zscore(ts_std(ts_skew(co, w5), w5), w_id(w_id(w60))), w60), add(gap, neg(c_ma20)))",4.205789980154633,"beta60,c_ma20,c_ma60,co,dv_adv,gap,ret1,ret20,ret5",3,1.0
+"add(ts_max(ts_zscore(ts_std(ts_skew(co, w5), w5), w_id(w60)), w_id(w60)), add(gap, neg(c_ma20)))",4.205789980154633,"beta60,c_ma20,c_ma60,co,dv_adv,gap,ret1,ret20,ret5",3,1.0
+"add(ts_max(ts_zscore(ts_std(ts_skew(co, w5), w5), w60), w_id(w_id(w60))), add(gap, neg(c_ma20)))",4.205789980154633,"beta60,c_ma20,c_ma60,co,dv_adv,gap,ret1,ret20,ret5",3,1.0
+"add(ts_max(ts_zscore(ts_skew(co, w5), w60), w60), neg(c_ma20))",4.2050442669890655,"beta60,c_ma20,c_ma60,co,dv_adv,gap,ret1,ret20,ret5",3,0.9848
+"ts_std(div(ts_std(dv_adv, w60), div(div(sub(stoch, ret20), ts_skew(gap, w60)), ts_skew(ts_mean(ret5, w60), w60))), w60)",5.196929286467143,"beta60,c_ma20,dv_adv,gap,hl,ret1,ret20,ret5,stoch",5,0.606
+"ts_std(div(ts_std(dv_adv, w60), div(div(sub(stoch, ret20), ts_skew(ret1, w60)), ts_skew(ts_sum(ret1, w60), w60))), w60)",5.03884369658282,"beta60,c_ma20,dv_adv,gap,hl,ret1,ret20,ret5,stoch",5,0.572
+"ts_std(div(ts_std(dv_adv, w60), div(div(sub(stoch, ret20), ts_skew(gap, w60)), ts_std(beta60, w60))), w60)",5.034785237496373,"beta60,c_ma20,dv_adv,gap,hl,ret1,ret20,ret5,stoch",5,0.6034
+"ts_std(div(ts_std(ts_std(dv_adv, w60), w60), div(div(sub(stoch, ret20), ts_skew(gap, w60)), ts_skew(ret1, w60))), w60)",5.00162997163957,"beta60,c_ma20,dv_adv,gap,hl,ret1,ret20,ret5,stoch",5,0.571
+"ts_std(div(ts_std(ts_std(dv_adv, w60), w60), div(div(sub(stoch, ret20), ts_skew(gap, w60)), ts_skew(gap, w60))), w60)",4.983909264902184,"beta60,c_ma20,dv_adv,gap,hl,ret1,ret20,ret5,stoch",5,0.5976
+"ts_std(div(ts_std(ts_std(dv_adv, w_id(w60)), w60), div(div(sub(stoch, ret20), ts_skew(gap, w60)), ts_skew(ret1, w60))), w60)",4.979977893840265,"beta60,c_ma20,dv_adv,gap,hl,ret1,ret20,ret5,stoch",5,0.571
+"ts_std(div(ts_std(ts_std(dv_adv, w60), w60), div(div(sub(stoch, ret20), ts_skew(gap, w60)), ts_skew(ret1, w60))), w_id(w60))",4.979977893840265,"beta60,c_ma20,dv_adv,gap,hl,ret1,ret20,ret5,stoch",5,0.571
+"ts_std(div(ts_std(ts_std(dv_adv, w60), w_id(w_id(w60))), div(div(sub(stoch, ret20), ts_skew(gap, w60)), ts_skew(ret1, w60))), w60)",4.95832581604096,"beta60,c_ma20,dv_adv,gap,hl,ret1,ret20,ret5,stoch",5,0.571
+"ts_std(div(ts_std(ts_std(dv_adv, w60), w60), div(sub(stoch, ret20), ts_skew(gap, w60))), w60)",4.954030133310635,"beta60,c_ma20,dv_adv,gap,hl,ret1,ret20,ret5,stoch",5,0.5905
+"ts_std(div(ts_std(ts_std(dv_adv, w20), w60), div(div(sub(stoch, ret20), ts_skew(gap, w60)), ts_skew(ret1, w60))), w60)",4.93741991042798,"beta60,c_ma20,dv_adv,gap,hl,ret1,ret20,ret5,stoch",5,0.5597
+"ts_std(div(ts_std(dv_adv, w60), div(div(sub(stoch, ret20), ts_skew(gap, w60)), ts_skew(mul(dv_adv, ret20), w60))), w60)",4.932638226291959,"beta60,c_ma20,dv_adv,gap,hl,ret1,ret20,ret5,stoch",5,0.5886
+"ts_std(div(ts_std(ts_std(dv_adv, w_id(w20)), w60), div(div(sub(stoch, ret20), ts_skew(gap, w60)), ts_skew(ret1, w60))), w60)",4.916045798261625,"beta60,c_ma20,dv_adv,gap,hl,ret1,ret20,ret5,stoch",5,0.5597
+"ts_std(div(ts_std(dv_adv, w60), div(div(sub(stoch, ret20), ts_skew(gap, w60)), ts_skew(c_ma20, w60))), w60)",4.912907423048646,"beta60,c_ma20,dv_adv,gap,hl,ret1,ret20,ret5,stoch",5,0.5265
+"ts_std(div(ts_std(ts_std(dv_adv, w60), w60), div(div(sub(stoch, ret20), ts_skew(gap, w60)), c_ma20)), w60)",4.907570403306867,"beta60,c_ma20,dv_adv,gap,hl,ret1,ret20,ret5,stoch",5,0.5885
+"ts_std(div(ts_std(ts_skew(signlog(gap), w60), w60), div(div(sub(stoch, ret20), ts_skew(ret1, w60)), ts_skew(mul(dv_adv, ret20), w60))), w60)",4.904011192182125,"beta60,c_ma20,dv_adv,gap,hl,ret1,ret20,ret5,stoch",5,0.6649
+"ts_max(ts_mean(ts_mean(sub(ts_max(dv_adv, w20), ts_skew(gap, w60)), w60), w20), w5)",5.164654260156278,"beta60,c_ma20,c_ma60,dv_adv,gap,ret1,ret20,stoch,vol20",2,0.5541
+"ts_max(ts_mean(ts_mean(sub(ts_max(dv_adv, w20), ts_skew(gap, w60)), w60), w20), w_id(w5))",5.142862470029037,"beta60,c_ma20,c_ma60,dv_adv,gap,ret1,ret20,stoch,vol20",2,0.5541
+"ts_max(ts_mean(ts_mean(sub(ts_max(dv_adv, w20), ts_skew(gap, w60)), w60), w_id(w_id(w20))), w5)",5.121070679901795,"beta60,c_ma20,c_ma60,dv_adv,gap,ret1,ret20,stoch,vol20",2,0.5541
+"ts_max(ts_mean(ts_mean(sub(ts_max(dv_adv, w20), ts_skew(gap, w60)), w60), w20), w_id(w_id(w5)))",5.121070679901795,"beta60,c_ma20,c_ma60,dv_adv,gap,ret1,ret20,stoch,vol20",2,0.5541
+"ts_max(ts_mean(ts_mean(sub(ts_max(dv_adv, w20), ts_skew(gap, w60)), w60), w20), w_id(w_id(w_id(w5))))",5.099278889774554,"beta60,c_ma20,c_ma60,dv_adv,gap,ret1,ret20,stoch,vol20",2,0.5541
+"ts_max(ts_mean(ts_mean(sub(ts_max(dv_adv, w20), ts_skew(gap, w60)), w60), w_id(w20)), w_id(w_id(w5)))",5.099278889774554,"beta60,c_ma20,c_ma60,dv_adv,gap,ret1,ret20,stoch,vol20",2,0.5541
+"ts_max(ts_mean(ts_mean(sub(ts_max(dv_adv, w20), ts_skew(gap, w60)), w60), w20), w_id(w_id(w_id(w_id(w5)))))",5.077487099647311,"beta60,c_ma20,c_ma60,dv_adv,gap,ret1,ret20,stoch,vol20",2,0.5541
+"ts_max(ts_mean(ts_mean(sub(ts_max(dv_adv, w20), ts_skew(gap, w60)), w60), w_id(w_id(w20))), w_id(w_id(w5)))",5.077487099647311,"beta60,c_ma20,c_ma60,dv_adv,gap,ret1,ret20,stoch,vol20",2,0.5541
+"ts_max(ts_mean(ts_mean(sub(ts_max(dv_adv, w20), ts_skew(gap, w60)), w_id(w_id(w60))), w20), w_id(w_id(w5)))",5.077487099647311,"beta60,c_ma20,c_ma60,dv_adv,gap,ret1,ret20,stoch,vol20",2,0.5541
+"ts_max(ts_mean(ts_mean(sub(ts_max(dv_adv, w20), ts_skew(gap, w60)), w60), w_id(w_id(w_id(w20)))), w_id(w_id(w5)))",5.05569530952007,"beta60,c_ma20,c_ma60,dv_adv,gap,ret1,ret20,stoch,vol20",2,0.5541
+"ts_max(ts_mean(sub(ts_max(dv_adv, w20), ts_skew(gap, w60)), w60), w20)",5.048767979953753,"beta60,c_ma20,c_ma60,dv_adv,gap,ret1,ret20,stoch,vol20",2,0.671
+"ts_max(ts_mean(sub(sub(ts_max(dv_adv, w20), ts_skew(gap, w60)), ts_skew(gap, w60)), w60), w20)",5.032095058413233,"beta60,c_ma20,c_ma60,dv_adv,gap,ret1,ret20,stoch,vol20",2,0.5221
+"ts_max(ts_mean(sub(ts_max(dv_adv, w20), ts_skew(gap, w_id(w60))), w60), w20)",5.027643427736373,"beta60,c_ma20,c_ma60,dv_adv,gap,ret1,ret20,stoch,vol20",2,0.671
+"ts_max(ts_mean(sub(ts_max(dv_adv, w20), ts_skew(gap, w60)), w_id(w60)), w20)",5.027643427736373,"beta60,c_ma20,c_ma60,dv_adv,gap,ret1,ret20,stoch,vol20",2,0.671
+"ts_max(ts_mean(sub(ts_max(dv_adv, w20), ts_skew(gap, w60)), w60), w_id(w20))",5.027643427736373,"beta60,c_ma20,c_ma60,dv_adv,gap,ret1,ret20,stoch,vol20",2,0.671
+"ts_max(mul(mul(mul(dv_adv, ts_corr(co, gap, w60)), ts_delta(ts_decay(dv_adv, w20), w60)), ts_max(dv_adv, w60)), w60)",4.806142764591898,"c_ma20,c_ma60,co,dv_adv,gap,ret1,ret20,ret5,stoch",1,0.58
+"ts_max(mul(mul(mul(dv_adv, ts_corr(co, gap, w60)), ts_delta(ts_decay(dv_adv, w20), w60)), ts_max(dv_adv, w60)), w_id(w60))",4.785426631985899,"c_ma20,c_ma60,co,dv_adv,gap,ret1,ret20,ret5,stoch",1,0.58
+"ts_max(mul(mul(mul(dv_adv, ts_corr(co, gap, w60)), ts_delta(ts_decay(dv_adv, w20), w60)), ts_max(dv_adv, w_id(w60))), w60)",4.785426631985899,"c_ma20,c_ma60,co,dv_adv,gap,ret1,ret20,ret5,stoch",1,0.58
+"ts_max(mul(mul(mul(dv_adv, ts_corr(co, gap, w60)), ts_delta(ts_decay(dv_adv, w20), w_id(w60))), ts_max(dv_adv, w60)), w60)",4.785426631985899,"c_ma20,c_ma60,co,dv_adv,gap,ret1,ret20,ret5,stoch",1,0.58
+"ts_max(mul(mul(mul(c_ma60, ts_corr(co, gap, w60)), ts_delta(ts_decay(dv_adv, w60), w_id(w60))), ts_max(dv_adv, w_id(w5))), w60)",4.766334436992806,"c_ma20,c_ma60,co,dv_adv,gap,ret1,ret20,ret5,stoch",1,0.6499
+"ts_max(mul(mul(mul(dv_adv, ts_corr(co, gap, w60)), ts_delta(ts_decay(dv_adv, w20), w_id(w60))), ts_max(dv_adv, w60)), w_id(w60))",4.764710499379899,"c_ma20,c_ma60,co,dv_adv,gap,ret1,ret20,ret5,stoch",1,0.58
+"ts_max(mul(mul(mul(dv_adv, ts_corr(co, gap, w60)), ts_delta(ts_decay(dv_adv, w20), w60)), ts_max(dv_adv, w_id(w60))), w_id(w60))",4.764710499379899,"c_ma20,c_ma60,co,dv_adv,gap,ret1,ret20,ret5,stoch",1,0.58
+"ts_max(mul(mul(mul(dv_adv, ts_corr(co, gap, w60)), ts_delta(ts_decay(dv_adv, w20), w60)), ts_max(dv_adv, w60)), w_id(w_id(w60)))",4.764710499379899,"c_ma20,c_ma60,co,dv_adv,gap,ret1,ret20,ret5,stoch",1,0.58
+"ts_max(mul(mul(mul(dv_adv, ts_corr(co, gap, w60)), ts_delta(ts_decay(dv_adv, w20), w_id(w60))), ts_max(dv_adv, w_id(w60))), w60)",4.764710499379899,"c_ma20,c_ma60,co,dv_adv,gap,ret1,ret20,ret5,stoch",1,0.58
+"ts_max(mul(mul(mul(dv_adv, ts_corr(co, gap, w60)), ts_delta(ts_decay(dv_adv, w20), w60)), ts_max(dv_adv, w_id(w_id(w60)))), w60)",4.764710499379899,"c_ma20,c_ma60,co,dv_adv,gap,ret1,ret20,ret5,stoch",1,0.58
+"ts_max(mul(mul(mul(dv_adv, ts_corr(co, gap, w60)), ts_delta(ts_decay(dv_adv, w20), w_id(w60))), ts_max(dv_adv, w_id(w60))), w_id(w60))",4.7439943667739,"c_ma20,c_ma60,co,dv_adv,gap,ret1,ret20,ret5,stoch",1,0.58
+"ts_max(mul(mul(mul(dv_adv, ts_corr(co, gap, w60)), ts_delta(ts_decay(dv_adv, w20), w60)), ts_max(dv_adv, w_id(w60))), w_id(w_id(w60)))",4.7439943667739,"c_ma20,c_ma60,co,dv_adv,gap,ret1,ret20,ret5,stoch",1,0.58
+"ts_max(mul(mul(mul(dv_adv, ts_corr(co, gap, w60)), ts_delta(ts_decay(dv_adv, w20), w_id(w60))), ts_max(dv_adv, w60)), w_id(w_id(w60)))",4.7439943667739,"c_ma20,c_ma60,co,dv_adv,gap,ret1,ret20,ret5,stoch",1,0.58
+"ts_max(mul(mul(mul(dv_adv, ts_corr(co, gap, w60)), ts_delta(ts_decay(dv_adv, w20), w_id(w60))), ts_max(dv_adv, w_id(w_id(w60)))), w60)",4.7439943667739,"c_ma20,c_ma60,co,dv_adv,gap,ret1,ret20,ret5,stoch",1,0.58
+"ts_max(mul(mul(mul(dv_adv, ts_corr(co, gap, w60)), ts_delta(ts_decay(dv_adv, w20), w60)), ts_max(ts_delta(dv_adv, w5), w_id(w_id(w60)))), w60)",4.72515101514705,"c_ma20,c_ma60,co,dv_adv,gap,ret1,ret20,ret5,stoch",1,0.5796
+"ts_mean(div(ts_std(ts_std(ts_std(c_ma20, w10), w10), w_id(w20)), ts_min(ts_median(cs_rank(vol20), w_id(w10)), w10)), w60)",4.880622156383465,"beta60,c_ma20,c_ma60,co,gap,hl,ret1,stoch,vol20",8,0.8353
+"ts_mean(div(ts_std(c_ma20, w60), ts_std(c_ma60, w20)), w60)",4.878715455212181,"beta60,c_ma20,c_ma60,co,gap,hl,ret1,stoch,vol20",8,0.5776
+"ts_mean(div(ts_std(ts_std(ts_std(c_ma20, w5), w60), w20), ts_min(ts_median(cs_rank(vol20), w_id(w5)), w20)), w_id(w60))",4.871166803597704,"beta60,c_ma20,c_ma60,co,gap,hl,ret1,stoch,vol20",8,0.8367
+"ts_mean(div(ts_std(ts_std(ts_std(c_ma20, w10), w_id(w10)), w_id(w20)), ts_min(ts_median(cs_rank(vol20), w_id(w10)), w10)), w60)",4.859584991916296,"beta60,c_ma20,c_ma60,co,gap,hl,ret1,stoch,vol20",8,0.8353
+"ts_mean(div(ts_std(ts_std(ts_std(c_ma20, w10), w10), w20), ts_min(ts_median(cs_rank(vol20), w_id(w10)), w_id(w10))), w_id(w60))",4.859584991916296,"beta60,c_ma20,c_ma60,co,gap,hl,ret1,stoch,vol20",8,0.8353
+"ts_mean(div(ts_std(c_ma20, w60), ts_std(c_ma60, w20)), w_id(w60))",4.858471822617941,"beta60,c_ma20,c_ma60,co,gap,hl,ret1,stoch,vol20",8,0.5776
+"ts_mean(div(ts_std(ts_std(ts_std(c_ma20, w5), w60), w20), ts_min(ts_median(cs_rank(vol20), w_id(w5)), w_id(w20))), w_id(w60))",4.850170394961507,"beta60,c_ma20,c_ma60,co,gap,hl,ret1,stoch,vol20",8,0.8367
+"ts_mean(div(ts_std(ts_std(ts_std(c_ma20, w10), w10), w_id(w20)), ts_min(ts_median(cs_rank(vol20), w_id(w5)), w10)), w60)",4.848098069379458,"beta60,c_ma20,c_ma60,co,gap,hl,ret1,stoch,vol20",8,0.8529
+"ts_mean(div(ts_std(ts_std(ts_std(c_ma20, w10), w10), w20), ts_min(ts_median(cs_rank(vol20), w_id(w5)), w_id(w20))), w60)",4.842927957489711,"beta60,c_ma20,c_ma60,co,gap,hl,ret1,stoch,vol20",8,0.8644
+"ts_mean(div(ts_std(ts_std(ts_std(c_ma20, w10), w10), w20), ts_min(ts_median(cs_rank(vol20), w5), w_id(w20))), w_id(w60))",4.842927957489711,"beta60,c_ma20,c_ma60,co,gap,hl,ret1,stoch,vol20",8,0.8644
+"ts_mean(div(ts_std(ts_std(ts_std(c_ma20, w10), w10), w_id(w_id(w20))), ts_min(ts_median(cs_rank(vol20), w_id(w10)), w10)), w_id(w60))",4.838547827449125,"beta60,c_ma20,c_ma60,co,gap,hl,ret1,stoch,vol20",8,0.8353
+"ts_mean(div(ts_std(ts_std(ts_std(c_ma20, w10), w10), w_id(w_id(w20))), ts_min(ts_median(cs_rank(vol20), w10), w_id(w10))), w_id(w60))",4.838547827449125,"beta60,c_ma20,c_ma60,co,gap,hl,ret1,stoch,vol20",8,0.8353
+"ts_mean(div(ts_std(ts_std(ts_std(c_ma20, w10), w10), w_id(w_id(w20))), ts_min(ts_median(cs_rank(vol20), w_id(w10)), w_id(w10))), w60)",4.838547827449125,"beta60,c_ma20,c_ma60,co,gap,hl,ret1,stoch,vol20",8,0.8353
+"ts_mean(div(ts_std(c_ma20, w60), ts_std(c_ma60, w20)), w_id(w_id(w60)))",4.838228190023699,"beta60,c_ma20,c_ma60,co,gap,hl,ret1,stoch,vol20",8,0.5776
+"ts_mean(div(ts_std(c_ma20, w_id(w60)), ts_std(c_ma60, w20)), w_id(w60))",4.838228190023699,"beta60,c_ma20,c_ma60,co,gap,hl,ret1,stoch,vol20",8,0.5776
+"ts_median(ts_max(ts_delay(sub(sub(v_ma20, dv_adv), ts_sum(dv_adv, w5)), w60), w60), w60)",5.339006144902131,"beta60,c_ma60,co,dv_adv,hl,ret1,ret20,v_ma20,vol20",0,0.6037
+"ts_median(ts_max(ts_delay(sub(sub(v_ma20, dv_adv), ts_sum(dv_adv, w5)), w60), w_id(w60)), w60)",5.316478692813936,"beta60,c_ma60,co,dv_adv,hl,ret1,ret20,v_ma20,vol20",0,0.6037
+"ts_median(ts_max(ts_delay(sub(sub(v_ma20, dv_adv), ts_sum(dv_adv, w5)), w60), w60), w_id(w60))",5.316478692813936,"beta60,c_ma60,co,dv_adv,hl,ret1,ret20,v_ma20,vol20",0,0.6037
+"ts_median(ts_max(ts_delay(sub(sub(v_ma20, dv_adv), ts_sum(dv_adv, w5)), w_id(w60)), w60), w60)",5.316478692813936,"beta60,c_ma60,co,dv_adv,hl,ret1,ret20,v_ma20,vol20",0,0.6037
+"ts_median(ts_max(ts_delay(sub(sub(v_ma20, dv_adv), ts_sum(dv_adv, w5)), w_id(w60)), w_id(w60)), w60)",5.293951240725741,"beta60,c_ma60,co,dv_adv,hl,ret1,ret20,v_ma20,vol20",0,0.6037
+"ts_median(ts_max(ts_delay(sub(sub(v_ma20, dv_adv), ts_sum(dv_adv, w5)), w60), w60), w_id(w_id(w60)))",5.293951240725741,"beta60,c_ma60,co,dv_adv,hl,ret1,ret20,v_ma20,vol20",0,0.6037
+"ts_median(ts_max(ts_delay(sub(sub(v_ma20, dv_adv), ts_sum(dv_adv, w5)), w_id(w_id(w60))), w60), w60)",5.293951240725741,"beta60,c_ma60,co,dv_adv,hl,ret1,ret20,v_ma20,vol20",0,0.6037
+"ts_median(ts_max(ts_delay(sub(sub(v_ma20, dv_adv), ts_sum(dv_adv, w5)), w60), w_id(w60)), w_id(w60))",5.293951240725741,"beta60,c_ma60,co,dv_adv,hl,ret1,ret20,v_ma20,vol20",0,0.6037
+"ts_median(ts_max(ts_delay(sub(sub(v_ma20, dv_adv), ts_sum(dv_adv, w5)), w_id(w60)), w60), w_id(w60))",5.293951240725741,"beta60,c_ma60,co,dv_adv,hl,ret1,ret20,v_ma20,vol20",0,0.6037
+"ts_median(ts_max(ts_delay(sub(sub(v_ma20, dv_adv), ts_sum(dv_adv, w5)), w60), w_id(w_id(w60))), w60)",5.293951240725741,"beta60,c_ma60,co,dv_adv,hl,ret1,ret20,v_ma20,vol20",0,0.6037
+"ts_median(ts_max(ts_delay(sub(sub(v_ma20, dv_adv), ts_sum(dv_adv, w5)), w60), w_id(w_id(w60))), w_id(w60))",5.271423788637547,"beta60,c_ma60,co,dv_adv,hl,ret1,ret20,v_ma20,vol20",0,0.6037
+"ts_median(ts_max(ts_delay(sub(sub(v_ma20, dv_adv), ts_sum(dv_adv, w5)), w_id(w60)), w60), w_id(w_id(w60)))",5.271423788637547,"beta60,c_ma60,co,dv_adv,hl,ret1,ret20,v_ma20,vol20",0,0.6037
+"ts_median(ts_max(ts_delay(sub(sub(v_ma20, dv_adv), ts_sum(dv_adv, w5)), w_id(w60)), w_id(w_id(w60))), w60)",5.271423788637547,"beta60,c_ma60,co,dv_adv,hl,ret1,ret20,v_ma20,vol20",0,0.6037
+"ts_median(ts_max(ts_delay(sub(sub(v_ma20, dv_adv), ts_sum(dv_adv, w5)), w_id(w_id(w60))), w_id(w60)), w60)",5.271423788637547,"beta60,c_ma60,co,dv_adv,hl,ret1,ret20,v_ma20,vol20",0,0.6037
+"ts_median(ts_max(ts_delay(sub(sub(v_ma20, dv_adv), ts_sum(dv_adv, w5)), w60), w_id(w60)), w_id(w_id(w60)))",5.271423788637547,"beta60,c_ma60,co,dv_adv,hl,ret1,ret20,v_ma20,vol20",0,0.6037
+"div(div(ts_std(ts_median(ts_zscore(beta60, w60), w10), w60), c_ma20), signlog(size))",4.771070716690736,"beta60,c_ma20,c_ma60,co,dv_adv,hl,ret1,size,stoch",4,0.7854
+"div(ts_std(ts_median(ts_zscore(ts_zscore(beta60, w60), w60), w20), w60), ts_max(size, w10))",4.759216746715675,"beta60,c_ma20,c_ma60,co,dv_adv,hl,ret1,size,stoch",4,0.7915
+"div(div(ts_std(ts_median(ts_zscore(beta60, w60), w10), w60), c_ma20), ts_max(size, w10))",4.7477994849551886,"beta60,c_ma20,c_ma60,co,dv_adv,hl,ret1,size,stoch",4,0.7864
+"div(div(ts_std(ts_median(ts_zscore(beta60, w60), w10), w60), c_ma20), size)",4.742338189529138,"beta60,c_ma20,c_ma60,co,dv_adv,hl,ret1,size,stoch",4,0.788
+"div(ts_std(ts_median(ts_zscore(ts_zscore(beta60, w60), w60), w20), w60), ts_max(size, w5))",4.741364033807727,"beta60,c_ma20,c_ma60,co,dv_adv,hl,ret1,size,stoch",4,0.7923
+"div(ts_std(ts_median(ts_zscore(ts_zscore(beta60, w60), w60), w20), w60), ts_max(size, w_id(w10)))",4.7391356633962,"beta60,c_ma20,c_ma60,co,dv_adv,hl,ret1,size,stoch",4,0.7915
+"div(ts_std(ts_median(ts_zscore(ts_zscore(beta60, w60), w60), w20), w_id(w60)), ts_max(size, w10))",4.7391356633962,"beta60,c_ma20,c_ma60,co,dv_adv,hl,ret1,size,stoch",4,0.7915
+"div(ts_std(ts_median(ts_zscore(ts_zscore(beta60, w60), w60), w_id(w20)), w60), ts_max(size, w10))",4.7391356633962,"beta60,c_ma20,c_ma60,co,dv_adv,hl,ret1,size,stoch",4,0.7915
+"div(div(ts_std(ts_median(ts_zscore(beta60, w60), w10), w60), c_ma20), ts_max(size, w5))",4.734372638534097,"beta60,c_ma20,c_ma60,co,dv_adv,hl,ret1,size,stoch",4,0.7872
+"div(div(ts_std(ts_median(ts_zscore(beta60, w60), w10), w_id(w60)), c_ma20), ts_max(size, w10))",4.727766575735968,"beta60,c_ma20,c_ma60,co,dv_adv,hl,ret1,size,stoch",4,0.7864
+"div(div(ts_std(ts_median(ts_zscore(beta60, w60), w10), w60), c_ma20), cs_rank(size))",4.7224957375924905,"beta60,c_ma20,c_ma60,co,dv_adv,hl,ret1,size,stoch",4,0.788
+"div(ts_std(ts_median(ts_zscore(ts_zscore(beta60, w60), w60), w20), w60), size)",4.722076047753993,"beta60,c_ma20,c_ma60,co,dv_adv,hl,ret1,size,stoch",4,0.7933
+"div(ts_std(ts_median(ts_zscore(ts_zscore(beta60, w60), w60), w20), w60), ts_max(size, w_id(w5)))",4.7213582783908175,"beta60,c_ma20,c_ma60,co,dv_adv,hl,ret1,size,stoch",4,0.7923
+"div(ts_std(ts_median(ts_zscore(ts_zscore(beta60, w60), w60), w_id(w20)), w60), ts_max(size, w5))",4.7213582783908175,"beta60,c_ma20,c_ma60,co,dv_adv,hl,ret1,size,stoch",4,0.7923
+"div(ts_std(ts_median(ts_zscore(ts_zscore(beta60, w60), w60), w_id(w20)), w60), ts_max(cs_rank(size), w10))",4.719054612358605,"beta60,c_ma20,c_ma60,co,dv_adv,hl,ret1,size,stoch",4,0.7915
+"ts_sum(neg(add(signlog(ret1), add(signlog(ret5), signlog(size)))), w5)",5.180950317562401,"beta60,co,hl,ret1,ret5,size,stoch,v_ma20,vol20",10,0.9053
+"ts_sum(neg(add(signlog(size), signlog(ret5))), w5)",5.117921609589806,"beta60,co,hl,ret1,ret5,size,stoch,v_ma20,vol20",10,0.9072
+"ts_sum(neg(add(signlog(ret5), signlog(size))), w5)",5.117921609589806,"beta60,co,hl,ret1,ret5,size,stoch,v_ma20,vol20",10,0.9072
+"ts_sum(neg(add(signlog(ret5), signlog(ts_mean(size, w60)))), w5)",5.101129805022754,"beta60,co,hl,ret1,ret5,size,stoch,v_ma20,vol20",10,0.9001
+"ts_sum(neg(add(signlog(ret5), signlog(size))), w_id(w5))",5.096773173186542,"beta60,co,hl,ret1,ret5,size,stoch,v_ma20,vol20",10,0.9072
+"ts_sum(neg(add(signlog(ret5), signlog(size))), w_id(w_id(w5)))",5.075624736783279,"beta60,co,hl,ret1,ret5,size,stoch,v_ma20,vol20",10,0.9072
+"ts_sum(neg(add(signlog(size), ret5)), w5)",5.058795241070922,"beta60,co,hl,ret1,ret5,size,stoch,v_ma20,vol20",10,0.8961
+"ts_sum(neg(add(ret5, signlog(size))), w5)",5.058795241070922,"beta60,co,hl,ret1,ret5,size,stoch,v_ma20,vol20",10,0.8961
+"ts_sum(neg(add(ts_delta(co, w_id(w20)), add(ret1, signlog(size)))), w_id(w_id(w5)))",5.056137641364183,"beta60,co,hl,ret1,ret5,size,stoch,v_ma20,vol20",10,0.8609
+"ts_sum(neg(add(signlog(ret5), signlog(size))), w_id(w_id(w_id(w5))))",5.054476300380015,"beta60,co,hl,ret1,ret5,size,stoch,v_ma20,vol20",10,0.9072
+"ts_sum(neg(add(signlog(signlog(ret5)), signlog(size))), w5)",5.048643704192983,"beta60,co,hl,ret1,ret5,size,stoch,v_ma20,vol20",10,0.908
+"ts_sum(neg(add(mul(ret5, hl), signlog(size))), w5)",5.045792665396666,"beta60,co,hl,ret1,ret5,size,stoch,v_ma20,vol20",10,0.8751
+"ts_sum(neg(add(ret5, signlog(size))), w_id(w5))",5.037977153659107,"beta60,co,hl,ret1,ret5,size,stoch,v_ma20,vol20",10,0.8961
+"ts_sum(neg(add(ret5, add(co, signlog(size)))), w5)",5.034372053522349,"beta60,co,hl,ret1,ret5,size,stoch,v_ma20,vol20",10,0.8943
+"ts_sum(neg(add(ret5, add(ret1, signlog(size)))), w_id(w_id(w5)))",5.029717070242961,"beta60,co,hl,ret1,ret5,size,stoch,v_ma20,vol20",10,0.8915
+"sub(ts_std(gap, w_id(w20)), signlog(mul(add(c_ma20, ret5), size)))",5.833692769117576,"c_ma20,c_ma60,co,dv_adv,gap,ret20,ret5,size,stoch",14,0.9088
+"sub(ts_delay(ts_std(gap, w_id(w10)), w_id(w5)), signlog(mul(add(c_ma20, ret5), size)))",5.82336050662985,"c_ma20,c_ma60,co,dv_adv,gap,ret20,ret5,size,stoch",14,0.9063
+"sub(gap, signlog(mul(add(c_ma20, ret5), size)))",5.777640403853878,"c_ma20,c_ma60,co,dv_adv,gap,ret20,ret5,size,stoch",14,0.9273
+"sub(ts_std(gap, w5), signlog(mul(add(c_ma20, ret5), size)))",5.723801006024169,"c_ma20,c_ma60,co,dv_adv,gap,ret20,ret5,size,stoch",14,0.9195
+"sub(ts_std(gap, w60), signlog(mul(add(c_ma20, ret5), size)))",5.6678890895448015,"c_ma20,c_ma60,co,dv_adv,gap,ret20,ret5,size,stoch",14,0.9151
+"sub(ts_std(gap, w_id(w60)), signlog(mul(add(c_ma20, ret5), size)))",5.644272885005031,"c_ma20,c_ma60,co,dv_adv,gap,ret20,ret5,size,stoch",14,0.9151
+"sub(gap, signlog(mul(add(add(c_ma20, c_ma20), ret5), size)))",5.521210679229253,"c_ma20,c_ma60,co,dv_adv,gap,ret20,ret5,size,stoch",14,0.8557
+"sub(gap, signlog(mul(add(c_ma20, add(c_ma20, ret5)), size)))",5.521210325674708,"c_ma20,c_ma60,co,dv_adv,gap,ret20,ret5,size,stoch",14,0.8557
+"sub(gap, signlog(mul(c_ma20, size)))",5.473506247106026,"c_ma20,c_ma60,co,dv_adv,gap,ret20,ret5,size,stoch",14,0.8831
+"sub(gap, ts_sum(signlog(mul(add(c_ma20, ret5), ts_max(size, w10))), w5))",5.399548351439467,"c_ma20,c_ma60,co,dv_adv,gap,ret20,ret5,size,stoch",14,0.9238
+"sub(gap, signlog(mul(add(c_ma20, ret20), size)))",5.366463831434365,"c_ma20,c_ma60,co,dv_adv,gap,ret20,ret5,size,stoch",14,0.9359
+"sub(ts_delay(ts_std(ts_delta(ret20, w20), w60), w60), mul(add(c_ma20, add(c_ma20, ret5)), size))",5.363402026708919,"c_ma20,c_ma60,co,dv_adv,gap,ret20,ret5,size,stoch",14,0.8459
+"sub(ts_delay(ts_std(ts_delta(ret20, w60), w60), w60), mul(add(c_ma20, add(c_ma20, ret5)), size))",5.34456642523372,"c_ma20,c_ma60,co,dv_adv,gap,ret20,ret5,size,stoch",14,0.8586
+"sub(ts_min(mul(ret20, size), w_id(w20)), signlog(mul(add(c_ma20, ret5), size)))",5.28664439361054,"c_ma20,c_ma60,co,dv_adv,gap,ret20,ret5,size,stoch",14,0.7634
+"sub(ts_delay(ts_std(add(c_ma20, add(c_ma20, c_ma20)), w60), w60), mul(add(c_ma20, add(c_ma20, ret5)), size))",5.262980057032926,"c_ma20,c_ma60,co,dv_adv,gap,ret20,ret5,size,stoch",14,0.8439
+"ts_sum(ts_max(ts_delta(ts_max(div(c_ma60, size), w10), w20), w10), w60)",5.136032142041048,"beta60,c_ma60,co,gap,ret1,ret20,size,v_ma20,vol20",15,0.5986
+"ts_sum(ts_max(ts_delta(ts_max(div(c_ma60, size), w_id(w10)), w20), w10), w60)",5.114542467806567,"beta60,c_ma60,co,gap,ret1,ret20,size,v_ma20,vol20",15,0.5986
+"ts_sum(ts_max(ts_delta(ts_max(div(c_ma60, size), w10), w20), w10), w_id(w60))",5.114542467806567,"beta60,c_ma60,co,gap,ret1,ret20,size,v_ma20,vol20",15,0.5986
+"ts_sum(ts_max(ts_delta(ts_max(div(c_ma60, size), w10), w_id(w20)), w10), w60)",5.114542467806567,"beta60,c_ma60,co,gap,ret1,ret20,size,v_ma20,vol20",15,0.5986
+"ts_sum(ts_max(ts_delta(ts_max(div(c_ma60, size), w10), w20), w_id(w10)), w60)",5.114542467806567,"beta60,c_ma60,co,gap,ret1,ret20,size,v_ma20,vol20",15,0.5986
+"ts_sum(ts_max(ts_delta(ts_max(div(c_ma60, size), w20), w60), w20), w5)",5.111868959792665,"beta60,c_ma60,co,gap,ret1,ret20,size,v_ma20,vol20",15,0.5272
+"ts_median(ts_max(ts_delta(ts_max(div(c_ma60, size), w10), w60), w_id(w_id(w20))), w5)",5.096211609468359,"beta60,c_ma60,co,gap,ret1,ret20,size,v_ma20,vol20",15,0.5398
+"ts_sum(ts_max(ts_delta(ts_max(div(c_ma60, size), w10), w_id(w20)), w10), w_id(w60))",5.0930527935720855,"beta60,c_ma60,co,gap,ret1,ret20,size,v_ma20,vol20",15,0.5986
+"ts_sum(ts_max(ts_delta(ts_max(div(c_ma60, size), w_id(w10)), w20), w_id(w10)), w60)",5.0930527935720855,"beta60,c_ma60,co,gap,ret1,ret20,size,v_ma20,vol20",15,0.5986
+"ts_sum(ts_max(ts_delta(ts_max(div(c_ma60, size), w10), w_id(w20)), w_id(w10)), w60)",5.0930527935720855,"beta60,c_ma60,co,gap,ret1,ret20,size,v_ma20,vol20",15,0.5986
+"ts_sum(ts_max(ts_delta(ts_max(div(c_ma60, size), w10), w20), w_id(w_id(w10))), w60)",5.0930527935720855,"beta60,c_ma60,co,gap,ret1,ret20,size,v_ma20,vol20",15,0.5986
+"ts_sum(ts_max(ts_delta(ts_max(div(c_ma60, size), w10), w20), w10), w_id(w_id(w60)))",5.0930527935720855,"beta60,c_ma60,co,gap,ret1,ret20,size,v_ma20,vol20",15,0.5986
+"ts_sum(ts_max(ts_delta(ts_max(div(c_ma60, size), w10), w_id(w_id(w20))), w10), w60)",5.0930527935720855,"beta60,c_ma60,co,gap,ret1,ret20,size,v_ma20,vol20",15,0.5986
+"ts_sum(ts_max(ts_delta(ts_max(div(c_ma60, size), w20), w60), w_id(w20)), w5)",5.09048038673914,"beta60,c_ma60,co,gap,ret1,ret20,size,v_ma20,vol20",15,0.5272
+"ts_sum(ts_max(ts_delta(ts_max(div(c_ma60, size), w10), w60), w20), w20)",5.08601777603176,"beta60,c_ma60,co,gap,ret1,ret20,size,v_ma20,vol20",15,0.5525
+"neg(sub(ts_min(ts_max(ts_max(size, w60), w60), w60), sub(ts_mean(ret20, w20), c_ma60)))",6.178320527316801,"c_ma20,c_ma60,co,gap,ret1,ret20,ret5,size,stoch",18,0.8605
+"neg(sub(ts_min(ts_max(ts_max(size, w60), w_id(w60)), w60), sub(ts_mean(ret20, w20), c_ma60)))",6.152141203048509,"c_ma20,c_ma60,co,gap,ret1,ret20,ret5,size,stoch",18,0.8605
+"neg(sub(ts_min(ts_max(ts_max(size, w60), w60), w_id(w60)), sub(ts_mean(ret20, w20), c_ma60)))",6.152141203048509,"c_ma20,c_ma60,co,gap,ret1,ret20,ret5,size,stoch",18,0.8605
+"neg(sub(ts_min(ts_max(ts_max(size, w60), w60), w60), sub(ts_mean(ret20, w_id(w20)), c_ma60)))",6.152141203048509,"c_ma20,c_ma60,co,gap,ret1,ret20,ret5,size,stoch",18,0.8605
+"neg(sub(ts_min(ts_max(ts_max(size, w60), w_id(w60)), w60), sub(ts_mean(ret20, w_id(w20)), c_ma60)))",6.125961878780218,"c_ma20,c_ma60,co,gap,ret1,ret20,ret5,size,stoch",18,0.8605
+"neg(sub(ts_min(ts_max(ts_max(size, w60), w60), w_id(w_id(w60))), sub(ts_mean(ret20, w20), c_ma60)))",6.125961878780218,"c_ma20,c_ma60,co,gap,ret1,ret20,ret5,size,stoch",18,0.8605
+"neg(sub(ts_min(ts_max(ts_max(size, w60), w60), w_id(w60)), sub(ts_mean(ret20, w_id(w20)), c_ma60)))",6.125961878780218,"c_ma20,c_ma60,co,gap,ret1,ret20,ret5,size,stoch",18,0.8605
+"neg(sub(ts_min(ts_max(ts_max(size, w60), w_id(w60)), w_id(w_id(w60))), sub(ts_mean(ret20, w20), c_ma60)))",6.099782554511926,"c_ma20,c_ma60,co,gap,ret1,ret20,ret5,size,stoch",18,0.8605
+"neg(sub(ts_min(ts_max(ts_max(size, w60), w60), w_id(w_id(w60))), sub(ts_mean(ret20, w_id(w20)), c_ma60)))",6.099782554511926,"c_ma20,c_ma60,co,gap,ret1,ret20,ret5,size,stoch",18,0.8605
+"neg(sub(ts_min(ts_max(ts_max(size, w60), w20), w_id(w20)), sub(ts_mean(ret20, w20), c_ma60)))",6.077928099468405,"c_ma20,c_ma60,co,gap,ret1,ret20,ret5,size,stoch",18,0.8743
+"neg(sub(ts_min(ts_max(ts_max(size, w60), w_id(w20)), w20), sub(ts_mean(ret20, w20), c_ma60)))",6.077928099468405,"c_ma20,c_ma60,co,gap,ret1,ret20,ret5,size,stoch",18,0.8743
+"neg(sub(ts_min(ts_max(ts_max(size, w60), w20), w60), sub(ts_mean(ret20, w20), c_ma60)))",6.073942341187436,"c_ma20,c_ma60,co,gap,ret1,ret20,ret5,size,stoch",18,0.8413
+"neg(sub(ts_min(ts_max(ts_max(size, w20), w60), w60), sub(ts_mean(ret20, w20), c_ma60)))",6.073942341187436,"c_ma20,c_ma60,co,gap,ret1,ret20,ret5,size,stoch",18,0.8413
+"neg(sub(ts_max(ts_min(ts_max(size, w60), w20), w20), sub(ts_mean(ret20, w20), c_ma60)))",6.071571601092277,"c_ma20,c_ma60,co,gap,ret1,ret20,ret5,size,stoch",18,0.873
+"neg(sub(ts_max(ts_min(ts_max(size, w20), w20), w60), sub(ts_mean(ret20, w20), c_ma60)))",6.071400135389416,"c_ma20,c_ma60,co,gap,ret1,ret20,ret5,size,stoch",18,0.873
+"ts_std(add(div(ts_corr(ret20, ret1, w60), size), ts_corr(size, ts_skew(ts_mean(size, w20), w60), w20)), w60)",5.651159371987416,"beta60,c_ma60,dv_adv,gap,hl,ret1,ret20,size,stoch",12,0.6938
+"ts_std(add(div(ts_corr(cs_rank(ret20), ret1, w60), size), ts_corr(size, ts_std(beta60, w_id(w60)), w20)), w60)",5.61411171687806,"beta60,c_ma60,dv_adv,gap,hl,ret1,ret20,size,stoch",12,0.7348
+"ts_std(add(div(ts_corr(cs_rank(ret20), ret1, w_id(w60)), size), ts_corr(size, ts_std(beta60, w_id(w60)), w20)), w60)",5.590016816805623,"beta60,c_ma60,dv_adv,gap,hl,ret1,ret20,size,stoch",12,0.7348
+"ts_std(add(div(ts_corr(cs_rank(ret20), ret1, w60), size), ts_corr(size, ts_skew(ts_skew(c_ma60, w20), w60), w20)), w60)",5.441775751865874,"beta60,c_ma60,dv_adv,gap,hl,ret1,ret20,size,stoch",12,0.7305
+"ts_std(add(div(ts_corr(cs_rank(ret20), ret1, w60), size), ts_corr(size, ts_skew(ts_skew(c_ma60, w20), w60), w20)), w_id(w60))",5.418319821900936,"beta60,c_ma60,dv_adv,gap,hl,ret1,ret20,size,stoch",12,0.7305
+"ts_std(add(div(ts_corr(cs_rank(ret20), ret1, w60), size), ts_corr(size, ts_skew(ts_skew(c_ma60, w20), w60), w20)), w_id(w_id(w60)))",5.394863891935997,"beta60,c_ma60,dv_adv,gap,hl,ret1,ret20,size,stoch",12,0.7305
+"ts_std(add(div(ts_corr(cs_rank(ret20), ret1, w60), size), ts_corr(size, ts_min(ts_skew(c_ma60, w60), w_id(w20)), w20)), w_id(w60))",5.390840240686356,"beta60,c_ma60,dv_adv,gap,hl,ret1,ret20,size,stoch",12,0.7299
+"ts_std(add(div(ts_corr(ret20, ret1, w60), size), ts_corr(size, ts_corr(ts_std(size, w60), c_ma60, w_id(w60)), w20)), w_id(w60))",5.375702098997571,"beta60,c_ma60,dv_adv,gap,hl,ret1,ret20,size,stoch",12,0.732
+"ts_std(add(div(ts_corr(cs_rank(ret20), ret1, w60), size), ts_corr(size, ts_skew(ret20, w_id(w60)), w20)), w60)",5.3702060162452945,"beta60,c_ma60,dv_adv,gap,hl,ret1,ret20,size,stoch",12,0.7349
+"ts_std(add(div(ts_corr(cs_rank(ret20), ret1, w60), size), ts_corr(size, ts_skew(ret20, w60), w20)), w_id(w60))",5.3702060162452945,"beta60,c_ma60,dv_adv,gap,hl,ret1,ret20,size,stoch",12,0.7349
+"ts_std(add(div(ts_corr(cs_rank(ret20), ret1, w60), size), ts_corr(size, ts_min(ts_skew(c_ma60, w60), w20), w20)), w_id(w_id(w_id(w60))))",5.367401804857285,"beta60,c_ma60,dv_adv,gap,hl,ret1,ret20,size,stoch",12,0.7299
+"ts_std(add(div(ts_corr(cs_rank(ret20), ret1, w60), size), ts_corr(size, ts_min(ts_skew(c_ma60, w60), w_id(w20)), w20)), w_id(w_id(w60)))",5.367401804857285,"beta60,c_ma60,dv_adv,gap,hl,ret1,ret20,size,stoch",12,0.7299
+"ts_std(add(div(ts_corr(ret20, ret1, w60), size), ts_corr(size, ts_corr(ts_std(size, w60), ret20, w_id(w60)), w20)), w_id(w60))",5.359635647386243,"beta60,c_ma60,dv_adv,gap,hl,ret1,ret20,size,stoch",12,0.7311
+"ts_std(add(div(ts_corr(cs_rank(ret20), ret1, w_id(w60)), size), ts_corr(size, ts_skew(ret20, w60), w20)), w_id(w60))",5.347157921754972,"beta60,c_ma60,dv_adv,gap,hl,ret1,ret20,size,stoch",12,0.7349
+"ts_std(add(div(ts_corr(cs_rank(ret20), ret1, w60), size), ts_corr(size, ts_skew(ret20, w_id(w60)), w20)), w_id(w60))",5.347157921754972,"beta60,c_ma60,dv_adv,gap,hl,ret1,ret20,size,stoch",12,0.7349
+"ts_std(div(ts_min(ts_min(cs_zscore(ret1), w60), w60), cs_rank(hl)), w60)",5.235953642388431,"beta60,co,dv_adv,gap,hl,ret1,ret20,stoch,v_ma20",16,0.9737
+"ts_std(div(ts_min(ts_min(cs_zscore(ret1), w60), w60), cs_rank(hl)), w_id(w60))",5.214045886562538,"beta60,co,dv_adv,gap,hl,ret1,ret20,stoch,v_ma20",16,0.9737
+"ts_std(div(ts_min(ts_min(cs_zscore(ret1), w60), w_id(w60)), cs_rank(hl)), w60)",5.214045886562538,"beta60,co,dv_adv,gap,hl,ret1,ret20,stoch,v_ma20",16,0.9737
+"ts_std(div(ts_min(ts_min(cs_zscore(ret1), w_id(w60)), w_id(w60)), cs_rank(hl)), w60)",5.1921381307366445,"beta60,co,dv_adv,gap,hl,ret1,ret20,stoch,v_ma20",16,0.9737
+"ts_std(div(ts_min(ts_min(cs_zscore(ret1), w60), w_id(w_id(w60))), cs_rank(hl)), w60)",5.1921381307366445,"beta60,co,dv_adv,gap,hl,ret1,ret20,stoch,v_ma20",16,0.9737
+"ts_std(div(ts_min(ts_min(cs_zscore(ret1), w60), w_id(w60)), cs_rank(hl)), w_id(w60))",5.1921381307366445,"beta60,co,dv_adv,gap,hl,ret1,ret20,stoch,v_ma20",16,0.9737
+"ts_std(div(ts_min(ts_min(cs_zscore(ret1), w60), w_id(w60)), cs_rank(hl)), w_id(w_id(w60)))",5.170230374910751,"beta60,co,dv_adv,gap,hl,ret1,ret20,stoch,v_ma20",16,0.9737
+"ts_std(div(ts_min(ts_min(cs_zscore(ret1), w60), w_id(w60)), cs_rank(cs_rank(hl))), w_id(w_id(w60)))",5.148322619084858,"beta60,co,dv_adv,gap,hl,ret1,ret20,stoch,v_ma20",16,0.9737
+"ts_std(div(ts_std(ts_std(ts_mean(v_ma20, w60), w60), w_id(w_id(w60))), cs_rank(hl)), w60)",5.07785134285818,"beta60,co,dv_adv,gap,hl,ret1,ret20,stoch,v_ma20",16,0.9086
+"ts_std(div(ts_min(ts_min(cs_zscore(gap), w60), w60), cs_rank(hl)), w_id(w60))",5.05575981687604,"beta60,co,dv_adv,gap,hl,ret1,ret20,stoch,v_ma20",16,0.9729
+"ts_std(div(ts_min(ts_min(ret1, w60), w60), cs_rank(hl)), w60)",5.044727836359276,"beta60,co,dv_adv,gap,hl,ret1,ret20,stoch,v_ma20",16,0.9545
+"ts_std(div(ts_min(ts_min(cs_zscore(gap), w60), w_id(w60)), cs_rank(hl)), w_id(w60))",5.034517128569838,"beta60,co,dv_adv,gap,hl,ret1,ret20,stoch,v_ma20",16,0.9729
+"ts_std(div(ts_min(ts_min(ret1, w_id(w60)), w60), cs_rank(hl)), w60)",5.023708137041112,"beta60,co,dv_adv,gap,hl,ret1,ret20,stoch,v_ma20",16,0.9545
+"ts_std(div(ts_min(ts_min(ret1, w60), w60), cs_rank(cs_rank(hl))), w60)",5.023708137041112,"beta60,co,dv_adv,gap,hl,ret1,ret20,stoch,v_ma20",16,0.9545
+"ts_std(div(ts_min(ts_min(ret1, w60), w_id(w60)), cs_rank(hl)), w60)",5.023708137041112,"beta60,co,dv_adv,gap,hl,ret1,ret20,stoch,v_ma20",16,0.9545
+"signlog(ts_decay(div(ts_std(ts_std(hl, w20), w60), cs_rank(ts_sum(hl, w5))), w60))",4.956577558751734,"c_ma20,c_ma60,co,dv_adv,hl,ret5,size,stoch,vol20",13,0.8825
+"ts_max(ts_decay(div(ts_std(ts_std(hl, w20), w60), cs_rank(hl)), w20), w60)",4.919830391542587,"c_ma20,c_ma60,co,dv_adv,hl,ret5,size,stoch,vol20",13,0.8845
+"ts_max(ts_decay(div(ts_std(ts_std(hl, w20), w60), cs_rank(hl)), w60), w60)",4.906119211661823,"c_ma20,c_ma60,co,dv_adv,hl,ret5,size,stoch,vol20",13,0.846
+"ts_max(ts_decay(div(ts_std(ts_std(hl, w10), w60), cs_rank(hl)), w60), w60)",4.900102653031436,"c_ma20,c_ma60,co,dv_adv,hl,ret5,size,stoch,vol20",13,0.8474
+"ts_max(ts_decay(div(ts_std(ts_std(hl, w20), w60), cs_rank(hl)), w_id(w20)), w60)",4.8991588352756015,"c_ma20,c_ma60,co,dv_adv,hl,ret5,size,stoch,vol20",13,0.8845
+"ts_max(ts_decay(div(ts_std(ts_std(hl, w20), w60), cs_rank(hl)), w60), w_id(w60))",4.885505265394336,"c_ma20,c_ma60,co,dv_adv,hl,ret5,size,stoch,vol20",13,0.846
+"ts_max(ts_decay(div(ts_std(ts_std(hl, w20), w_id(w60)), cs_rank(hl)), w60), w60)",4.885505265394336,"c_ma20,c_ma60,co,dv_adv,hl,ret5,size,stoch,vol20",13,0.846
+"ts_max(ts_decay(div(ts_std(ts_std(hl, w20), w60), cs_rank(cs_rank(hl))), w60), w60)",4.885505265394336,"c_ma20,c_ma60,co,dv_adv,hl,ret5,size,stoch,vol20",13,0.846
+"ts_max(ts_decay(div(ts_std(ts_std(hl, w20), w60), cs_rank(hl)), w_id(w60)), w60)",4.885505265394336,"c_ma20,c_ma60,co,dv_adv,hl,ret5,size,stoch,vol20",13,0.846
+"ts_max(ts_decay(div(ts_std(ts_std(hl, w10), w60), cs_rank(cs_rank(hl))), w60), w60)",4.879513986422061,"c_ma20,c_ma60,co,dv_adv,hl,ret5,size,stoch,vol20",13,0.8474
+"ts_max(ts_decay(div(ts_std(ts_std(hl, w10), w60), cs_rank(hl)), w60), w_id(w60))",4.879513986422061,"c_ma20,c_ma60,co,dv_adv,hl,ret5,size,stoch,vol20",13,0.8474
+"ts_max(ts_decay(div(ts_std(ts_std(hl, w10), w_id(w60)), cs_rank(hl)), w60), w60)",4.879513986422061,"c_ma20,c_ma60,co,dv_adv,hl,ret5,size,stoch,vol20",13,0.8474
+"ts_max(ts_decay(div(ts_std(ts_std(hl, w10), w60), cs_rank(hl)), w_id(w60)), w60)",4.879513986422061,"c_ma20,c_ma60,co,dv_adv,hl,ret5,size,stoch,vol20",13,0.8474
+"signlog(ts_decay(div(ts_std(ts_std(hl, w20), w60), cs_rank(hl)), w60))",4.869067593759358,"c_ma20,c_ma60,co,dv_adv,hl,ret5,size,stoch,vol20",13,0.8598
+"ts_max(ts_decay(div(ts_std(ts_std(hl, w20), w60), cs_rank(hl)), w_id(w_id(w60))), w60)",4.8648913191268495,"c_ma20,c_ma60,co,dv_adv,hl,ret5,size,stoch,vol20",13,0.846
+"sub(ts_max(ts_delta(ts_min(div(c_ma60, size), w20), w5), w60), ts_corr(beta60, size, w60))",5.3473646848449015,"beta60,c_ma20,c_ma60,co,dv_adv,hl,ret20,size,stoch",19,0.654
+"sub(ts_max(ts_delta(ts_min(div(c_ma60, size), w20), w60), w60), cs_zscore(cs_zscore(ts_std(ts_delay(ret20, w60), w_id(w60)))))",5.312062492490613,"beta60,c_ma20,c_ma60,co,dv_adv,hl,ret20,size,stoch",19,0.6569
+"sub(ts_max(ts_delta(ts_min(div(stoch, size), w20), w5), w60), cs_zscore(ts_max(c_ma60, w_id(w60))))",5.290738126394875,"beta60,c_ma20,c_ma60,co,dv_adv,hl,ret20,size,stoch",19,0.6791
+"sub(ts_max(ts_delta(ts_min(div(stoch, size), w20), w5), w_id(w60)), cs_zscore(cs_zscore(ts_max(c_ma60, w60))))",5.268224347133621,"beta60,c_ma20,c_ma60,co,dv_adv,hl,ret20,size,stoch",19,0.6791
+"sub(ts_max(ts_delta(ts_min(div(stoch, size), w_id(w20)), w5), w60), cs_zscore(cs_zscore(ts_max(c_ma60, w60))))",5.268224347133621,"beta60,c_ma20,c_ma60,co,dv_adv,hl,ret20,size,stoch",19,0.6791
+"sub(ts_max(ts_delta(ts_min(div(stoch, size), w20), w_id(w5)), w60), cs_zscore(ts_max(c_ma60, w_id(w60))))",5.2682243471336205,"beta60,c_ma20,c_ma60,co,dv_adv,hl,ret20,size,stoch",19,0.6791
+"sub(ts_max(ts_delta(ts_min(div(stoch, size), w20), w5), w_id(w60)), cs_zscore(ts_max(c_ma60, w_id(w60))))",5.2682243471336205,"beta60,c_ma20,c_ma60,co,dv_adv,hl,ret20,size,stoch",19,0.6791
+"sub(ts_max(ts_delta(ts_min(div(stoch, size), w_id(w20)), w5), w60), cs_zscore(cs_zscore(ts_max(c_ma60, w_id(w60)))))",5.245710567872367,"beta60,c_ma20,c_ma60,co,dv_adv,hl,ret20,size,stoch",19,0.6791
+"sub(ts_max(ts_delta(ts_min(div(stoch, size), w_id(w20)), w_id(w5)), w60), cs_zscore(cs_zscore(ts_max(c_ma60, w60))))",5.245710567872367,"beta60,c_ma20,c_ma60,co,dv_adv,hl,ret20,size,stoch",19,0.6791
+"sub(ts_max(ts_delta(ts_min(div(stoch, size), w20), w_id(w5)), w_id(w60)), cs_zscore(ts_max(c_ma60, w_id(w60))))",5.245710567872366,"beta60,c_ma20,c_ma60,co,dv_adv,hl,ret20,size,stoch",19,0.6791
+"sub(ts_max(ts_delta(ts_min(div(c_ma60, size), w20), w5), w60), cs_zscore(size))",5.244830859472205,"beta60,c_ma20,c_ma60,co,dv_adv,hl,ret20,size,stoch",19,0.6756
+"sub(ts_max(ts_delta(ts_min(div(c_ma60, size), w20), w5), w60), cs_zscore(cs_zscore(size)))",5.222793787406058,"beta60,c_ma20,c_ma60,co,dv_adv,hl,ret20,size,stoch",19,0.6756
+"sub(ts_max(ts_delta(ts_min(div(c_ma60, size), w_id(w20)), w5), w60), cs_zscore(size))",5.222793755020641,"beta60,c_ma20,c_ma60,co,dv_adv,hl,ret20,size,stoch",19,0.6756
+"sub(ts_max(ts_delta(ts_min(div(c_ma60, size), w20), w5), w_id(w60)), cs_zscore(size))",5.222793755020641,"beta60,c_ma20,c_ma60,co,dv_adv,hl,ret20,size,stoch",19,0.6756
+"sub(ts_max(ts_delta(ts_min(div(c_ma60, size), w20), w_id(w5)), w60), cs_zscore(size))",5.222793755020641,"beta60,c_ma20,c_ma60,co,dv_adv,hl,ret20,size,stoch",19,0.6756
+"ts_max(ts_median(ts_median(ts_std(ts_delay(v_ma20, w60), w10), w10), w_id(w60)), w_id(w60))",4.73899507006824,"c_ma60,co,dv_adv,hl,ret1,ret20,stoch,v_ma20,vol20",11,0.6962
+"ts_max(ts_median(ts_median(ts_std(ts_delay(v_ma20, w60), w10), w60), w_id(w60)), w60)",4.733504140019349,"c_ma60,co,dv_adv,hl,ret1,ret20,stoch,v_ma20,vol20",11,0.6641
+"ts_max(ts_median(ts_median(ts_std(ts_delay(v_ma20, w60), w_id(w10)), w60), w60), w60)",4.733504140019349,"c_ma60,co,dv_adv,hl,ret1,ret20,stoch,v_ma20,vol20",11,0.6641
+"ts_max(ts_median(ts_median(ts_std(ts_delay(v_ma20, w60), w10), w60), w_id(w60)), w_id(w60))",4.713615467162124,"c_ma60,co,dv_adv,hl,ret1,ret20,stoch,v_ma20,vol20",11,0.6641
+"ts_max(ts_median(ts_median(ts_std(ts_delay(v_ma20, w60), w10), w_id(w60)), w_id(w60)), w_id(w60))",4.6937267943049,"c_ma60,co,dv_adv,hl,ret1,ret20,stoch,v_ma20,vol20",11,0.6641
+"ts_max(ts_median(ts_median(ts_std(ts_delay(v_ma20, w60), w10), w60), w_id(w60)), w_id(w_id(w60)))",4.6937267943049,"c_ma60,co,dv_adv,hl,ret1,ret20,stoch,v_ma20,vol20",11,0.6641
+"ts_max(ts_median(ts_median(ts_std(ts_std(v_ma20, w60), w10), w60), w60), w60)",4.5811641109767045,"c_ma60,co,dv_adv,hl,ret1,ret20,stoch,v_ma20,vol20",11,0.6844
+"ts_max(ts_median(ts_median(ts_std(ts_std(v_ma20, w60), w10), w60), w_id(w60)), w60)",4.561996060303162,"c_ma60,co,dv_adv,hl,ret1,ret20,stoch,v_ma20,vol20",11,0.6844
+"ts_max(ts_median(ts_median(ts_std(ts_std(v_ma20, w60), w10), w_id(w60)), w60), w60)",4.561996060303162,"c_ma60,co,dv_adv,hl,ret1,ret20,stoch,v_ma20,vol20",11,0.6844
+"ts_max(ts_median(ts_median(ts_std(ts_std(v_ma20, w60), w_id(w10)), w60), w60), w60)",4.561996060303162,"c_ma60,co,dv_adv,hl,ret1,ret20,stoch,v_ma20,vol20",11,0.6844
+"ts_max(ts_median(ts_median(ts_std(ts_std(v_ma20, w60), w10), w60), w_id(w60)), w_id(w60))",4.542828009629619,"c_ma60,co,dv_adv,hl,ret1,ret20,stoch,v_ma20,vol20",11,0.6844
+"ts_max(ts_median(ts_median(ts_std(ts_std(v_ma20, w60), w10), w_id(w60)), w_id(w60)), w60)",4.542828009629619,"c_ma60,co,dv_adv,hl,ret1,ret20,stoch,v_ma20,vol20",11,0.6844
+"ts_max(ts_median(ts_median(ts_std(ts_std(v_ma20, w60), w10), w60), w60), w_id(w_id(w60)))",4.542828009629619,"c_ma60,co,dv_adv,hl,ret1,ret20,stoch,v_ma20,vol20",11,0.6844
+"ts_max(ts_median(ts_median(ts_std(ts_std(v_ma20, w60), w_id(w10)), w60), w60), w_id(w60))",4.542828009629619,"c_ma60,co,dv_adv,hl,ret1,ret20,stoch,v_ma20,vol20",11,0.6844
+"ts_max(ts_median(ts_median(ts_std(ts_std(v_ma20, w60), w10), w_id(w_id(w60))), w60), w60)",4.542828009629619,"c_ma60,co,dv_adv,hl,ret1,ret20,stoch,v_ma20,vol20",11,0.6844
+"signsqrt(mul(ts_mean(signlog(ts_mean(size, w60)), w60), neg(c_ma60)))",5.532139936145741,"c_ma60,co,dv_adv,hl,ret1,ret20,size,stoch,v_ma20",21,0.859
+"signsqrt(mul(ts_mean(ts_mean(signlog(size), w60), w60), neg(c_ma60)))",5.530040688585591,"c_ma60,co,dv_adv,hl,ret1,ret20,size,stoch,v_ma20",21,0.8593
+"signsqrt(mul(ts_mean(signlog(ts_mean(size, w60)), w_id(w60)), neg(c_ma60)))",5.509089353078467,"c_ma60,co,dv_adv,hl,ret1,ret20,size,stoch,v_ma20",21,0.859
+"signsqrt(mul(ts_mean(ts_mean(signlog(size), w60), w_id(w60)), neg(c_ma60)))",5.506998852383151,"c_ma60,co,dv_adv,hl,ret1,ret20,size,stoch,v_ma20",21,0.8593
+"signsqrt(mul(ts_mean(ts_mean(signlog(size), w_id(w60)), w60), neg(c_ma60)))",5.506998852383151,"c_ma60,co,dv_adv,hl,ret1,ret20,size,stoch,v_ma20",21,0.8593
+"signsqrt(mul(ts_mean(signlog(ts_mean(size, w60)), w_id(w_id(w60))), neg(c_ma60)))",5.486038770011193,"c_ma60,co,dv_adv,hl,ret1,ret20,size,stoch,v_ma20",21,0.859
+"signsqrt(mul(ts_mean(ts_mean(signlog(size), w60), w_id(w_id(w60))), neg(c_ma60)))",5.483957016180711,"c_ma60,co,dv_adv,hl,ret1,ret20,size,stoch,v_ma20",21,0.8593
+"signsqrt(mul(ts_mean(ts_mean(signlog(size), w_id(w60)), w_id(w60)), neg(c_ma60)))",5.483957016180711,"c_ma60,co,dv_adv,hl,ret1,ret20,size,stoch,v_ma20",21,0.8593
+"signsqrt(mul(ts_mean(signlog(size), w60), neg(c_ma60)))",5.265999766784073,"c_ma60,co,dv_adv,hl,ret1,ret20,size,stoch,v_ma20",21,0.8838
+"signsqrt(mul(ts_mean(signlog(size), w_id(w60)), neg(c_ma60)))",5.244239437169263,"c_ma60,co,dv_adv,hl,ret1,ret20,size,stoch,v_ma20",21,0.8838
+"signsqrt(mul(signlog(ts_mean(size, w60)), neg(c_ma60)))",5.23893634979696,"c_ma60,co,dv_adv,hl,ret1,ret20,size,stoch,v_ma20",21,0.883
+"signsqrt(mul(ts_mean(signlog(size), w_id(w_id(w60))), neg(c_ma60)))",5.222479107554453,"c_ma60,co,dv_adv,hl,ret1,ret20,size,stoch,v_ma20",21,0.8838
+"signsqrt(mul(ts_mean(ts_mean(signlog(size), w60), w20), neg(c_ma60)))",5.221523418229324,"c_ma60,co,dv_adv,hl,ret1,ret20,size,stoch,v_ma20",21,0.8745
+"signsqrt(mul(ts_mean(ts_mean(signlog(size), w20), w60), neg(c_ma60)))",5.220256525070585,"c_ma60,co,dv_adv,hl,ret1,ret20,size,stoch,v_ma20",21,0.8745
+"signsqrt(mul(ts_mean(signlog(ts_mean(size, w20)), w60), neg(c_ma60)))",5.217325839018293,"c_ma60,co,dv_adv,hl,ret1,ret20,size,stoch,v_ma20",21,0.8744
+"sub(neg(ts_min(ts_median(dv_adv, w60), w60)), add(ts_max(ts_max(size, w60), w60), c_ma20))",5.933145000433087,"beta60,c_ma20,c_ma60,co,dv_adv,gap,size,stoch,vol20",20,0.9132
+"sub(neg(ts_min(ts_median(dv_adv, w60), w60)), add(ts_max(ts_max(size, w60), w_id(w60)), c_ma20))",5.908004555515998,"beta60,c_ma20,c_ma60,co,dv_adv,gap,size,stoch,vol20",20,0.9132
+"sub(neg(ts_min(ts_median(dv_adv, w_id(w60)), w60)), add(ts_max(ts_max(size, w60), w60), c_ma20))",5.908004555515998,"beta60,c_ma20,c_ma60,co,dv_adv,gap,size,stoch,vol20",20,0.9132
+"sub(neg(ts_min(ts_median(dv_adv, w_id(w60)), w_id(w60))), add(ts_max(ts_max(size, w60), w60), c_ma20))",5.882864110598908,"beta60,c_ma20,c_ma60,co,dv_adv,gap,size,stoch,vol20",20,0.9132
+"sub(neg(ts_min(ts_median(dv_adv, w_id(w60)), w60)), add(ts_max(ts_max(size, w_id(w60)), w60), c_ma20))",5.882864110598908,"beta60,c_ma20,c_ma60,co,dv_adv,gap,size,stoch,vol20",20,0.9132
+"sub(neg(signlog(ts_min(ts_median(dv_adv, w60), w60))), add(ts_max(size, w60), c_ma20))",5.879696982358332,"beta60,c_ma20,c_ma60,co,dv_adv,gap,size,stoch,vol20",20,0.9329
+"sub(neg(ts_min(ts_median(dv_adv, w_id(w60)), w20)), add(ts_max(ts_max(size, w60), w60), c_ma20))",5.863874421536598,"beta60,c_ma20,c_ma60,co,dv_adv,gap,size,stoch,vol20",20,0.8897
+"sub(neg(ts_min(ts_median(dv_adv, w60), w60)), add(ts_max(ts_max(size, w60), w_id(w5)), c_ma20))",5.85915883283112,"beta60,c_ma20,c_ma60,co,dv_adv,gap,size,stoch,vol20",20,0.9094
+"sub(neg(ts_min(ts_median(dv_adv, w60), w60)), add(ts_max(ts_max(size, w_id(w5)), w60), c_ma20))",5.85915883283112,"beta60,c_ma20,c_ma60,co,dv_adv,gap,size,stoch,vol20",20,0.9094
+"sub(neg(ts_min(ts_median(dv_adv, w_id(w60)), w_id(w_id(w60)))), add(ts_max(ts_max(size, w60), w60), c_ma20))",5.857723665681819,"beta60,c_ma20,c_ma60,co,dv_adv,gap,size,stoch,vol20",20,0.9132
+"sub(neg(signlog(ts_min(ts_median(dv_adv, w60), w_id(w60)))), add(ts_max(size, w60), c_ma20))",5.854888134331503,"beta60,c_ma20,c_ma60,co,dv_adv,gap,size,stoch,vol20",20,0.9329
+"sub(neg(signlog(ts_min(ts_median(dv_adv, w60), w60))), add(ts_max(size, w_id(w60)), c_ma20))",5.854888134331503,"beta60,c_ma20,c_ma60,co,dv_adv,gap,size,stoch,vol20",20,0.9329
+"sub(neg(ts_min(ts_median(dv_adv, w60), w60)), add(ts_max(size, w60), c_ma20))",5.853453200633202,"beta60,c_ma20,c_ma60,co,dv_adv,gap,size,stoch,vol20",20,0.9065
+"sub(neg(ts_min(ts_median(dv_adv, w_id(w60)), w_id(w20))), add(ts_max(ts_max(size, w60), w60), c_ma20))",5.8389217644236755,"beta60,c_ma20,c_ma60,co,dv_adv,gap,size,stoch,vol20",20,0.8897
+"sub(neg(ts_min(ts_median(dv_adv, w_id(w60)), w60)), add(ts_max(ts_max(size, w_id(w5)), w60), c_ma20))",5.8342262420531155,"beta60,c_ma20,c_ma60,co,dv_adv,gap,size,stoch,vol20",20,0.9094
+"ts_median(ts_mean(add(ts_max(v_ma20, w20), ts_delta(beta60, w60)), w10), w60)",4.518879743386986,"beta60,c_ma60,dv_adv,gap,hl,ret20,ret5,stoch,v_ma20",17,0.6595
+"ts_median(ts_mean(add(ts_max(v_ma20, w20), ts_delta(beta60, w_id(w60))), w10), w60)",4.499972296761936,"beta60,c_ma60,dv_adv,gap,hl,ret20,ret5,stoch,v_ma20",17,0.6595
+"ts_median(ts_mean(add(ts_max(v_ma20, w20), ts_delta(beta60, w60)), w_id(w10)), w60)",4.499972296761936,"beta60,c_ma60,dv_adv,gap,hl,ret20,ret5,stoch,v_ma20",17,0.6595
+"ts_median(ts_mean(add(ts_max(v_ma20, w20), ts_delta(beta60, w60)), w10), w_id(w60))",4.499972296761936,"beta60,c_ma60,dv_adv,gap,hl,ret20,ret5,stoch,v_ma20",17,0.6595
+"ts_median(ts_mean(add(ts_max(v_ma20, w_id(w20)), ts_delta(beta60, w60)), w10), w_id(w60))",4.481064850136886,"beta60,c_ma60,dv_adv,gap,hl,ret20,ret5,stoch,v_ma20",17,0.6595
+"ts_median(ts_mean(add(ts_max(v_ma20, w20), ts_delta(beta60, w60)), w10), w_id(w_id(w60)))",4.481064850136886,"beta60,c_ma60,dv_adv,gap,hl,ret20,ret5,stoch,v_ma20",17,0.6595
+"ts_median(ts_mean(add(ts_max(v_ma20, w20), ts_delta(beta60, w60)), w_id(w10)), w_id(w60))",4.481064850136886,"beta60,c_ma60,dv_adv,gap,hl,ret20,ret5,stoch,v_ma20",17,0.6595
+"ts_median(ts_mean(add(ts_max(v_ma20, w_id(w20)), ts_delta(beta60, w_id(w60))), w10), w60)",4.481064850136886,"beta60,c_ma60,dv_adv,gap,hl,ret20,ret5,stoch,v_ma20",17,0.6595
+"ts_median(ts_mean(add(ts_max(v_ma20, w20), ts_delta(beta60, w_id(w60))), w10), w_id(w60))",4.481064850136886,"beta60,c_ma60,dv_adv,gap,hl,ret20,ret5,stoch,v_ma20",17,0.6595
+"ts_median(ts_mean(add(ts_max(v_ma20, w20), ts_delta(beta60, w_id(w60))), w_id(w10)), w_id(w60))",4.462157403511836,"beta60,c_ma60,dv_adv,gap,hl,ret20,ret5,stoch,v_ma20",17,0.6595
+"ts_median(ts_mean(add(ts_max(v_ma20, w_id(w20)), ts_delta(beta60, w_id(w60))), w10), w_id(w60))",4.462157403511836,"beta60,c_ma60,dv_adv,gap,hl,ret20,ret5,stoch,v_ma20",17,0.6595
+"ts_median(ts_mean(add(ts_max(v_ma20, w20), ts_delta(beta60, w_id(w60))), w10), w_id(w_id(w60)))",4.462157403511836,"beta60,c_ma60,dv_adv,gap,hl,ret20,ret5,stoch,v_ma20",17,0.6595
+"ts_median(add(ts_max(v_ma20, w20), ts_delta(beta60, w_id(w60))), w60)",4.4545536022909165,"beta60,c_ma60,dv_adv,gap,hl,ret20,ret5,stoch,v_ma20",17,0.6731
+"ts_median(ts_mean(add(ts_max(v_ma20, w20), ts_delta(beta60, w_id(w60))), w10), w_id(w_id(w_id(w60))))",4.443249956886786,"beta60,c_ma60,dv_adv,gap,hl,ret20,ret5,stoch,v_ma20",17,0.6595
+"ts_median(add(ts_max(v_ma20, w20), ts_delta(beta60, w_id(w60))), w_id(w60))",4.435992962281372,"beta60,c_ma60,dv_adv,gap,hl,ret20,ret5,stoch,v_ma20",17,0.6731
+"neg(mul(mul(c_ma20, ts_sum(signlog(size), w20)), c_ma20))",6.304604577627432,"c_ma20,c_ma60,co,gap,hl,ret5,size,stoch,vol20",24,0.0
+"neg(mul(c_ma20, mul(ts_sum(signlog(size), w20), c_ma20)))",6.304604577627432,"c_ma20,c_ma60,co,gap,hl,ret5,size,stoch,vol20",24,1.0
+"neg(mul(c_ma20, mul(c_ma20, ts_sum(signlog(size), w20))))",6.304604577627432,"c_ma20,c_ma60,co,gap,hl,ret5,size,stoch,vol20",24,1.0
+"neg(mul(ts_sum(signlog(size), w20), mul(c_ma20, c_ma20)))",6.304604013330446,"c_ma20,c_ma60,co,gap,hl,ret5,size,stoch,vol20",24,1.0
+"neg(mul(c_ma20, mul(c_ma20, ts_sum(signlog(size), w_id(w20)))))",6.278444392658024,"c_ma20,c_ma60,co,gap,hl,ret5,size,stoch,vol20",24,1.0
+"neg(mul(c_ma20, mul(ts_sum(signlog(size), w_id(w20)), signlog(c_ma20))))",6.211341347235409,"c_ma20,c_ma60,co,gap,hl,ret5,size,stoch,vol20",24,0.9917
+"neg(mul(c_ma20, mul(c_ma20, ts_sum(signlog(size), w60))))",6.130427394086419,"c_ma20,c_ma60,co,gap,hl,ret5,size,stoch,vol20",24,0.9739
+"neg(mul(c_ma20, mul(c_ma20, ts_sum(signlog(size), w_id(w60)))))",6.1049899360196695,"c_ma20,c_ma60,co,gap,hl,ret5,size,stoch,vol20",24,0.9739
+"neg(mul(c_ma20, mul(c_ma20, ts_sum(signlog(size), w10))))",6.0720035073095255,"c_ma20,c_ma60,co,gap,hl,ret5,size,stoch,vol20",24,0.9937
+"neg(mul(c_ma20, mul(c_ma20, ts_sum(signlog(size), w5))))",6.066045043433204,"c_ma20,c_ma60,co,gap,hl,ret5,size,stoch,vol20",24,0.9892
+"neg(mul(c_ma20, mul(c_ma20, ts_sum(signlog(size), w_id(w10)))))",6.046808472009486,"c_ma20,c_ma60,co,gap,hl,ret5,size,stoch,vol20",24,0.9937
+"neg(mul(c_ma20, mul(c_ma20, ts_sum(signlog(size), w_id(w5)))))",6.040874732049664,"c_ma20,c_ma60,co,gap,hl,ret5,size,stoch,vol20",24,0.9892
+"neg(mul(c_ma20, mul(ts_sum(signlog(size), w_id(w5)), signlog(c_ma20))))",5.986390973135899,"c_ma20,c_ma60,co,gap,hl,ret5,size,stoch,vol20",24,0.9808
+"neg(mul(mul(ts_mean(c_ma20, w5), signsqrt(c_ma20)), mul(c_ma20, ts_sum(signlog(size), w20))))",5.956301171241422,"c_ma20,c_ma60,co,gap,hl,ret5,size,stoch,vol20",24,0.9854
+"neg(mul(mul(c_ma20, signlog(size)), c_ma20))",5.931698258999806,"c_ma20,c_ma60,co,gap,hl,ret5,size,stoch,vol20",24,0.9851
+"ts_mean(ts_max(ts_decay(sub(ts_delta(beta60, w5), dv_adv), w_id(w10)), w60), w_id(w10))",5.048569959624786,"beta60,c_ma20,co,dv_adv,hl,ret20,ret5,v_ma20,vol20",23,0.3814
+"ts_mean(ts_max(ts_decay(sub(ts_corr(ret20, ret20, w5), dv_adv), w10), w60), w10)",4.930400378876732,"beta60,c_ma20,co,dv_adv,hl,ret20,ret5,v_ma20,vol20",23,0.963
+"ts_mean(ts_max(ts_decay(sub(ts_corr(ret20, ret20, w5), dv_adv), w10), w_id(w60)), w10)",4.909684410898259,"beta60,c_ma20,co,dv_adv,hl,ret20,ret5,v_ma20,vol20",23,0.963
+"ts_mean(ts_max(ts_decay(sub(ts_corr(ret20, ret20, w5), dv_adv), w10), w60), w_id(w10))",4.909684410898259,"beta60,c_ma20,co,dv_adv,hl,ret20,ret5,v_ma20,vol20",23,0.963
+"ts_mean(ts_max(ts_decay(sub(ts_corr(ret20, ret20, w5), dv_adv), w_id(w10)), w60), w10)",4.909684410898259,"beta60,c_ma20,co,dv_adv,hl,ret20,ret5,v_ma20,vol20",23,0.963
+"ts_mean(ts_max(ts_decay(sub(ts_corr(ret20, ret20, w5), dv_adv), w10), w60), w_id(w_id(w10)))",4.8889684429197855,"beta60,c_ma20,co,dv_adv,hl,ret20,ret5,v_ma20,vol20",23,0.963
+"ts_mean(ts_max(ts_decay(sub(ts_corr(ret20, ret20, w5), dv_adv), w_id(w10)), w60), w_id(w10))",4.8889684429197855,"beta60,c_ma20,co,dv_adv,hl,ret20,ret5,v_ma20,vol20",23,0.963
+"ts_mean(ts_max(ts_decay(sub(ts_delta(beta60, w5), dv_adv), w_id(w10)), w60), w5)",4.868270340919016,"beta60,c_ma20,co,dv_adv,hl,ret20,ret5,v_ma20,vol20",23,0.9849
+"ts_mean(ts_max(ts_decay(sub(ts_corr(ret20, ret20, w5), dv_adv), w10), w60), w_id(w_id(w_id(w10))))",4.868252474941311,"beta60,c_ma20,co,dv_adv,hl,ret20,ret5,v_ma20,vol20",23,0.963
+"ts_mean(ts_max(ts_decay(sub(ts_corr(ret20, ret20, w5), dv_adv), w_id(w10)), w60), w_id(w_id(w10)))",4.868252474941311,"beta60,c_ma20,co,dv_adv,hl,ret20,ret5,v_ma20,vol20",23,0.963
+"ts_mean(ts_max(ts_decay(sub(ts_corr(ret20, ret20, w5), dv_adv), w_id(w_id(w10))), w60), w_id(w10))",4.868252474941311,"beta60,c_ma20,co,dv_adv,hl,ret20,ret5,v_ma20,vol20",23,0.963
+"ts_mean(ts_max(ts_decay(sub(ts_corr(ret20, ret20, w5), dv_adv), w_id(w10)), w60), w_id(w_id(w_id(w10))))",4.847536506962838,"beta60,c_ma20,co,dv_adv,hl,ret20,ret5,v_ma20,vol20",23,0.963
+"ts_mean(ts_max(ts_decay(sub(ts_corr(ret20, ret20, w5), dv_adv), w_id(w_id(w10))), w60), w_id(w_id(w10)))",4.847536506962838,"beta60,c_ma20,co,dv_adv,hl,ret20,ret5,v_ma20,vol20",23,0.963
+"ts_mean(ts_max(ts_decay(sub(ts_corr(ret20, ret20, w5), dv_adv), w_id(w_id(w10))), w60), w_id(w_id(w_id(w10))))",4.826820538984364,"beta60,c_ma20,co,dv_adv,hl,ret20,ret5,v_ma20,vol20",23,0.963
+"ts_mean(ts_max(ts_decay(sub(ts_corr(ret20, ret20, w60), dv_adv), w10), w60), w10)",4.820162137738559,"beta60,c_ma20,co,dv_adv,hl,ret20,ret5,v_ma20,vol20",23,0.974
+"ts_std(div(ts_max(ts_std(ts_skew(ret1, w20), w60), w60), cs_rank(hl)), w60)",5.347187913698351,"beta60,c_ma20,c_ma60,co,gap,hl,ret1,ret5,vol20",22,0.4833
+"ts_std(div(ts_max(ts_std(ts_skew(ret1, w20), w60), w60), cs_rank(cs_rank(hl))), w60)",5.324720737590375,"beta60,c_ma20,c_ma60,co,gap,hl,ret1,ret5,vol20",22,1.0
+"ts_std(div(ts_max(ts_std(ts_skew(ret1, w20), w60), w60), cs_rank(hl)), w_id(w60))",5.324720737590375,"beta60,c_ma20,c_ma60,co,gap,hl,ret1,ret5,vol20",22,1.0
+"ts_std(div(ts_max(ts_std(ts_skew(ret1, w20), w_id(w60)), w60), cs_rank(hl)), w60)",5.324720737590375,"beta60,c_ma20,c_ma60,co,gap,hl,ret1,ret5,vol20",22,1.0
+"ts_std(div(ts_max(ts_std(ts_skew(ret1, w20), w60), w_id(w60)), cs_rank(hl)), w60)",5.324720737590375,"beta60,c_ma20,c_ma60,co,gap,hl,ret1,ret5,vol20",22,1.0
+"ts_std(div(ts_max(ts_std(ts_skew(ret1, w20), w60), w60), cs_rank(signsqrt(hl))), w60)",5.324395220367254,"beta60,c_ma20,c_ma60,co,gap,hl,ret1,ret5,vol20",22,1.0
+"ts_std(div(ts_max(ts_std(ts_skew(ret1, w20), w_id(w60)), w60), cs_rank(ts_mean(hl, w10))), w60)",5.321359737795719,"beta60,c_ma20,c_ma60,co,gap,hl,ret1,ret5,vol20",22,0.9558
+"ts_std(div(ts_max(ts_std(ts_skew(ret1, w20), w60), w60), cs_rank(cs_rank(cs_zscore(hl)))), w60)",5.302253561482398,"beta60,c_ma20,c_ma60,co,gap,hl,ret1,ret5,vol20",22,1.0
+"ts_std(div(ts_max(ts_std(ts_skew(ret1, w20), w60), w60), cs_rank(cs_rank(cs_rank(hl)))), w60)",5.302253561482398,"beta60,c_ma20,c_ma60,co,gap,hl,ret1,ret5,vol20",22,1.0
+"ts_std(div(ts_max(ts_std(ts_skew(ret1, w20), w60), w60), cs_rank(cs_rank(hl))), w_id(w60))",5.302253561482398,"beta60,c_ma20,c_ma60,co,gap,hl,ret1,ret5,vol20",22,1.0
+"ts_std(div(ts_max(ts_std(ts_skew(ret1, w20), w_id(w60)), w60), cs_rank(cs_rank(hl))), w60)",5.302253561482398,"beta60,c_ma20,c_ma60,co,gap,hl,ret1,ret5,vol20",22,1.0
+"ts_std(div(ts_max(ts_std(ts_skew(ret1, w20), w60), w60), cs_rank(hl)), w_id(w_id(w60)))",5.302253561482398,"beta60,c_ma20,c_ma60,co,gap,hl,ret1,ret5,vol20",22,1.0
+"ts_std(div(ts_max(ts_std(ts_skew(ret1, w20), w60), w_id(w60)), cs_rank(hl)), w_id(w60))",5.302253561482398,"beta60,c_ma20,c_ma60,co,gap,hl,ret1,ret5,vol20",22,1.0
+"ts_std(div(ts_max(ts_std(ts_skew(ret1, w20), w60), w_id(w60)), cs_rank(cs_rank(hl))), w60)",5.302253561482398,"beta60,c_ma20,c_ma60,co,gap,hl,ret1,ret5,vol20",22,1.0
+"ts_std(div(ts_max(ts_std(ts_skew(ret1, w20), w_id(w60)), w60), cs_rank(hl)), w_id(w60))",5.302253561482398,"beta60,c_ma20,c_ma60,co,gap,hl,ret1,ret5,vol20",22,1.0
+"ts_min(ts_min(ts_min(ts_std(add(beta60, v_ma20), w60), w60), w60), w60)",5.208597182986575,"beta60,c_ma60,co,dv_adv,hl,ret1,stoch,v_ma20,vol20",25,0.6277
+"ts_min(ts_min(ts_min(ts_std(add(beta60, v_ma20), w_id(w60)), w60), w60), w60)",5.186803889333912,"beta60,c_ma60,co,dv_adv,hl,ret1,stoch,v_ma20,vol20",25,0.6277
+"ts_min(ts_min(ts_min(ts_std(add(beta60, v_ma20), w60), w60), w60), w_id(w60))",5.186803889333912,"beta60,c_ma60,co,dv_adv,hl,ret1,stoch,v_ma20,vol20",25,0.6277
+"ts_min(ts_min(ts_min(ts_std(add(beta60, v_ma20), w60), w60), w_id(w_id(w60))), w_id(w60))",5.143217302028585,"beta60,c_ma60,co,dv_adv,hl,ret1,stoch,v_ma20,vol20",25,0.6277
+"ts_min(ts_min(ts_min(ts_std(add(ret1, v_ma20), w60), w60), w60), w60)",5.020365679373488,"beta60,c_ma60,co,dv_adv,hl,ret1,stoch,v_ma20,vol20",25,0.6281
+"ts_min(ts_min(ts_min(ts_std(add(ret1, v_ma20), w60), w60), w60), w_id(w60))",4.99935996523385,"beta60,c_ma60,co,dv_adv,hl,ret1,stoch,v_ma20,vol20",25,0.6281
+"ts_min(ts_min(ts_min(ts_std(add(ret1, v_ma20), w60), w60), w_id(w60)), w60)",4.99935996523385,"beta60,c_ma60,co,dv_adv,hl,ret1,stoch,v_ma20,vol20",25,0.6281
+"ts_min(ts_min(ts_min(ts_std(add(ret1, v_ma20), w_id(w60)), w60), w60), w60)",4.99935996523385,"beta60,c_ma60,co,dv_adv,hl,ret1,stoch,v_ma20,vol20",25,0.6281
+"ts_min(ts_min(ts_min(ts_std(add(ret1, v_ma20), w60), w_id(w_id(w60))), w60), w60)",4.9783542510942125,"beta60,c_ma60,co,dv_adv,hl,ret1,stoch,v_ma20,vol20",25,0.6281
+"ts_min(ts_min(ts_min(ts_std(add(ret1, v_ma20), w60), w60), w_id(w_id(w60))), w60)",4.9783542510942125,"beta60,c_ma60,co,dv_adv,hl,ret1,stoch,v_ma20,vol20",25,0.6281
+"ts_min(ts_min(ts_min(ts_std(add(ret1, v_ma20), w60), w60), w_id(w60)), w_id(w60))",4.9783542510942125,"beta60,c_ma60,co,dv_adv,hl,ret1,stoch,v_ma20,vol20",25,0.6281
+"ts_min(ts_min(ts_min(ts_std(add(ret1, v_ma20), w60), w_id(w60)), w60), w_id(w60))",4.9783542510942125,"beta60,c_ma60,co,dv_adv,hl,ret1,stoch,v_ma20,vol20",25,0.6281
+"ts_min(ts_min(ts_min(ts_std(add(ret1, v_ma20), w_id(w60)), w60), w_id(w60)), w60)",4.9783542510942125,"beta60,c_ma60,co,dv_adv,hl,ret1,stoch,v_ma20,vol20",25,0.6281
+"ts_min(ts_min(ts_min(ts_std(add(ret1, v_ma20), w_id(w60)), w60), w60), w_id(w60))",4.9783542510942125,"beta60,c_ma60,co,dv_adv,hl,ret1,stoch,v_ma20,vol20",25,0.6281
+"ts_min(ts_min(ts_min(ts_std(add(ret1, v_ma20), w_id(w60)), w_id(w60)), w60), w60)",4.9783542510942125,"beta60,c_ma60,co,dv_adv,hl,ret1,stoch,v_ma20,vol20",25,0.6281
+"neg(add(c_ma20, ts_delay(ts_max(ts_max(size, w60), w5), w20)))",5.8325924699450304,"c_ma20,c_ma60,dv_adv,gap,ret20,ret5,size,v_ma20,vol20",29,0.9131
+"neg(add(c_ma20, ts_max(ts_delay(ts_max(size, w60), w20), w10)))",5.7890140091754185,"c_ma20,c_ma60,dv_adv,gap,ret20,ret5,size,v_ma20,vol20",29,0.9118
+"neg(add(c_ma20, ts_delay(ts_max(ts_max(size, w60), w10), w_id(w20))))",5.76489311747052,"c_ma20,c_ma60,dv_adv,gap,ret20,ret5,size,v_ma20,vol20",29,0.9118
+"neg(add(c_ma20, ts_max(ts_delay(ts_max(size, w20), w60), w20)))",5.761753791072698,"c_ma20,c_ma60,dv_adv,gap,ret20,ret5,size,v_ma20,vol20",29,0.8753
+"neg(add(ts_delay(ts_max(size, w60), w20), c_ma20))",5.756944993717791,"c_ma20,c_ma60,dv_adv,gap,ret20,ret5,size,v_ma20,vol20",29,0.9119
+"neg(add(c_ma20, ts_delay(ts_max(size, w60), w20)))",5.756944993717791,"c_ma20,c_ma60,dv_adv,gap,ret20,ret5,size,v_ma20,vol20",29,0.9119
+"neg(add(c_ma20, ts_max(ts_delay(ts_max(size, w20), w60), w10)))",5.7520469310651805,"c_ma20,c_ma60,dv_adv,gap,ret20,ret5,size,v_ma20,vol20",29,0.8658
+"neg(add(c_ma20, ts_max(ts_delay(ts_max(size, w5), w60), w20)))",5.751096760771204,"c_ma20,c_ma60,dv_adv,gap,ret20,ret5,size,v_ma20,vol20",29,0.8606
+"neg(add(c_ma20, ts_delay(ts_max(ts_max(size, w60), w10), w_id(w_id(w20)))))",5.740772225765623,"c_ma20,c_ma60,dv_adv,gap,ret20,ret5,size,v_ma20,vol20",29,0.9118
+"neg(add(c_ma20, ts_max(ts_delay(ts_max(size, w20), w60), w_id(w20))))",5.737746483609895,"c_ma20,c_ma60,dv_adv,gap,ret20,ret5,size,v_ma20,vol20",29,0.8753
+"neg(add(ts_delay(ts_max(size, w60), w_id(w20)), c_ma20))",5.73315596481813,"c_ma20,c_ma60,dv_adv,gap,ret20,ret5,size,v_ma20,vol20",29,0.9119
+"neg(add(c_ma20, ts_delay(ts_max(size, w_id(w60)), w20)))",5.73315596481813,"c_ma20,c_ma60,dv_adv,gap,ret20,ret5,size,v_ma20,vol20",29,0.9119
+"neg(add(c_ma20, ts_delay(ts_max(size, w60), w_id(w20))))",5.73315596481813,"c_ma20,c_ma60,dv_adv,gap,ret20,ret5,size,v_ma20,vol20",29,0.9119
+"neg(add(c_ma20, ts_max(ts_delay(ts_max(size, w20), w60), w_id(w10))))",5.728080068852409,"c_ma20,c_ma60,dv_adv,gap,ret20,ret5,size,v_ma20,vol20",29,0.8658
+"neg(add(c_ma20, ts_max(ts_delay(ts_max(size, w20), w60), w_id(w5))))",5.727133857601324,"c_ma20,c_ma60,dv_adv,gap,ret20,ret5,size,v_ma20,vol20",29,0.8606
+"ts_median(sub(cs_zscore(div(ts_std(dv_adv, w10), ts_std(size, w20))), cs_zscore(add(ret1, add(ret1, size)))), w5)",6.150508621774839,"beta60,c_ma20,c_ma60,co,dv_adv,ret1,size,stoch,vol20",27,0.6851
+"ts_median(sub(cs_zscore(div(ts_std(dv_adv, w10), ts_std(size, w20))), cs_zscore(add(ret1, add(ret1, size)))), w_id(w5))",6.124111589063359,"beta60,c_ma20,c_ma60,co,dv_adv,ret1,size,stoch,vol20",27,0.6851
+"ts_median(sub(cs_zscore(div(ts_std(dv_adv, w5), ts_std(size, w20))), cs_zscore(add(ret1, add(ret1, size)))), w5)",6.109749178881945,"beta60,c_ma20,c_ma60,co,dv_adv,ret1,size,stoch,vol20",27,0.6974
+"ts_median(sub(cs_zscore(div(ts_std(dv_adv, w5), ts_std(size, w20))), cs_zscore(add(ret1, add(ret1, size)))), w_id(w5))",6.083527079401764,"beta60,c_ma20,c_ma60,co,dv_adv,ret1,size,stoch,vol20",27,0.6974
+"ts_median(sub(cs_zscore(div(ts_std(dv_adv, w5), ts_std(size, w20))), cs_zscore(add(ret1, add(ret1, size)))), w_id(w_id(w5)))",6.057304979921585,"beta60,c_ma20,c_ma60,co,dv_adv,ret1,size,stoch,vol20",27,0.6974
+"ts_median(sub(cs_zscore(div(vol20, ts_std(size, w20))), cs_zscore(add(ret1, add(ret1, size)))), w5)",6.004519921168795,"beta60,c_ma20,c_ma60,co,dv_adv,ret1,size,stoch,vol20",27,0.657
+"ts_median(sub(cs_zscore(div(dv_adv, ts_std(size, w20))), cs_zscore(add(ret1, add(ret1, size)))), w5)",5.987011482383479,"beta60,c_ma20,c_ma60,co,dv_adv,ret1,size,stoch,vol20",27,0.7223
+"ts_median(sub(cs_zscore(div(vol20, ts_std(size, w20))), cs_zscore(add(ret1, add(ret1, size)))), w_id(w5))",5.978968772568077,"beta60,c_ma20,c_ma60,co,dv_adv,ret1,size,stoch,vol20",27,0.657
+"ts_median(sub(cs_zscore(div(dv_adv, ts_std(size, w20))), cs_zscore(add(ret1, add(ret1, size)))), w_id(w5))",5.961534837777592,"beta60,c_ma20,c_ma60,co,dv_adv,ret1,size,stoch,vol20",27,0.7223
+"ts_median(sub(cs_zscore(div(vol20, ts_std(size, w20))), cs_zscore(add(ret1, add(ret1, size)))), w_id(w_id(w5)))",5.953417623967359,"beta60,c_ma20,c_ma60,co,dv_adv,ret1,size,stoch,vol20",27,0.657
+"ts_median(sub(cs_zscore(div(ts_std(dv_adv, w20), ts_std(size, w20))), cs_zscore(add(ret1, add(ret1, size)))), w5)",5.938833594609505,"beta60,c_ma20,c_ma60,co,dv_adv,ret1,size,stoch,vol20",27,0.6618
+"ts_median(sub(cs_zscore(div(dv_adv, ts_std(size, w20))), cs_zscore(add(ret1, add(ret1, size)))), w_id(w_id(w5)))",5.9360581931717045,"beta60,c_ma20,c_ma60,co,dv_adv,ret1,size,stoch,vol20",27,0.7223
+"ts_median(sub(cs_zscore(div(ts_std(dv_adv, w20), ts_std(size, w20))), cs_zscore(add(ret1, add(ret1, size)))), w_id(w5))",5.913345038409465,"beta60,c_ma20,c_ma60,co,dv_adv,ret1,size,stoch,vol20",27,0.6618
+"ts_median(sub(cs_zscore(div(dv_adv, ts_std(size, w20))), cs_zscore(add(ret1, add(ret1, size)))), w_id(w_id(w_id(w5))))",5.910581548565817,"beta60,c_ma20,c_ma60,co,dv_adv,ret1,size,stoch,vol20",27,0.7223
+"ts_median(sub(cs_zscore(div(ts_std(dv_adv, w10), ts_std(size, w20))), cs_zscore(add(ret1, add(co, size)))), w5)",5.889763970159739,"beta60,c_ma20,c_ma60,co,dv_adv,ret1,size,stoch,vol20",27,0.6815
+"ts_median(ts_delay(ts_delay(ts_delay(ts_std(v_ma20, w20), w5), w60), w60), w60)",4.797437127479955,"c_ma20,c_ma60,co,gap,ret20,ret5,stoch,v_ma20,vol20",28,0.717
+"ts_median(ts_delay(ts_delay(ts_delay(ts_std(v_ma20, w20), w60), w5), w60), w60)",4.797437127479955,"c_ma20,c_ma60,co,gap,ret20,ret5,stoch,v_ma20,vol20",28,0.717
+"ts_median(ts_delay(ts_delay(ts_delay(ts_std(v_ma20, w20), w5), w_id(w60)), w60), w60)",4.77736416878757,"c_ma20,c_ma60,co,gap,ret20,ret5,stoch,v_ma20,vol20",28,0.717
+"ts_median(ts_delay(ts_delay(ts_delay(ts_std(v_ma20, w20), w_id(w5)), w60), w60), w60)",4.77736416878757,"c_ma20,c_ma60,co,gap,ret20,ret5,stoch,v_ma20,vol20",28,0.717
+"ts_median(ts_delay(ts_delay(ts_delay(ts_std(v_ma20, w20), w60), w60), w_id(w5)), w60)",4.77736416878757,"c_ma20,c_ma60,co,gap,ret20,ret5,stoch,v_ma20,vol20",28,0.717
+"ts_median(ts_delay(ts_delay(ts_std(ts_corr(co, gap, w10), w20), w60), w60), w60)",4.766279693490665,"c_ma20,c_ma60,co,gap,ret20,ret5,stoch,v_ma20,vol20",28,0.4284
+"ts_median(ts_delay(ts_delay(ts_delay(ts_std(v_ma20, w20), w60), w60), w_id(w_id(w5))), w60)",4.757291210095185,"c_ma20,c_ma60,co,gap,ret20,ret5,stoch,v_ma20,vol20",28,0.717
+"ts_median(ts_delay(ts_delay(ts_delay(ts_std(v_ma20, w20), w5), w_id(w_id(w60))), w60), w60)",4.757291210095185,"c_ma20,c_ma60,co,gap,ret20,ret5,stoch,v_ma20,vol20",28,0.717
+"ts_median(ts_delay(ts_delay(ts_delay(ts_std(v_ma20, w20), w_id(w5)), w_id(w_id(w60))), w60), w60)",4.7372182514028,"c_ma20,c_ma60,co,gap,ret20,ret5,stoch,v_ma20,vol20",28,0.717
+"ts_median(ts_delay(ts_delay(ts_std(v_ma20, w20), w60), w60), w60)",4.711452092715245,"c_ma20,c_ma60,co,gap,ret20,ret5,stoch,v_ma20,vol20",28,0.7258
+"ts_median(ts_delay(ts_delay(ts_std(v_ma20, w20), w60), w60), w_id(w60))",4.691902498969538,"c_ma20,c_ma60,co,gap,ret20,ret5,stoch,v_ma20,vol20",28,0.7258
+"ts_median(ts_delay(ts_delay(ts_std(v_ma20, w20), w_id(w60)), w60), w60)",4.691902498969538,"c_ma20,c_ma60,co,gap,ret20,ret5,stoch,v_ma20,vol20",28,0.7258
+"ts_median(ts_delay(ts_delay(ts_std(v_ma20, w20), w60), w_id(w60)), w60)",4.691902498969538,"c_ma20,c_ma60,co,gap,ret20,ret5,stoch,v_ma20,vol20",28,0.7258
+"ts_median(ts_delay(ts_delay(ts_std(v_ma20, w_id(w20)), w60), w60), w60)",4.691902498969538,"c_ma20,c_ma60,co,gap,ret20,ret5,stoch,v_ma20,vol20",28,0.7258
+"ts_median(ts_delay(ts_delay(ts_std(v_ma20, w20), w60), w60), w_id(w_id(w60)))",4.672352905223832,"c_ma20,c_ma60,co,gap,ret20,ret5,stoch,v_ma20,vol20",28,0.7258
+"neg(add(add(ts_median(ts_median(size, w60), w60), ts_min(co, w60)), c_ma20))",5.551107339664177,"beta60,c_ma20,co,hl,ret20,size,stoch,v_ma20,vol20",26,0.8045
+"neg(add(add(ts_median(ts_median(size, w60), w60), ts_std(cs_zscore(size), w20)), c_ma20))",5.545774527546369,"beta60,c_ma20,co,hl,ret20,size,stoch,v_ma20,vol20",26,0.877
+"neg(add(add(ts_median(ts_median(size, w60), w60), ts_min(co, w_id(w60))), c_ma20))",5.5277833592454195,"beta60,c_ma20,co,hl,ret20,size,stoch,v_ma20,vol20",26,0.8045
+"neg(add(add(ts_median(ts_median(size, w60), w_id(w60)), ts_std(cs_zscore(size), w20)), c_ma20))",5.522374635025077,"beta60,c_ma20,co,hl,ret20,size,stoch,v_ma20,vol20",26,0.877
+"neg(add(add(ts_median(ts_median(size, w60), w60), ts_std(cs_zscore(size), w_id(w20))), c_ma20))",5.522374635025077,"beta60,c_ma20,co,hl,ret20,size,stoch,v_ma20,vol20",26,0.877
+"neg(add(add(ts_median(ts_median(size, w60), w_id(w60)), ts_std(cs_zscore(size), w_id(w20))), c_ma20))",5.498974742503784,"beta60,c_ma20,co,hl,ret20,size,stoch,v_ma20,vol20",26,0.877
+"neg(add(add(ts_median(ts_median(size, w60), w60), ts_std(ts_median(size, w60), w60)), c_ma20))",5.480409027447348,"beta60,c_ma20,co,hl,ret20,size,stoch,v_ma20,vol20",26,0.8777
+"neg(add(add(ts_median(ts_median(size, w60), w60), ts_std(cs_zscore(size), w60)), c_ma20))",5.47377883292848,"beta60,c_ma20,co,hl,ret20,size,stoch,v_ma20,vol20",26,0.8388
+"neg(add(add(ts_median(ts_median(size, w60), w60), ts_std(ts_median(size, w60), w_id(w60))), c_ma20))",5.457186955297147,"beta60,c_ma20,co,hl,ret20,size,stoch,v_ma20,vol20",26,0.8777
+"neg(add(add(ts_median(ts_median(size, w60), w_id(w60)), ts_std(ts_median(size, w60), w60)), c_ma20))",5.457186955297147,"beta60,c_ma20,co,hl,ret20,size,stoch,v_ma20,vol20",26,0.8777
+"neg(add(add(ts_median(ts_median(size, w60), w60), ts_std(cs_zscore(size), w10)), c_ma20))",5.456473152078631,"beta60,c_ma20,co,hl,ret20,size,stoch,v_ma20,vol20",26,0.861
+"neg(add(add(ts_median(ts_median(size, w60), w60), ts_std(size, w60)), c_ma20))",5.455365464529281,"beta60,c_ma20,co,hl,ret20,size,stoch,v_ma20,vol20",26,0.8749
+"neg(add(add(ts_median(ts_median(size, w60), w60), ts_std(cs_zscore(size), w_id(w60))), c_ma20))",5.450682719709373,"beta60,c_ma20,co,hl,ret20,size,stoch,v_ma20,vol20",26,0.8388
+"neg(add(add(ts_median(ts_median(size, w60), w_id(w60)), ts_std(cs_zscore(size), w60)), c_ma20))",5.450682719709373,"beta60,c_ma20,co,hl,ret20,size,stoch,v_ma20,vol20",26,0.8388
+"neg(add(add(ts_median(ts_median(size, w60), w60), neg(vol20)), c_ma20))",5.4434079921630785,"beta60,c_ma20,co,hl,ret20,size,stoch,v_ma20,vol20",26,0.8159

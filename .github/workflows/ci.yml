@@ -24,7 +24,10 @@ jobs:
       - name: Install (CPU torch)
         run: |
           pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install numpy pandas pytest ruff mypy matplotlib lxml
+          # statsmodels is the Hamilton gate's estimator: without it the whole
+          # markov-gate suite importorskips and CI goes green having tested
+          # none of it (measured: 195 passed / 4 skipped vs 212 / 3 locally).
+          pip install numpy pandas pytest ruff mypy matplotlib lxml statsmodels
       - name: Lint (ruff)
         run: python -m ruff check nec_moe/ tests/ scripts/ run_experiment.py
       - name: Type-check (mypy)

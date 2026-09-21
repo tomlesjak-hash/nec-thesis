@@ -36,7 +36,7 @@ import math
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 import torch
 import torch.nn as nn
@@ -45,6 +45,9 @@ from torch import Tensor
 
 from .config import NECConfig, PriorConfig
 from .utils import assert_shape
+
+if TYPE_CHECKING:  # pragma: no cover - import cycle: data imports nothing here
+    from .data import Panel
 
 __all__ = [
     "PriorOutput",
@@ -56,6 +59,7 @@ __all__ = [
     "TopKRegimePrior",
     "GumbelSoftmaxRegimePrior",
     "HMMRegimePrior",
+    "PrecomputedRegimePrior",
     "PRIOR_REGISTRY",
     "build_prior",
     "Router",
@@ -97,10 +101,13 @@ class PriorContext:
     - ``prev_filtered``: ``(B, K)`` **log-domain** filtered posterior
       ``log r_{t-1}`` — the HMM recursion's state. ``None`` at a sequence start.
     - ``step``: global training step, for temperature/annealing schedules.
+    - ``date``: ``(B,)`` int64 date codes — the lookup key for a
+      :class:`PrecomputedRegimePrior`. Ignored by every other prior.
     """
 
     prev_filtered: Tensor | None = None
     step: int | None = None
+    date: Tensor | None = None
 
 
 class RegimePrior(nn.Module, ABC):
@@ -110,14 +117,155 @@ class RegimePrior(nn.Module, ABC):
     #: each step's filtered posterior into the next step's context.
     stateful: ClassVar[bool] = False
 
+    #: True => the prior is fitted separately (``fit``) and frozen, rather
+    #: than trained jointly by backpropagation. Under Q19 this is how all four
+    #: compared gates work; the backpropagated priors are baseline arms.
+    precomputed: ClassVar[bool] = False
+
     def __init__(self, n_experts: int) -> None:
         super().__init__()
         self.n_experts = n_experts
+
+    def fit(self, train_panel: Panel) -> None:
+        """Fit the prior on a **training block**. Default: a no-op.
+
+        The walk-forward harness calls this once per fold, on that fold's
+        training panel only, before the base and the experts are trained — so
+        it inherits the purge discipline the harness already enforces. Every
+        existing (backpropagated) prior is unaffected by the default.
+
+        Implementations must treat ``train_panel`` as the entire information
+        set they are permitted to see. Applying the fitted prior to later
+        dates is a separate, causal operation (see
+        :meth:`PrecomputedRegimePrior.apply_causal`).
+        """
 
     @abstractmethod
     def forward(
         self, gate_logits: Tensor, ctx: PriorContext | None = None
     ) -> PriorOutput: ...
+
+
+class PrecomputedRegimePrior(RegimePrior):
+    """A regime prior computed **outside** the optimizer and looked up by date.
+
+    The shape of every gate under Q19: the regime process is fitted on a
+    training block, frozen, and then handed to the experts as an input they
+    cannot influence. The table holds one row of **log** priors per date code;
+    ``forward`` looks rows up and expands them to the batch, and contributes
+    no gradient to anything.
+
+    Two date populations live in the table, and the distinction is the whole
+    point of the class:
+
+    - dates written by :meth:`fit`, which the fitting procedure *saw*;
+    - dates written by :meth:`apply_causal`, produced by running the frozen
+      fitted model forward over later dates.
+
+    A date beyond the training block is legal for *application* — a filter at
+    date ``t`` conditions only on the series through ``t`` — but it must never
+    arrive from a fit that saw it. ``apply_causal`` therefore refuses to
+    overwrite a fitted row, and lookup refuses a date in neither population,
+    so "the table quietly contained a date it should not have" is not a
+    reachable state.
+
+    ``stateful`` is False: any recursion has already been run at fit/apply
+    time, so the trainer does not need to thread state.
+    """
+
+    stateful: ClassVar[bool] = False
+    precomputed: ClassVar[bool] = True
+
+    def __init__(self, n_experts: int) -> None:
+        super().__init__(n_experts)
+        self.fitted = False
+        #: date code -> row index into ``_log_table``
+        self._rows: dict[int, int] = {}
+        self._log_table: Tensor = torch.zeros(0, n_experts)
+        #: largest date the *fit* was allowed to see; apply_causal may only
+        #: add dates strictly after it
+        self.fit_max_date: int | None = None
+
+    # ----------------------------------------------------------- table I/O
+    def _write(self, dates: Tensor, log_prior: Tensor, *, source: str) -> None:
+        assert_shape(log_prior, (dates.shape[0], self.n_experts), f"{source} log prior")
+        lse = torch.logsumexp(log_prior, dim=-1)
+        if float(lse.abs().max()) > 1e-4:
+            raise ValueError(
+                f"{source} rows must be normalized log probabilities "
+                f"(max |logsumexp| = {float(lse.abs().max()):.3e})"
+            )
+        rows, table = dict(self._rows), [self._log_table]
+        nxt = self._log_table.shape[0]
+        keep: list[int] = []
+        for i, d in enumerate(int(v) for v in dates):
+            if d in rows:
+                if source == "apply":
+                    continue  # never overwrite a fitted row
+                raise ValueError(f"duplicate date {d} written by {source}")
+            rows[d] = nxt + len(keep)
+            keep.append(i)
+        if keep:
+            table.append(log_prior[torch.tensor(keep, dtype=torch.long)].detach())
+        self._rows = rows
+        self._log_table = torch.cat(table, dim=0)
+
+    def set_fitted_table(self, dates: Tensor, log_prior: Tensor) -> None:
+        """Install the rows produced by :meth:`fit` (the training block)."""
+        self._write(dates, log_prior, source="fit")
+        self.fit_max_date = int(dates.max())
+        self.fitted = True
+
+    def extend_causal_table(self, dates: Tensor, log_prior: Tensor) -> None:
+        """Add rows produced by the causal application of the frozen fit."""
+        if not self.fitted:
+            raise ValueError("apply before fit: there is nothing frozen to apply")
+        beyond = dates[dates > int(self.fit_max_date or 0)]
+        if beyond.numel() == 0:
+            return
+        mask = dates > int(self.fit_max_date or 0)
+        self._write(dates[mask], log_prior[mask], source="apply")
+
+    def apply_causal(self, panel: Panel) -> None:
+        """Extend the table to ``panel``'s later dates with **frozen** params.
+
+        Subclasses implement the mechanics; the contract is that no parameter
+        may be re-estimated here, because maximum likelihood over the extended
+        series would use every observation including the future.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement causal application"
+        )
+
+    # ------------------------------------------------------------- forward
+    def forward(
+        self, gate_logits: Tensor, ctx: PriorContext | None = None
+    ) -> PriorOutput:
+        assert_shape(gate_logits, (None, self.n_experts), "gate logits (prior input)")
+        if not self.fitted:
+            raise ValueError(
+                f"{type(self).__name__}.forward before fit(): a precomputed "
+                "prior has no table until it is fitted on a training block. "
+                "The walk-forward harness calls fit() once per fold"
+            )
+        if ctx is None or ctx.date is None:
+            raise ValueError(
+                f"{type(self).__name__} is looked up by date, but no dates "
+                "were supplied (PriorContext.date is None). Batches carry "
+                "their date codes; pass them through"
+            )
+        missing = sorted({int(d) for d in ctx.date} - set(self._rows))
+        if missing:
+            raise ValueError(
+                f"{type(self).__name__}: {len(missing)} date(s) outside the "
+                f"fitted information set, first {missing[:5]}. A date is only "
+                "servable if fit() saw it or apply_causal() produced it by "
+                "running the frozen model forward"
+            )
+        idx = torch.tensor(
+            [self._rows[int(d)] for d in ctx.date], dtype=torch.long
+        )
+        return PriorOutput(log_prior=self._log_table[idx])
 
 
 class SoftRegimePrior(RegimePrior):
@@ -289,7 +437,31 @@ class GumbelSoftmaxRegimePrior(RegimePrior):
 
 
 class HMMRegimePrior(RegimePrior):
-    """Markov-transition prior: the forward filter's predict step (Variation 3).
+    """A **jointly fitted latent Markov mixture** — a baseline arm, not Hamilton.
+
+    Named accurately, because the difference matters for the write-up: this is
+    a latent Markov mixture with homogeneous, covariate-independent
+    transitions, estimated **by gradient descent through the forward
+    recursion** rather than by maximum likelihood. It is not Hamilton's Markov
+    switching model as the econometrics literature estimates it, and the
+    thesis must not describe it as though it were. The encoder and gate head
+    are dormant under this prior: it ignores the gate logits and uses them for
+    shape inference only (the dead-parameter audit reports exactly that).
+
+    Under Q19 this is a **baseline arm**, not one of the four compared regime
+    mechanisms. The Hamilton arm is
+    :class:`~nec_moe.markov_gate.MarkovSwitchingRegimePrior`, fitted separately
+    by maximum likelihood on the training block and frozen.
+
+    Comparing the two is itself worth reporting: if the backpropagated filter
+    recovers transition matrices and expected durations close to the
+    maximum-likelihood ones, that is a defensible sentence in the methodology
+    chapter; if it does not, better to find out now than at the defence.
+
+    The mechanics below are unchanged — this docstring is a correction of what
+    the object is *called*, not of what it does.
+
+    Markov-transition prior: the forward filter's predict step (Variation 3).
 
     - Transition matrix ``A = row_softmax(L)`` over an unconstrained ``(K, K)``
       logit matrix ``L`` — a valid stochastic matrix under unconstrained
@@ -367,7 +539,16 @@ PRIOR_REGISTRY: dict[str, Callable[[NECConfig], RegimePrior]] = {
         tau_anneal_steps=cfg.prior.tau_anneal_steps,
     ),
     "hmm": lambda cfg: HMMRegimePrior(cfg.experts.n_experts, cfg.prior),
+    # Hamilton's Markov switching model, fitted by ML on the training block
+    # and frozen (brief 03). Late import: markov_gate imports from this module.
+    "markov": lambda cfg: _build_markov(cfg),
 }
+
+
+def _build_markov(cfg: NECConfig) -> RegimePrior:
+    from .markov_gate import MarkovSwitchingRegimePrior
+
+    return MarkovSwitchingRegimePrior(cfg.experts.n_experts, cfg.markov_gate)
 
 
 def build_prior(cfg: NECConfig) -> RegimePrior:

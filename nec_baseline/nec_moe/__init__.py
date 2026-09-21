@@ -27,6 +27,7 @@ from .config import (
     EncoderConfig,
     ExpertConfig,
     GateConfig,
+    MarkovGateConfig,
     NECConfig,
     PriorConfig,
     TrainConfig,
@@ -83,6 +84,13 @@ from .losses import (
     mixture_nll,
 )
 from .market_data import DEFAULT_UNIVERSE, MARKET_SYMBOL, load_ohlcv, load_universe
+from .markov_gate import (
+    ORDERING_REGISTRY,
+    SERIES_REGISTRY,
+    MarkovFit,
+    MarkovSwitchingRegimePrior,
+    date_level_series,
+)
 from .model import NECModel, NECOutput
 from .multiple_testing import (
     DeflatedSharpe,
@@ -109,6 +117,7 @@ from .priors import (
     GumbelSoftmaxRegimePrior,
     HardRegimePrior,
     HMMRegimePrior,
+    PrecomputedRegimePrior,
     PriorContext,
     PriorOutput,
     RegimePrior,
@@ -144,6 +153,7 @@ __all__ = [
     "GateConfig",
     "ExpertConfig",
     "PriorConfig",
+    "MarkovGateConfig",
     "BaseConfig",
     "TrainConfig",
     "NECConfig",
@@ -171,6 +181,12 @@ __all__ = [
     "TopKRegimePrior",
     "GumbelSoftmaxRegimePrior",
     "HMMRegimePrior",
+    "PrecomputedRegimePrior",
+    "MarkovSwitchingRegimePrior",
+    "MarkovFit",
+    "SERIES_REGISTRY",
+    "ORDERING_REGISTRY",
+    "date_level_series",
     "PriorOutput",
     "PriorContext",
     "PRIOR_REGISTRY",

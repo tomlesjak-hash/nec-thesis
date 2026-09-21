@@ -201,6 +201,15 @@ def _metrics_from_result(res: WalkForwardResult) -> dict[str, float]:
         with_pf = [f for f in scored if f.base_portfolio is not None]
         if with_pf:
             m["base_net_ir"] = statistics.fmean(f.base_portfolio.ir_net for f in with_pf)  # type: ignore[union-attr]
+    # The fitted gate's own summary (brief 03 §4/§5): expected durations, stay
+    # probabilities, the multi-start counts. Averaged over folds in canonical
+    # regime order, which is what makes the average meaningful at all.
+    per_gate: dict[str, list[float]] = {}
+    for fold in res.folds:
+        for key, value in fold.gate_metrics:
+            per_gate.setdefault(key, []).append(value)
+    for key, values in per_gate.items():
+        m[key] = statistics.fmean(values)
     per_corr: dict[str, list[float]] = {}
     for fold in res.folds:
         for key, value in fold.correction:
@@ -303,6 +312,7 @@ def run_sweep(
                     ),
                     base_cache=base_cache,
                     seed=seed,
+                    registry=registry,
                 )
             else:
                 assert build_baseline is not None

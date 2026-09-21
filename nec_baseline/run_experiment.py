@@ -39,6 +39,7 @@ import json
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import torch
 
@@ -50,11 +51,13 @@ from nec_moe import (  # noqa: E402
     DataConfig,
     EncoderConfig,
     ExpertConfig,
+    MarkovGateConfig,
     MLPBaseline,
     NECConfig,
     NECModel,
     Panel,
     PriorConfig,
+    PriorContext,
     RidgeBaseline,
     StageBSpec,
     SyntheticRegimePanel,
@@ -171,6 +174,24 @@ class Experiment:
     aux_correction_penalty: bool = False
     correction_penalty_weight: float = 0.0
 
+    # ---------------- the Hamilton gate (prior="markov", brief 03) ----------
+    # Fitted by maximum likelihood on each fold's training block, canonically
+    # reordered, and applied to the test block with FROZEN parameters through
+    # the filter. Nothing here is chosen yet.
+    gate_series: str = "market_excess_return"  # registry key (see SERIES_REGISTRY)
+    gate_series_feature: str = "mkt_ret_1d"    # sequence-feature name for that key
+    gate_series_channel: int = 0               # channel index for "sequence_channel"
+    gate_trend: str = "c"
+    gate_switching_variance: bool = True       # the usual finance setting
+    gate_switching_trend: bool = True
+    gate_order: int = 0                        # 0 -> MarkovRegression; >0 -> MarkovAR
+    gate_search_reps: int = 20                 # random starts; each is a logged trial
+    gate_maxiter: int = 500
+    gate_start_seed: int = 0
+    gate_start_jitter: float = 0.5             # see MarkovGateConfig for the trade-off
+    gate_order_by: str = "variance"            # canonical regime order, ascending
+    gate_registry_tag: str = "markov_gate_starts"
+
     # ---------------- checkpointing / resume ----------------
     checkpoint_every: int = 0       # save training state every N steps (0 = off);
                                     #   set for any run you might interrupt
@@ -269,6 +290,20 @@ def _nec_config(exp: Experiment, panel: Panel, sigma_init: float) -> NECConfig:
         prior=PriorConfig(kind=exp.prior, top_k=exp.top_k, tau_init=exp.tau_init,
                           tau_anneal_steps=exp.tau_anneal_steps,
                           transition_diag_bias=exp.transition_diag_bias),
+        markov_gate=MarkovGateConfig(series=exp.gate_series,
+                                     series_feature=exp.gate_series_feature,
+                                     series_channel=exp.gate_series_channel,
+                                     k_regimes=exp.n_experts,
+                                     trend=exp.gate_trend,
+                                     switching_variance=exp.gate_switching_variance,
+                                     switching_trend=exp.gate_switching_trend,
+                                     order=exp.gate_order,
+                                     search_reps=exp.gate_search_reps,
+                                     maxiter=exp.gate_maxiter,
+                                     start_seed=exp.gate_start_seed,
+                                     start_jitter=exp.gate_start_jitter,
+                                     order_by=exp.gate_order_by,
+                                     registry_tag=exp.gate_registry_tag),
         base=BaseConfig(enabled=exp.base_enabled,
                         hidden_dims=tuple(exp.base_hidden_dims),
                         dropout=exp.base_dropout,
@@ -349,6 +384,17 @@ def _quick(exp: Experiment, panel: Panel, purge: int, out: Path,
         torch.manual_seed(exp.seeds[0])
         trainer = Trainer(NECModel(cfg))
         remaining = exp.steps
+    # a precomputed (fitted-and-frozen) gate: fit on the training split, then
+    # extend causally to the test split with the frozen parameters
+    if getattr(trainer.model.prior, "precomputed", False) and not resumed:
+        gate: Any = trainer.model.prior
+        gate.fit(train)
+        gate.apply_causal(panel)
+        gf = getattr(gate, "fit_result", None)
+        if gf is not None:
+            print(f"[gate] markov: llf {gf.llf:.2f}, durations "
+                  f"{gf.expected_durations.round(1).tolist()}, perm {gf.permutation}, "
+                  f"converged {gf.n_converged}/{gf.n_starts}")
     # gate frozen at construction -> base fitted on the training block and
     # frozen -> only then the experts train (brief 02 §4 ordering). On resume
     # the base weights come back with the checkpoint, and the warm-start must
@@ -378,7 +424,9 @@ def _quick(exp: Experiment, panel: Panel, purge: int, out: Path,
         nll = trainer.evaluate(test.full_batch())
         trainer.model.eval()
         with torch.no_grad():
-            pred = trainer.model(test.x_seq, test.x_snap).y_hat
+            pred = trainer.model(
+                test.x_seq, test.x_snap, PriorContext(date=test.date)
+            ).y_hat
     history = trainer.history  # full trajectory, spanning any resumes
     print(f"[quick] held-out NLL = {nll:.4f}   "
           f"({len(train):,} train rows → {len(test):,} test rows)")

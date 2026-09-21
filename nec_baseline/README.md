@@ -69,8 +69,19 @@ print("held-out NLL:", trainer.evaluate(test.full_batch()))
 `PriorConfig.kind` selects the gate's prior: `soft` (baseline), `uniform`
 (frozen-uniform-gate ablation — no learned routing), `hard` (top-1 with the hard-EM
 objective; the *trainable* version of the prototype's argmax), `topk` (k ≥ 2 enforced —
-top-1-renormalized is gradient-dead, use `hard`), `gumbel` (annealed temperature), and
-`hmm` (Variation 3). `ExpertConfig.kind` selects the emission along the second plug
+top-1-renormalized is gradient-dead, use `hard`), `gumbel` (annealed temperature),
+`hmm`, and `markov` (Hamilton, fitted separately and frozen).
+
+> **`hmm` is not Hamilton.** `HMMRegimePrior` is a jointly fitted latent Markov mixture
+> with homogeneous, covariate-independent transitions, estimated by gradient descent
+> through the forward recursion rather than by maximum likelihood; the encoder and gate
+> head are dormant under it (it uses the gate logits for shape inference only). Under
+> Q19 it is a **baseline arm**, not one of the compared regime mechanisms. The Hamilton
+> arm is `prior.kind="markov"` (`MarkovSwitchingRegimePrior`), fitted by maximum
+> likelihood on each fold's training block, canonically reordered, and applied to the
+> test block with frozen parameters through the **filter** — never the smoother.
+> Comparing the two estimators' transition matrices and expected durations is itself a
+> reportable result. `ExpertConfig.kind` selects the emission along the second plug
 axis: `mlp` (neural experts) or `classical` (per-regime constant Gaussians —
 `classical` × `hmm` **is the classical Hamilton baseline**, parameter-recovery-tested;
 compare it on held-out NLL and regime recovery, not rank-IC: constant per-date

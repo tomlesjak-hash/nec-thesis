@@ -50,7 +50,7 @@ from torch import Tensor
 from .data import Panel
 from .likelihood import expert_log_likelihood
 from .losses import mixture_nll
-from .priors import GumbelSoftmaxRegimePrior, SoftRegimePrior
+from .priors import GumbelSoftmaxRegimePrior, PriorContext, SoftRegimePrior
 from .train import Trainer
 
 __all__ = [
@@ -83,7 +83,10 @@ def _gate_logits_and_loglik(
     zs, lls = [], []
     for i in range(0, len(panel), batch_size):
         sl = slice(i, i + batch_size)
-        out = model(panel.x_seq[sl], panel.x_snap[sl])
+        out = model(
+            panel.x_seq[sl], panel.x_snap[sl],
+            PriorContext(date=panel.date[sl]),
+        )
         zs.append(out.gate_logits)
         lls.append(expert_log_likelihood(out.mu, out.log_sigma, panel.y[sl]))
     return torch.cat(zs), torch.cat(lls)

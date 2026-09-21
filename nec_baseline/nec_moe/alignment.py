@@ -29,6 +29,7 @@ import torch
 from torch import Tensor
 
 from .data import Panel
+from .priors import PriorContext
 from .train import Trainer
 
 __all__ = [
@@ -56,7 +57,7 @@ def gate_utilization_by_date(trainer: Trainer, panel: Panel) -> tuple[Tensor, Te
         ev = trainer.evaluate_sequence(panel.time_sequence())
         util = ev.log_filtered.exp().mean(dim=1)  # (L, K), L == len(dates)
         return dates, util
-    out = model(panel.x_seq, panel.x_snap)
+    out = model(panel.x_seq, panel.x_snap, PriorContext(date=panel.date))
     pi = out.prior.log_prior.exp()  # (N, K)
     util = torch.stack([pi[panel.date == d].mean(dim=0) for d in dates])
     return dates, util

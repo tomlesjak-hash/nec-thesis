@@ -41,10 +41,12 @@ from torch import Tensor
 
 from .base import BaseCache, BaseFit
 from .data import Panel
+from .registry import TrialRegistry
 
 if TYPE_CHECKING:  # pragma: no cover
     from .baselines import BaselineModel
 from .diagnostics import canonical_expert_order, persistence_metrics
+from .priors import PriorContext
 from .train import Trainer
 from .utils import atomic_torch_save
 
@@ -324,6 +326,14 @@ class FoldResult:
     base_nll: float | None = None
     base_portfolio: PortfolioSummary | None = None
     correction: tuple[tuple[str, float], ...] = ()
+    # Brief 03 §4: the canonical relabelling applied to this fold's fitted
+    # gate regimes. Recorded so cross-fold per-regime statistics are auditable
+    # — the fold's "regime 0" is only comparable to another fold's if the
+    # permutation that produced it is on the record.
+    gate_permutation: tuple[int, ...] = ()
+    # The fitted gate's own summary (durations, stay probabilities, llf,
+    # multi-start counts), in canonical order; empty for non-fitted gates.
+    gate_metrics: tuple[tuple[str, float], ...] = ()
 
     @property
     def ic_improvement(self) -> float | None:
@@ -380,6 +390,8 @@ class _FoldAccumulator:
         base_pred: Tensor | None = None,
         base_nll: float | None = None,
         correction: tuple[tuple[str, float], ...] = (),
+        gate_permutation: tuple[int, ...] = (),
+        gate_metrics: tuple[tuple[str, float], ...] = (),
     ) -> dict[str, Any]:
         """Score a freshly-evaluated fold. Returns the picklable payload that
         fold-level resume persists and :meth:`add_completed` re-ingests."""
@@ -421,6 +433,8 @@ class _FoldAccumulator:
                 base_nll=base_nll,
                 base_portfolio=base_portfolio,
                 correction=correction,
+                gate_permutation=gate_permutation,
+                gate_metrics=gate_metrics,
             ),
             "ics": ics,
             "gross": gross,
@@ -466,7 +480,9 @@ class _FoldAccumulator:
 @torch.no_grad()
 def _predict_memoryless(trainer: Trainer, test: Panel) -> Tensor:
     trainer.model.eval()
-    return trainer.model(test.x_seq, test.x_snap).y_hat
+    return trainer.model(
+        test.x_seq, test.x_snap, PriorContext(date=test.date)
+    ).y_hat
 
 
 def _fold_predictions(
@@ -491,6 +507,75 @@ def _fold_predictions(
             )
         return pred, ev.nll
     return _predict_memoryless(trainer, test), trainer.evaluate(test.full_batch())
+
+
+def _fit_gate(
+    trainer: Trainer, panel: Panel, train: Panel, fold: WalkForwardFold
+) -> None:
+    """Fit the prior on this fold's training block, then apply it causally.
+
+    Two calls, deliberately separate (brief 03 §1, §3):
+
+    1. ``fit(train)`` sees the training block and **only** the training block,
+       which is what makes the harness's existing purge discipline cover the
+       gate for free — the panel handed over has already had the label-overlap
+       dates removed.
+    2. ``apply_causal(panel)`` extends the gate to the test dates by running
+       the *frozen* fitted model forward. That is legal because a filter at
+       date ``t`` conditions only on the series through ``t``; re-fitting
+       would not be, and the precomputed prior refuses to overwrite a fitted
+       row so the two populations can never be confused.
+
+    Non-precomputed priors inherit a no-op ``fit`` and are untouched.
+    """
+    if int(train.date.max()) >= int(fold.test_dates.min()):
+        raise AssertionError(
+            f"gate fit panel reaches date {int(train.date.max())} but the test "
+            f"block starts at {int(fold.test_dates.min())}: the gate would be "
+            "fitted on data it must not see"
+        )
+    trainer.model.prior.fit(train)
+    prior = trainer.model.prior
+    if getattr(prior, "precomputed", False):
+        # the gate must cover the test dates too, and only this path may
+        # produce them
+        prior.apply_causal(  # type: ignore[operator]
+            panel.subset_dates(torch.cat([fold.train_dates, fold.test_dates]))
+        )
+
+
+def _gate_report(
+    trainer: Trainer,
+    fold: WalkForwardFold,
+    registry: TrialRegistry | None,
+    tag: str | None,
+    seed: int,
+) -> tuple[tuple[int, ...], tuple[tuple[str, float], ...]]:
+    """The fitted gate's permutation + metrics, and its multi-start trials.
+
+    Brief 03 §5: the Markov switching likelihood is multimodal, so keeping the
+    best of N random starts is a **selection event** exactly like "best of 20
+    initializations" elsewhere in this project. Every start's converged
+    log-likelihood is logged as its own trial so the multiplicity reaches the
+    deflated Sharpe and the multiple-testing corrections, and the chosen
+    start's index and the convergence count travel with the fold.
+    """
+    fit = getattr(trainer.model.prior, "fit_result", None)
+    if fit is None:
+        return (), ()
+    metrics = fit.metrics()
+    if registry is not None:
+        gate_tag = str(tag or trainer.cfg.markov_gate.registry_tag)
+        for i, llf in enumerate(fit.start_llfs):
+            if math.isfinite(llf):
+                registry.log(
+                    gate_tag,
+                    {"llf": llf, "start": float(i), "fold": float(fold.fold)},
+                    config={"arm": gate_tag, "chosen": i == fit.chosen_start},
+                    seed=seed,
+                    notes=f"markov gate start {i} of {fit.n_starts}, fold {fold.fold}",
+                )
+    return fit.permutation, tuple(metrics.items())
 
 
 def _attach_base(
@@ -534,7 +619,7 @@ def base_and_correction(
         return None, None, ()
     model.eval()
     base_pred = model.base(test.x_snap)
-    out = model(test.x_seq, test.x_snap)
+    out = model(test.x_seq, test.x_snap, PriorContext(date=test.date))
     pi = out.prior.log_prior.exp()
     sigma = (pi * out.log_sigma.exp().unsqueeze(0)).sum(dim=-1)
     resid = test.y - base_pred
@@ -575,6 +660,8 @@ def walk_forward_evaluate(
     resume_dir: str | Path | None = None,
     base_cache: BaseCache | None = None,
     seed: int = 0,
+    registry: TrialRegistry | None = None,
+    registry_tag: str | None = None,
 ) -> WalkForwardResult:
     """Fit-once-per-window walk-forward evaluation (Decision D protocol).
 
@@ -640,9 +727,11 @@ def walk_forward_evaluate(
             _attach_base(trainer, train, fold, base_cache, seed)
         else:
             trainer = make_trainer()
-            # Order matters (brief 02 §4): the gate is frozen at construction,
-            # the base is fitted on this fold's training block and frozen, and
-            # only then do the experts train against what is left.
+            # Order matters (brief 02 §4, brief 03 §1): the gate is fitted on
+            # this fold's training block and frozen, THEN the base is fitted on
+            # the same block and frozen, and only then do the experts train
+            # against what is left.
+            _fit_gate(trainer, panel, train, fold)
             base_fit = _attach_base(trainer, train, fold, base_cache, seed)
             x = trainer.cfg.experts
             if warmstart_key is not None and not (
@@ -671,6 +760,7 @@ def walk_forward_evaluate(
             else ()
         )
         base_pred, base_nll, correction = base_and_correction(trainer, test)
+        gate_perm, gate_metrics = _gate_report(trainer, fold, registry, registry_tag, seed)
         payload = acc.add(
             fold, pred, train, test, nll,
             expert_order=order,
@@ -679,6 +769,8 @@ def walk_forward_evaluate(
             base_pred=base_pred,
             base_nll=base_nll,
             correction=correction,
+            gate_permutation=gate_perm,
+            gate_metrics=gate_metrics,
         )
         if done_file is not None:
             payload = dict(

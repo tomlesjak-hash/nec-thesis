@@ -41,6 +41,7 @@ Checkpointing (resume-exact):
 
 from __future__ import annotations
 
+import dataclasses
 import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -396,6 +397,10 @@ class Trainer:
         *predictive* weights (for hard routing: the selected expert's density).
         Priors that don't distinguish the two are unaffected.
         """
+        # date codes reach the prior here, once, for every execution path:
+        # a precomputed (date-keyed) gate is looked up by them
+        if batch.date is not None and (ctx is None or ctx.date is None):
+            ctx = dataclasses.replace(ctx or PriorContext(), date=batch.date)
         out = self.model(batch.x_seq, batch.x_snap, ctx)
         log_lik = expert_log_likelihood(out.mu, out.log_sigma, batch.y)
         log_w = out.prior.log_prior

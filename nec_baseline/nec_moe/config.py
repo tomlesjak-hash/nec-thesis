@@ -31,6 +31,7 @@ __all__ = [
     "GateConfig",
     "ExpertConfig",
     "PriorConfig",
+    "MarkovGateConfig",
     "BaseConfig",
     "TrainConfig",
     "NECConfig",
@@ -173,6 +174,58 @@ class PriorConfig:
 
 
 @dataclass(frozen=True)
+class MarkovGateConfig:
+    """The Hamilton (Markov switching) gate, fitted by ML and frozen (brief 03).
+
+    Hamilton's model is **univariate**: it needs one series, and the gate is a
+    date-level variable, so the series is market-level and never the
+    cross-section. ``series`` is a registry key rather than a hardcoded
+    choice (see :data:`nec_moe.markov_gate.SERIES_REGISTRY`); every field
+    below is a config field because none of them is chosen yet.
+
+    - ``series`` / ``series_feature`` / ``series_channel``: which date-level
+      series to fit on. Must be knowable at date ``t`` — the panel's feature
+      contract guarantees that for sequence features, and the target ``y`` is
+      excluded by construction because it is a *forward* return.
+    - ``k_regimes``: states in the chain. Ties to ``experts.n_experts``
+      (validated); the value itself is open (Q18).
+    - ``trend`` / ``switching_trend`` / ``switching_variance``: the emission.
+      ``switching_variance=True`` is the usual finance setting — empirical
+      regimes are distinguished more by volatility than by mean (Ang &
+      Timmermann 2012) — but it is a *default*, not a decision, and both
+      settings are sweepable.
+    - ``order``: 0 selects ``MarkovRegression``, > 0 ``MarkovAutoregression``.
+    - ``search_reps`` / ``maxiter``: the multi-start search (§5). Each start is
+      a logged trial, because best-of-N is a selection event.
+    - ``order_by``: the declared canonical ordering of the fitted regimes
+      (§4) — a rule, not an assumption.
+    """
+
+    series: str = "market_excess_return"  # registry key
+    series_feature: str = "mkt_ret_1d"  # sequence-feature name for that key
+    series_channel: int = 0  # channel index for the raw-channel key
+    k_regimes: int = 2
+    trend: str = "c"
+    switching_variance: bool = True
+    switching_trend: bool = True
+    order: int = 0  # 0 -> MarkovRegression; >0 -> MarkovAutoregression
+    search_reps: int = 20  # random starts; every one is a logged trial
+    maxiter: int = 500
+    start_seed: int = 0  # base seed for the random starts
+    # sd of the perturbation applied to each random start. Measured trade-off
+    # on a simulated two-state series: at 0.05-0.2 every start converges but
+    # lands in the SAME basin (log-likelihood spread 0.000), so the search is
+    # decorative and would report false confidence; at 0.5 it reaches distinct
+    # optima (spread ~600 nats) at the cost of most starts failing to
+    # converge. Not chosen: sweep it, and read gate_llf_spread to see whether
+    # the search actually explored anything.
+    start_jitter: float = 0.5
+    prob_floor: float = 1e-12  # clamp before log: keeps rows normalizable
+    order_by: str = "variance"  # "variance" | "mean" — ascending (§4)
+    registry_tag: str = "markov_gate_starts"  # TrialRegistry tag for §5
+
+
+@dataclass(frozen=True)
 class BaseConfig:
     """The frozen base predictor ``f0`` of the residual design (brief 02).
 
@@ -266,6 +319,7 @@ class NECConfig:
     gate: GateConfig = field(default_factory=GateConfig)
     experts: ExpertConfig = field(default_factory=ExpertConfig)
     prior: PriorConfig = field(default_factory=PriorConfig)
+    markov_gate: MarkovGateConfig = field(default_factory=MarkovGateConfig)
     base: BaseConfig = field(default_factory=BaseConfig)
     train: TrainConfig = field(default_factory=TrainConfig)
 
@@ -280,7 +334,7 @@ class NECConfig:
     # ------------------------------------------------------------ validation
     def validate(self) -> NECConfig:
         d, e, x, p, t = self.data, self.encoder, self.experts, self.prior, self.train
-        b = self.base
+        b, mg = self.base, self.markov_gate
 
         def bad(msg: str) -> ValueError:
             return ValueError(f"NECConfig invalid: {msg}")
@@ -445,6 +499,56 @@ class NECConfig:
                 "correction is a correction *to* something, and with no base "
                 "the experts' zero-initialized heads would predict a constant 0"
             )
+        # markov gate (brief 03). The cross-block tie is only meaningful when
+        # the gate is actually selected — an unused config block must not
+        # block an otherwise valid config.
+        if p.kind == "markov" and mg.k_regimes != x.n_experts:
+            raise bad(
+                f"markov_gate.k_regimes={mg.k_regimes} must equal "
+                f"experts.n_experts={x.n_experts}: the gate's regimes are the "
+                "mixture's components"
+            )
+        if mg.search_reps < 1 or mg.maxiter < 1:
+            raise bad(
+                f"markov_gate search_reps/maxiter must be >= 1, got "
+                f"{mg.search_reps}/{mg.maxiter}"
+            )
+        if mg.order < 0:
+            raise bad(f"markov_gate.order must be >= 0, got {mg.order}")
+        from .markov_gate import ORDERING_REGISTRY, SERIES_REGISTRY
+
+        if mg.series not in SERIES_REGISTRY:
+            raise bad(
+                f"unknown markov_gate.series {mg.series!r}; registered: "
+                f"{sorted(SERIES_REGISTRY)}"
+            )
+        if mg.order_by not in ORDERING_REGISTRY:
+            raise bad(
+                f"unknown markov_gate.order_by {mg.order_by!r}; registered: "
+                f"{sorted(ORDERING_REGISTRY)}"
+            )
+        # A canonical ordering needs a statistic that actually varies across
+        # regimes; sorting on a shared parameter returns an arbitrary order
+        # that looks canonical, which is worse than refusing.
+        if mg.order_by == "variance" and not mg.switching_variance:
+            raise bad(
+                "markov_gate.order_by='variance' requires "
+                "switching_variance=True: with a shared variance the sort key "
+                "is identical across regimes and the 'canonical' order would "
+                "be whatever the optimizer happened to produce"
+            )
+        if mg.order_by == "mean" and not mg.switching_trend:
+            raise bad(
+                "markov_gate.order_by='mean' requires switching_trend=True "
+                "(a shared mean gives every regime the same sort key)"
+            )
+        if p.kind == "markov" and t.sequence_ordered:
+            raise bad(
+                "prior.kind='markov' is a precomputed (date-keyed) gate, not a "
+                "recursive one: its filter has already been run at fit time, "
+                "so train.sequence_ordered must be False"
+            )
+
         if x.correction_mode and x.kind != "mlp":
             raise bad(
                 f"experts.correction_mode is defined for the neural expert "
@@ -473,6 +577,7 @@ class NECConfig:
             # hidden_dims round-trips through JSON as a list
             experts=ExpertConfig(**_tupled(d.get("experts", {}), ("hidden_dims",))),
             prior=PriorConfig(**d.get("prior", {})),
+            markov_gate=MarkovGateConfig(**d.get("markov_gate", {})),
             base=BaseConfig(**_tupled(d.get("base", {}), ("hidden_dims",))),
             train=TrainConfig(**d.get("train", {})),
         )

@@ -37,7 +37,9 @@ MEMORYLESS_KINDS = ("soft", "uniform", "hard", "topk", "gumbel")
 
 
 def test_registry_contains_all_kinds():
-    assert set(MEMORYLESS_KINDS) | {"hmm"} == set(PRIOR_REGISTRY)
+    # "hmm" is the backpropagated latent Markov mixture (a baseline arm);
+    # "markov" is the separately-fitted, frozen Hamilton gate (brief 03).
+    assert set(MEMORYLESS_KINDS) | {"hmm", "markov"} == set(PRIOR_REGISTRY)
     for kind in MEMORYLESS_KINDS:
         cfg = small_config(n_experts=3, prior_kind=kind)
         # config round-trip must also survive validation + serialization

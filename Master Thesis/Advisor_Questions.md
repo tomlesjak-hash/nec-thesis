@@ -186,41 +186,6 @@ settled in the literature for a different target?
 
 ---
 
-### Q7. Should the shared base be pre-trained and frozen, or trained jointly with the experts?
-**Status:** open — and **this is the cell Ye & Borde do NOT test**
-
-Their "standard MoE" arm changes **two things at once**: it removes the base *and* switches to joint
-training. There is no arm in the paper with a base network that is trained jointly with the experts.
-That configuration is exactly DeepSeekMoE's **shared expert isolation** (arXiv:2401.06066, used in
-DeepSeek-V2/V3 and Qwen's MoE models) — an always-on shared expert plus routed experts, optimised
-end to end — and it is now the mainstream choice in large-model practice. So the question "is the
-benefit the base, or the freezing?" is genuinely unanswered by the closest precedent.
-
-**Arguments for freezing.**
-1. **It is what makes the residual interpretable.** If the base moves during training, the residual
-   is defined against a moving target: the base can quietly absorb regime-conditional structure and
-   shrink `Σ_k π_k r_k(x)` without the gate being any worse. Freezing turns the residual series into
-   an analysable object — magnitude, timing, concentration in transition windows.
-2. **It makes the cross-gate comparison exactly controlled** — every candidate gate faces the
-   identical base, so differences between gates cannot come from differences in what the base
-   happened to learn.
-3. It gives the guaranteed floor described in Q6.
-4. The closest precedent freezes, so the comparison with it stays clean.
-
-**Arguments for joint training.** A strictly higher ceiling — the base specialises into whatever the
-experts do not cover, and the system is optimised for the actual objective rather than in two
-disconnected stages. It is also the mainstream choice. The cost is identifiability: base and experts
-trade capacity back and forth and nothing pins down how much of the forecast the gate is responsible
-for.
-
-**My position:** freeze — measurement beats maximum performance when the point of the thesis is to
-measure something. But the cost of freezing should be quantified rather than assumed.
-
-**Ask the advisor:** does freezing the base invite the criticism that the model was handicapped, and
-is reporting a jointly trained arm alongside it a sufficient answer?
-
----
-
 ### Q8. Expert and base architecture — what is settled by literature and what is not
 **Partly settled 2026-09-19.** Width is no longer a free parameter: it follows the pyramid rule
 (halve at each layer) from a fixed first hidden layer, and no width sweep is run. The first hidden
@@ -1148,6 +1113,63 @@ is submitted?
 
 ---
 
+### Q20. Which error function should the model be trained against?
+
+**Status:** open — raised 2026-09-21. Deliberately excluded from
+`Code_Change_Brief_02_Residual_Frozen_Base.md`, which leaves the existing objective untouched and
+adds only a registry seam so that answering this later is a registration rather than a rewrite.
+
+**The candidates.**
+
+1. **Mixture negative log likelihood**, which is what `nec_baseline` implements today: Gaussian
+   emissions, a learned per-expert noise scale, and responsibilities obtained by Bayes' rule.
+2. **Squared error, or Huber, on the point prediction.** What Ye & Borde use, and what Gu, Kelly and
+   Xiu use. Their preference for Huber over plain squared error is not cosmetic: returns are
+   fat-tailed and the robust loss made a material difference in their results.
+3. **A cross-sectional rank or information-coefficient objective**, matching the metric the thesis
+   is actually scored on.
+
+**The tension that is specific to this thesis, and the reason this cannot be waved through.** The
+two leading candidates weight the experts by different things.
+
+- The residual point prediction is `y_hat = f0(x) + sum_k pi_k r_k(x)`, weighted by the **prior**
+  `pi` that comes out of the frozen gate. Under squared error, expert k's gradient is proportional
+  to `pi_k` and to nothing else. The frozen gate fully determines which expert learns from which
+  observation.
+- The mixture likelihood weights expert k's gradient by the **posterior** responsibility
+  `gamma_k = pi_k N_k / sum_j pi_j N_j`, which depends on the realised target through the
+  likelihood term. An expert that happens to sit close to `y` receives more gradient than its gate
+  weight alone would give it.
+
+Under a **trainable** gate the posterior weighting is the whole point, because it is what supplies
+the gate's training signal. **Under the frozen gate decided in Q19 that justification disappears**,
+since the gate receives no gradient at all. What remains is that the realised target gets to
+re-weight the experts *after* the regime assignment has already been made, which partially undoes
+the constraint the frozen gate was introduced to impose. Given that the stated purpose of freezing
+both the gate and the base is to leave the regime assignment as the only thing varying across arms,
+this is an argument in the direction of the point-prediction loss. It is an argument, not a
+conclusion, and it should be put to the advisor rather than settled unilaterally.
+
+**Three secondary considerations.**
+
+- **Objective versus metric.** The thesis is scored on rank-IC and long-short portfolio performance
+  (Q9). Squared error optimises level accuracy; the metric rewards cross-sectional ordering. Whether
+  it is acceptable for the training objective to differ from the evaluation metric is part of this
+  question, and the rank objective is the candidate that closes the gap at the cost of leaving the
+  benchmark literature's practice.
+- **Raw target or residual.** Under squared error the two are equivalent: minimising
+  `(y - f0 - sum_k pi_k r_k)^2` is exactly minimising the squared error of the mixture against the
+  residual `y - f0`, because the frozen base contributes a fixed per-observation offset. Under the
+  likelihood they are **not** equivalent, because the noise scale then describes a different
+  quantity. So the choice of objective silently decides what `sigma_k` means.
+- **The choice is a selection event.** Whichever objective is picked must be fixed before any
+  out-of-sample result is looked at, and if more than one is tried, the number tried enters the
+  multiple-testing accounting like any other candidate.
+
+**What to ask.** Which objective, and is it acceptable for it to differ from the evaluation metric?
+And, if the likelihood is retained, is the posterior re-weighting of experts under a frozen gate a
+feature or a leak?
+
 ## RESOLVED
 
 ### Q3. Data access, CRSP and Compustat through the university? [RESOLVED 2026-09-19]
@@ -1378,3 +1400,82 @@ question, not independent of it.
 a learned gate discovers, or that independently identified regimes are useful to the cross-section?
 And is it acceptable for the jointly trained gate to appear as a baseline rather than as one of the
 compared mechanisms?
+
+### Q7. Should the shared base be pre-trained and frozen, or trained jointly with the experts? [RESOLVED 2026-09-21]
+
+**Answer: pre-trained and frozen.** Tom's decision, 2026-09-21, taken together with Q19. A design
+commitment, not a finding.
+
+**The motivation is the same one that froze the gate.** The quantity being measured is what a
+regime-conditional correction adds to a fixed baseline. If the base moved during expert training it
+would co-adapt with the experts, and any improvement could no longer be attributed to the regime
+structure rather than to the base quietly reorganising itself around the mixture. Freezing both ends
+leaves exactly one thing varying across arms: the regime process that produced the gate.
+
+**What is being given up, stated plainly.** The original question identified the jointly trained
+base as the cell Ye and Borde never test, and as DeepSeekMoE's shared expert isolation
+(arXiv:2401.06066). That remains the configuration most likely to produce the best fitted objective,
+and it is now deliberately out of scope. The reasoning: the novelty budget of this thesis is spent
+on the gate mechanisms, and freezing the base is what keeps the comparison with the base paper
+clean. Testing the untested cell would be a second thesis.
+
+**Consequences.**
+
+1. **Only the experts train.** Base frozen, gate frozen, so the trainable model is K small MLPs plus
+   their noise scales. Report the live parameter count per arm so this is visible rather than
+   inferred.
+2. **The base is shared across all four gate arms** within a window and seed, since it never sees
+   regime information. This is the amortisation Q11's cost arithmetic already assumed, and it is now
+   load bearing for the compute budget.
+3. **The base's own out-of-sample performance must be reported beside every result.** The mixture's
+   number is uninterpretable without the floor it is measured from, and the headline quantity of the
+   thesis becomes the *improvement over the base*, not the level.
+4. **The base protocol must be fixed in advance and never tuned after seeing expert results.** An
+   undertrained base makes the experts look good and an overtrained one makes them look useless.
+   Because the base is shared, this does not bias the comparison *between* gates, but it does set
+   the headline "does the residual help" number, so it belongs in the pre-registration.
+5. **The residual may be close to noise, and a null is a real possible outcome.** With the base
+   capturing most of a signal that is around 0.4 per cent monthly out-of-sample R-squared to begin
+   with, there may be little left for regime-conditional corrections to find. Decide now how a null
+   is reported, because deciding after seeing the results is not a decision.
+
+**Also settled by this.** The base and the experts are both multilayer perceptrons on the
+characteristic snapshot, per Q8. Implementation brief: `Code_Change_Brief_02_Residual_Frozen_Base.md`.
+
+*Original question, for the record:*
+
+### Q7. Should the shared base be pre-trained and frozen, or trained jointly with the experts?
+**Status:** RESOLVED 2026-09-21, see the answer above. Raised as open; the jointly trained cell
+that Ye & Borde do not test is now deliberately out of scope.
+
+Their "standard MoE" arm changes **two things at once**: it removes the base *and* switches to joint
+training. There is no arm in the paper with a base network that is trained jointly with the experts.
+That configuration is exactly DeepSeekMoE's **shared expert isolation** (arXiv:2401.06066, used in
+DeepSeek-V2/V3 and Qwen's MoE models) — an always-on shared expert plus routed experts, optimised
+end to end — and it is now the mainstream choice in large-model practice. So the question "is the
+benefit the base, or the freezing?" is genuinely unanswered by the closest precedent.
+
+**Arguments for freezing.**
+1. **It is what makes the residual interpretable.** If the base moves during training, the residual
+   is defined against a moving target: the base can quietly absorb regime-conditional structure and
+   shrink `Σ_k π_k r_k(x)` without the gate being any worse. Freezing turns the residual series into
+   an analysable object — magnitude, timing, concentration in transition windows.
+2. **It makes the cross-gate comparison exactly controlled** — every candidate gate faces the
+   identical base, so differences between gates cannot come from differences in what the base
+   happened to learn.
+3. It gives the guaranteed floor described in Q6.
+4. The closest precedent freezes, so the comparison with it stays clean.
+
+**Arguments for joint training.** A strictly higher ceiling — the base specialises into whatever the
+experts do not cover, and the system is optimised for the actual objective rather than in two
+disconnected stages. It is also the mainstream choice. The cost is identifiability: base and experts
+trade capacity back and forth and nothing pins down how much of the forecast the gate is responsible
+for.
+
+**My position:** freeze — measurement beats maximum performance when the point of the thesis is to
+measure something. But the cost of freezing should be quantified rather than assumed.
+
+**Ask the advisor:** does freezing the base invite the criticism that the model was handicapped, and
+is reporting a jointly trained arm alongside it a sufficient answer?
+
+---

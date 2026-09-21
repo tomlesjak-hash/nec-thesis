@@ -62,12 +62,16 @@ class Batch:
     - ``y``      float32 ``(B,)``          — forward return target.
     - ``regime`` optional int64 ``(B,)``   — ground-truth latent regime;
       synthetic data / diagnostics only, never a model input.
+    - ``date``   optional int64 ``(B,)``   — the row's date code. Not a
+      feature and never reaches a network: it is the key a **precomputed**
+      prior looks its date-level regime probabilities up by (brief 03 §1).
     """
 
     x_seq: Tensor
     x_snap: Tensor
     y: Tensor
     regime: Tensor | None = None
+    date: Tensor | None = None
 
     def __post_init__(self) -> None:
         if self.x_seq.ndim != 3:
@@ -77,6 +81,8 @@ class Batch:
         assert_shape(self.y, (b,), "y")
         if self.regime is not None:
             assert_shape(self.regime, (b,), "regime")
+        if self.date is not None:
+            assert_shape(self.date, (b,), "date")
 
     def __len__(self) -> int:
         return self.x_seq.shape[0]
@@ -159,7 +165,8 @@ class Panel:
 
     def _batch(self, idx: Tensor) -> Batch:
         return Batch(
-            self.x_seq[idx], self.x_snap[idx], self.y[idx], self._batch_regime(idx)
+            self.x_seq[idx], self.x_snap[idx], self.y[idx],
+            self._batch_regime(idx), self.date[idx],
         )
 
     # ------------------------------------------------------------- batching

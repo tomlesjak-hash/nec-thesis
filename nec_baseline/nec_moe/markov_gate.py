@@ -47,6 +47,7 @@ silently absorbed.
 
 from __future__ import annotations
 
+import itertools
 import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -62,6 +63,11 @@ from .priors import PrecomputedRegimePrior, PriorOutput
 __all__ = [
     "SERIES_REGISTRY",
     "ORDERING_REGISTRY",
+    "START_SCHEME_REGISTRY",
+    "causal_vol_assignment",
+    "informed_centre",
+    "validate_start",
+    "distinct_optima",
     "MarkovFit",
     "MarkovSwitchingRegimePrior",
     "date_level_series",
@@ -155,6 +161,260 @@ ORDERING_REGISTRY: dict[str, Callable[[np.ndarray, np.ndarray], np.ndarray]] = {
 }
 
 
+# --------------------------------------------------------------------------- #
+# Starting values for the ML fit (brief 04 section B)
+# --------------------------------------------------------------------------- #
+
+
+def causal_vol_assignment(
+    series: np.ndarray, window: int, calm_share: float, k: int, min_history: int
+) -> np.ndarray:
+    """Per-date regime assignment by trailing volatility, using no future data.
+
+    Two ingredients, both strictly causal, so the assignment at date ``t``
+    depends on the series through ``t`` and nothing later:
+
+    - realised volatility over a **trailing** window ``[t-w+1, t]`` — never a
+      centred one, which would put ``w/2`` future observations into every
+      date's value even at initialisation;
+    - cut points from an **expanding** quantile of those volatilities, again
+      over dates ``<= t`` only. A full-sample quantile would be the simpler
+      choice and would be legal here (the fit sees the whole training block
+      anyway), but it would let a later date move the split at an earlier
+      one; the expanding version makes "no future observation enters" true
+      date by date and checkable by perturbation.
+
+    ``calm_share`` is the share of dates placed in the calmest regime; for
+    ``k > 2`` the remaining mass is split evenly among the others. Returns an
+    int array, ``-1`` where no assignment is possible yet (the window has not
+    filled, or fewer than ``min_history`` volatilities exist to cut on).
+    """
+    import pandas as pd
+
+    vol = pd.Series(series).rolling(window, min_periods=window, center=False).std()
+    cuts = [calm_share + j * (1.0 - calm_share) / (k - 1) for j in range(k - 1)]
+    thresholds = [
+        vol.expanding(min_periods=min_history).quantile(c).to_numpy() for c in cuts
+    ]
+    v = vol.to_numpy()
+    assigned = np.zeros(len(series), dtype=int)
+    for th in thresholds:
+        assigned += (v > th).astype(int)
+    undefined = np.isnan(v) | np.isnan(thresholds[0])
+    assigned[undefined] = -1
+    return assigned
+
+
+def _param_index(names: list[str]) -> dict[str, list[int]]:
+    groups: dict[str, list[int]] = {}
+    for i, n in enumerate(names):
+        groups.setdefault(n.split("[")[0], []).append(i)
+    return groups
+
+
+def informed_centre(
+    model, series: np.ndarray, calm_share: float, window: int, persistence: float,
+    cfg: MarkovGateConfig,
+) -> np.ndarray:
+    """One data-driven starting vector, in statsmodels' CONSTRAINED space.
+
+    Split the training block's dates into ``K`` groups by causal trailing
+    volatility (:func:`causal_vol_assignment`), set each regime's mean and
+    variance to its group's sample moments, and set the transition matrix to
+    ``persistence`` on the diagonal with ``(1-p)/(K-1)`` off it — informed
+    about both what a regime of daily returns looks like and how long it
+    lasts, unlike statsmodels' default start (``p = 0.5``: no persistence).
+
+    Written **by parameter name**, never by position: the layout of
+    ``param_names`` shifts with every trend/switching/order flag. Anything the
+    centre has no information about (AR terms, exog) keeps statsmodels' own
+    default for that name.
+    """
+    k = cfg.k_regimes
+    assign = causal_vol_assignment(
+        series, window, calm_share, k, cfg.start_min_history
+    )
+    means, variances = np.empty(k), np.empty(k)
+    for r in range(k):
+        members = series[assign == r]
+        if len(members) < cfg.start_min_group_size:
+            raise ValueError(
+                f"informed start (q={calm_share}, w={window}): regime {r} has "
+                f"{len(members)} dates, below start_min_group_size="
+                f"{cfg.start_min_group_size}; the training block is too short "
+                "for this grid point"
+            )
+        means[r], variances[r] = members.mean(), members.var(ddof=1)
+
+    names = list(model.param_names)
+    vec = np.asarray(model.start_params, dtype=float).copy()
+    for i, n in enumerate(names):
+        if n.startswith("p["):
+            src, dst = (int(x) for x in n[2:-1].split("->"))
+            vec[i] = persistence if src == dst else (1.0 - persistence) / (k - 1)
+        elif n.startswith("const["):
+            vec[i] = means[int(n[6:-1])]
+        elif n == "const":
+            vec[i] = series.mean()
+        elif n.startswith("sigma2["):
+            vec[i] = variances[int(n[7:-1])]
+        elif n == "sigma2":
+            vec[i] = series.var(ddof=1)
+    validate_start(names, vec, k)
+    return vec
+
+
+def validate_start(names: list[str], vec: np.ndarray, k: int) -> None:
+    """Raise unless ``vec`` is a valid constrained start.
+
+    Variances positive, every transition probability in ``[0, 1]``, and each
+    origin's free probabilities summing to at most 1 (statsmodels leaves the
+    last destination implicit, so its row sums to 1 exactly when that holds).
+    """
+    by = _param_index(names)
+    for i in by.get("sigma2", []):
+        if not vec[i] > 0:
+            raise ValueError(f"invalid start: {names[i]} = {vec[i]} is not > 0")
+    row_mass: dict[int, float] = {}
+    for i in by.get("p", []):
+        if not 0.0 <= vec[i] <= 1.0:
+            raise ValueError(f"invalid start: {names[i]} = {vec[i]} not in [0, 1]")
+        src = int(names[i][2:-1].split("->")[0])
+        row_mass[src] = row_mass.get(src, 0.0) + float(vec[i])
+    for src, mass in row_mass.items():
+        if mass > 1.0 + 1e-12:
+            raise ValueError(
+                f"invalid start: transitions out of regime {src} sum to {mass} > 1"
+            )
+
+
+def _default_jitter_starts(model, series, cfg: MarkovGateConfig):
+    """The pre-brief-04 scheme, reproduced exactly.
+
+    Start 0 is statsmodels' own default (``None``); start ``i > 0`` adds
+    absolute ``N(0, start_jitter)`` noise to ``model.start_params`` — in the
+    **constrained** space, which is the diagnosed defect. Kept so the B.1
+    comparison is reproducible, not because it is recommended.
+    """
+    rng = np.random.default_rng(cfg.start_seed)
+    base = np.asarray(model.start_params, dtype=float)
+    starts: list[np.ndarray | None] = [None]
+    for _ in range(1, max(cfg.search_reps, 1)):
+        starts.append(base + rng.normal(0.0, cfg.start_jitter, size=base.shape))
+    return starts
+
+
+def _centres(model, series, cfg: MarkovGateConfig) -> list[np.ndarray]:
+    return [
+        informed_centre(model, series, q, w, p, cfg)
+        for q, w, p in itertools.product(
+            cfg.start_vol_quantiles, cfg.start_vol_windows, cfg.start_persistences
+        )
+    ]
+
+
+def _informed_grid_starts(model, series, cfg: MarkovGateConfig):
+    """Deterministic: one start per (q, w, p) centre, unperturbed."""
+    return list(_centres(model, series, cfg))
+
+
+def _informed_jitter_starts(model, series, cfg: MarkovGateConfig):
+    """Each centre perturbed ``start_draws_per_centre`` times, validly.
+
+    ``untransform_params`` into the unconstrained space the optimizer works
+    in, add noise **relative to each coordinate's magnitude**, and
+    ``transform_params`` back — so a start is valid by construction rather
+    than by luck (measured: 0 invalid starts in 2,000 draws even at noise
+    sd 3.0 in unconstrained units). Noise sd per coordinate is
+    ``start_jitter_rel * max(|u_i|, floor_i)``, with the floor at the series
+    std for location/scale coordinates and ``start_jitter_unit`` for
+    dimensionless ones (transition logits, AR terms), because several
+    unconstrained coordinates sit exactly at 0 and purely relative noise
+    would never move them.
+    """
+    rng = np.random.default_rng(cfg.start_seed)
+    names = list(model.param_names)
+    scale_floor = np.array(
+        [
+            float(np.std(series))
+            if n.split("[")[0] in ("const", "sigma2")
+            else cfg.start_jitter_unit
+            for n in names
+        ]
+    )
+    starts: list[np.ndarray | None] = []
+    for centre in _centres(model, series, cfg):
+        u = np.asarray(model.untransform_params(centre), dtype=float)
+        sd = cfg.start_jitter_rel * np.maximum(np.abs(u), scale_floor)
+        for _ in range(cfg.start_draws_per_centre):
+            vec = np.asarray(
+                model.transform_params(u + rng.normal(0.0, sd)), dtype=float
+            )
+            validate_start(names, vec, cfg.k_regimes)
+            starts.append(vec)
+    return starts
+
+
+#: How the multi-start ML fit generates its starting values (brief 04 B).
+#:
+#: Default ``"informed_jitter"``. Measured on simulated daily-scale two-state
+#: series of 3,000 days, 20 starts each (brief 04 B.1, 2026-09-25):
+#:
+#: ====================  ===========================  =========  ========  =========
+#: series                scheme                       converged  distinct  best llf
+#: ====================  ===========================  =========  ========  =========
+#: well separated        default_jitter, 0.05         9 / 20     1         9248.95
+#: well separated        default_jitter, 0.50         4 / 20     2         9248.95
+#: well separated        informed + relative jitter   20 / 20    1         9248.95
+#: weak separation       default_jitter, 0.05         7 / 20     1         9508.75
+#: weak separation       informed + relative jitter   20 / 20    4         9508.75
+#: mean switch only      default_jitter, 0.05         7 / 20     1         9409.16
+#: mean switch only      informed + relative jitter   20 / 20    5         9412.44
+#: ====================  ===========================  =========  ========  =========
+#:
+#: Reproduced independently on differently-parameterised 3,000-day series
+#: when this was implemented (24 informed_jitter starts = 8 centres x 3):
+#:
+#: ====================  ======================  =====  ==========  =========
+#: series                scheme                  conv   failed      best llf
+#: ====================  ======================  =====  ==========  =========
+#: well separated        default_jitter, 0.05    6/20   14 raised   9716.98
+#: well separated        informed_jitter         24/24  0           9716.98
+#: weak separation       default_jitter, 0.05    6/20   14 raised   9425.46
+#: weak separation       informed_jitter         24/24  0           9433.98
+#: mean switch only      default_jitter, 0.50    4/20   16 raised   9554.51
+#: mean switch only      informed_jitter         24/24  0           9556.92
+#: ====================  ======================  =====  ==========  =========
+#:
+#: Every default_jitter failure was a *raised* start (invalid), none a
+#: non-converged one — the diagnosed mechanism exactly. What this shows:
+#: (1) the old scheme loses most starts even at small jitter, because its
+#: noise lands in the constrained space at the wrong scale;
+#: (2) every start finding one optimum is *not* a defect when the likelihood
+#: has one dominant optimum — the second "optimum" the old scheme reached at
+#: jitter 0.5 was hundreds of nats worse, not a discovery; (3) where the
+#: likelihood genuinely is multimodal, the old scheme could not see it, while
+#: informed starts found a better optimum (+3.3 nats, mean-switch series).
+START_SCHEME_REGISTRY: dict[str, Callable[..., list[np.ndarray | None]]] = {
+    "default_jitter": _default_jitter_starts,
+    "informed_grid": _informed_grid_starts,
+    "informed_jitter": _informed_jitter_starts,
+}
+
+
+def distinct_optima(llfs: list[float], tol: float) -> list[float]:
+    """Distinct converged optima, best first: values within ``tol`` nats merge.
+
+    Clustering by gap rather than rounding to a grid, so two values a hair
+    apart either side of a rounding boundary are not counted as two optima.
+    """
+    out: list[float] = []
+    for x in sorted(llfs, reverse=True):
+        if not out or out[-1] - x > tol:
+            out.append(x)
+    return out
+
+
 @dataclass
 class MarkovFit:
     """A fitted, frozen Markov switching model and the trace behind it."""
@@ -170,22 +430,47 @@ class MarkovFit:
     n_converged: int
     chosen_start: int  # which start won
     start_llfs: tuple[float, ...] = field(default_factory=tuple)
+    # per start: "failed" (raised) | "nonconverged" | "converged" (brief 04 B.3)
+    start_status: tuple[str, ...] = field(default_factory=tuple)
+    distinct_optima_tol: float = 1.0
+
+    @property
+    def distinct_optima(self) -> list[float]:
+        """Distinct CONVERGED optima, best first (within ``distinct_optima_tol``)."""
+        converged = [
+            llf for llf, st in zip(self.start_llfs, self.start_status, strict=True)
+            if st == "converged"
+        ]
+        return distinct_optima(converged, self.distinct_optima_tol)
 
     def metrics(self) -> dict[str, float]:
         """Registry-safe summary; per-regime values in canonical order."""
         finite = [x for x in self.start_llfs if math.isfinite(x)]
+        optima = self.distinct_optima
         m: dict[str, float] = {
             "gate_llf": self.llf,
             "gate_n_starts": float(self.n_starts),
             "gate_n_converged": float(self.n_converged),
+            "gate_n_failed": float(self.start_status.count("failed")),
+            "gate_n_nonconverged": float(self.start_status.count("nonconverged")),
             "gate_chosen_start": float(self.chosen_start),
-            # How multimodal the likelihood actually looked from these starts.
-            # ~0 means every start found the same optimum: the multi-start
-            # search explored nothing, and "best of N" was a selection from a
-            # population of one. Large means the local optima are real and the
-            # multiplicity genuinely matters.
+            # These two are what answer "is the likelihood multimodal on this
+            # data". One distinct optimum is NOT a defect: where the
+            # likelihood has one dominant maximum, every valid start should
+            # find it (brief 04 B.1, point 2).
+            "gate_n_distinct_optima": float(len(optima)),
+            # Range over every start that produced a log-likelihood, converged
+            # or not. Kept for continuity, but it does NOT measure
+            # multimodality: a start that ran without converging can sit
+            # hundreds of nats below any optimum and dominate it. (An earlier
+            # reading of a large spread as "the search found distinct optima"
+            # was wrong for exactly that reason.)
             "gate_llf_spread": (max(finite) - min(finite)) if len(finite) > 1 else 0.0,
         }
+        # the gap to the runner-up optimum is undefined with a single one;
+        # omitted rather than reported as 0, which would read as a tie
+        if len(optima) > 1:
+            m["gate_best_minus_second"] = optima[0] - optima[1]
         for k in range(len(self.variances)):
             m[f"gate_variance_{k}"] = float(self.variances[k])
             m[f"gate_stay_prob_{k}"] = float(self.transition[k, k])
@@ -249,58 +534,66 @@ class MarkovSwitchingRegimePrior(PrecomputedRegimePrior):
         """Fit by maximum likelihood on the **training block** only."""
         dates, series = date_level_series(train_panel, self.cfg)
         model = self._build_model(series)
-        result, trace = self._multi_start_fit(model)
+        result, trace = self._multi_start_fit(model, series)
         perm = self._canonical_order(result)
         self.fit_result = self._summarize(result, perm, trace)
         # the fitted table: filtered probabilities over the training dates
         log_prior = self._filtered_log_prior(result, perm)
         self.set_fitted_table(dates, log_prior)
 
-    def _multi_start_fit(self, model):
-        """Best of ``search_reps`` random starts; every start is a trial (§5).
+    def _multi_start_fit(self, model, series: np.ndarray):
+        """Best converged fit over the scheme's starts; every start is a trial.
 
         statsmodels has its own ``search_reps``, but it does not expose the
-        per-start likelihoods, and §5 needs them: "best of N" is a selection
-        event whose multiplicity has to reach the corrections. So the loop is
-        ours, each start fits with ``search_reps=0``, and every converged
-        log-likelihood is recorded.
+        per-start likelihoods, and brief 03 §5 needs them: "best of N" is a
+        selection event whose multiplicity has to reach the corrections. So
+        the loop is ours: starts come from ``START_SCHEME_REGISTRY``, each fits
+        with ``search_reps=0``, and every start's outcome is recorded as one of
+        three things, kept apart because they mean different things (B.3):
+
+        - ``failed``: the fit raised — for the old scheme, usually an invalid
+          start (a negative variance, a probability outside [0, 1]);
+        - ``nonconverged``: it ran but the optimizer did not converge;
+        - ``converged``: a candidate for the maximum.
         """
         import warnings
 
         c = self.cfg
-        rng = np.random.default_rng(c.start_seed)
+        starts = START_SCHEME_REGISTRY[c.start_scheme](model, series, c)
         best, best_llf, best_i = None, -np.inf, -1
         llfs: list[float] = []
-        n_converged = 0
-        for i in range(max(c.search_reps, 1)):
+        status: list[str] = []
+        for i, start in enumerate(starts):
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 try:
-                    start = None if i == 0 else _jitter(model, rng, c.start_jitter)
                     res = model.fit(
                         start_params=start, maxiter=c.maxiter,
                         search_reps=0, disp=0,
                     )
                 except Exception:  # a start that diverges is a datum, not a crash
                     llfs.append(float("nan"))
+                    status.append("failed")
                     continue
             converged = bool(res.mle_retvals.get("converged", False))
-            n_converged += int(converged)
             llf = float(res.llf)
             llfs.append(llf)
+            status.append("converged" if converged else "nonconverged")
             if converged and llf > best_llf:
                 best, best_llf, best_i = res, llf, i
         if best is None:
             raise RuntimeError(
-                f"Markov switching gate: none of {max(c.search_reps, 1)} random "
-                "starts converged. Reported rather than silently falling back "
-                "to a non-converged fit — inspect the series, k_regimes and "
-                "maxiter before continuing"
+                f"Markov switching gate: none of {len(starts)} starts converged "
+                f"({status.count('failed')} raised, "
+                f"{status.count('nonconverged')} did not converge). Reported "
+                "rather than silently falling back to a non-converged fit — "
+                "inspect the series, k_regimes, maxiter and start_scheme"
             )
         return best, {
             "llfs": tuple(llfs),
+            "status": tuple(status),
             "n_starts": len(llfs),
-            "n_converged": n_converged,
+            "n_converged": status.count("converged"),
             "chosen": best_i,
         }
 
@@ -324,6 +617,8 @@ class MarkovSwitchingRegimePrior(PrecomputedRegimePrior):
             n_converged=trace["n_converged"],
             chosen_start=trace["chosen"],
             start_llfs=trace["llfs"],
+            start_status=trace["status"],
+            distinct_optima_tol=self.cfg.distinct_optima_tol,
         )
 
     def _filtered_log_prior(self, result, perm: np.ndarray) -> Tensor:
@@ -375,18 +670,6 @@ class MarkovSwitchingRegimePrior(PrecomputedRegimePrior):
                 self.fit_result.transition.astype("float32")
             )
         return out
-
-
-def _jitter(model, rng: np.random.Generator, scale: float) -> np.ndarray:
-    """A randomly perturbed start, in the model's unconstrained parameterization.
-
-    ``scale`` is a config field (``markov_gate.start_jitter``): too small and
-    every start lands in the same basin, making the multi-start search
-    decorative; too large and most starts fail to converge. The convergence
-    count is reported per fit so the setting can be judged rather than assumed.
-    """
-    start = np.asarray(model.start_params, dtype=float)
-    return start + rng.normal(0.0, scale, size=start.shape)
 
 
 def _regime_moments(result, k: int) -> tuple[np.ndarray, np.ndarray]:

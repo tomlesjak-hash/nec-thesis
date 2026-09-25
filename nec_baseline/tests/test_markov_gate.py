@@ -427,7 +427,14 @@ def test_every_start_is_logged_as_a_trial(tmp_path: Path):
     reach the registry rather than living inside the fit."""
     panel = _sticky_panel(n_dates=180, n_entities=6)
     reg = TrialRegistry(tmp_path / "trials.jsonl")
-    cfg = _markov_cfg(search_reps=4, registry_tag="gate_starts")
+    cfg = _markov_cfg(registry_tag="gate_starts")
+    mg = cfg.markov_gate
+    # the scheme decides the count: centres x draws for informed_jitter
+    # (search_reps only governs default_jitter)
+    n_expected = (
+        len(mg.start_vol_quantiles) * len(mg.start_vol_windows)
+        * len(mg.start_persistences) * mg.start_draws_per_centre
+    )
 
     def make_trainer() -> Trainer:
         torch.manual_seed(0)
@@ -449,7 +456,7 @@ def test_every_start_is_logged_as_a_trial(tmp_path: Path):
     for fold in result.folds:
         assert sorted(fold.gate_permutation) == [0, 1]
         g = dict(fold.gate_metrics)
-        assert g["gate_n_starts"] == 4
+        assert g["gate_n_starts"] == n_expected
         assert g["gate_n_converged"] >= 1
         assert g["gate_expected_duration_0"] > 1.0
         assert 0.0 < g["gate_stay_prob_0"] < 1.0

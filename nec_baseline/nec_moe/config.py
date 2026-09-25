@@ -209,17 +209,49 @@ class MarkovGateConfig:
     switching_variance: bool = True
     switching_trend: bool = True
     order: int = 0  # 0 -> MarkovRegression; >0 -> MarkovAutoregression
-    search_reps: int = 20  # random starts; every one is a logged trial
     maxiter: int = 500
-    start_seed: int = 0  # base seed for the random starts
-    # sd of the perturbation applied to each random start. Measured trade-off
-    # on a simulated two-state series: at 0.05-0.2 every start converges but
-    # lands in the SAME basin (log-likelihood spread 0.000), so the search is
-    # decorative and would report false confidence; at 0.5 it reaches distinct
-    # optima (spread ~600 nats) at the cost of most starts failing to
-    # converge. Not chosen: sweep it, and read gate_llf_spread to see whether
-    # the search actually explored anything.
+    start_seed: int = 0  # base seed for every stochastic start scheme
+    # How starting values are generated (brief 04 B): a registry key into
+    # nec_moe.markov_gate.START_SCHEME_REGISTRY -- "informed_jitter" (default),
+    # "informed_grid", or "default_jitter" (the pre-brief-04 behaviour, kept
+    # exactly so the B.1 comparison stays reproducible). See that registry's
+    # docstring for the measurements behind the default.
+    start_scheme: str = "informed_jitter"
+    # default_jitter only: number of starts, and the sd of the ABSOLUTE noise
+    # it adds in the CONSTRAINED space. That is the diagnosed defect -- on
+    # daily returns it lands on probabilities, means and variances whose
+    # scales differ by orders of magnitude, so most starts are invalid or
+    # absurd. Retained for comparison, not recommended.
+    search_reps: int = 20
     start_jitter: float = 0.5
+    # informed_grid / informed_jitter: one data-driven centre per combination
+    # of the three tuples below. q = share of (causally assigned) dates in the
+    # calmest regime; w = trailing realised-vol window in dates, never centred;
+    # p = diagonal persistence of the starting transition matrix, with
+    # (1-p)/(K-1) off the diagonal.
+    start_vol_quantiles: tuple[float, ...] = (0.5, 0.75)
+    start_vol_windows: tuple[int, ...] = (20, 60)
+    start_persistences: tuple[float, ...] = (0.95, 0.99)
+    # dates of defined trailing vol before the expanding-quantile split may
+    # assign a regime (earlier dates are left unassigned), and the smallest
+    # group a centre may be built from -- both guard against a regime's mean
+    # and variance being estimated from a handful of dates.
+    start_min_history: int = 20
+    start_min_group_size: int = 10
+    # informed_jitter only: perturbed draws per centre, and the noise, applied
+    # in statsmodels' UNCONSTRAINED space so every start is valid by
+    # construction. sd_i = rel * max(|u_i|, floor_i), where floor_i is the
+    # series std for location/scale coordinates (means; sigma, which is what
+    # a variance untransforms to) and start_jitter_unit for dimensionless ones
+    # (transition logits, AR terms). The floor is not optional: several
+    # unconstrained coordinates are exactly 0 (e.g. the off-diagonal logits of
+    # a symmetric K=3 start), and purely relative noise never moves them.
+    start_draws_per_centre: int = 3
+    start_jitter_rel: float = 0.1
+    start_jitter_unit: float = 1.0
+    # converged log-likelihoods within this many nats are one optimum when
+    # counting distinct optima (brief 04 B.3)
+    distinct_optima_tol: float = 1.0
     prob_floor: float = 1e-12  # clamp before log: keeps rows normalizable
     order_by: str = "variance"  # "variance" | "mean" — ascending (§4)
     registry_tag: str = "markov_gate_starts"  # TrialRegistry tag for §5
@@ -525,8 +557,50 @@ class NECConfig:
             )
         if mg.order < 0:
             raise bad(f"markov_gate.order must be >= 0, got {mg.order}")
-        from .markov_gate import ORDERING_REGISTRY, SERIES_REGISTRY
+        if not (mg.start_vol_quantiles and mg.start_vol_windows and mg.start_persistences):
+            raise bad("markov_gate start grids must each hold at least one value")
+        if any(not 0.0 < q < 1.0 for q in mg.start_vol_quantiles):
+            raise bad(
+                f"start_vol_quantiles must lie in (0, 1), got {mg.start_vol_quantiles}"
+            )
+        if any(w < 2 for w in mg.start_vol_windows):
+            raise bad(f"start_vol_windows must be >= 2, got {mg.start_vol_windows}")
+        if any(not 0.0 < pp < 1.0 for pp in mg.start_persistences):
+            raise bad(
+                f"start_persistences must lie in (0, 1) -- a persistence of "
+                f"exactly 0 or 1 is not a valid transition row -- got "
+                f"{mg.start_persistences}"
+            )
+        if mg.start_min_history < 1 or mg.start_min_group_size < 2:
+            raise bad(
+                f"start_min_history must be >= 1 and start_min_group_size >= 2 "
+                f"(a variance needs two points), got {mg.start_min_history}/"
+                f"{mg.start_min_group_size}"
+            )
+        if mg.start_draws_per_centre < 1:
+            raise bad(
+                f"start_draws_per_centre must be >= 1, got {mg.start_draws_per_centre}"
+            )
+        if mg.start_jitter_rel < 0 or mg.start_jitter_unit <= 0 or mg.start_jitter < 0:
+            raise bad(
+                "start_jitter_rel and start_jitter must be >= 0 and "
+                "start_jitter_unit > 0"
+            )
+        if mg.distinct_optima_tol <= 0:
+            raise bad(
+                f"distinct_optima_tol must be > 0, got {mg.distinct_optima_tol}"
+            )
+        from .markov_gate import (
+            ORDERING_REGISTRY,
+            SERIES_REGISTRY,
+            START_SCHEME_REGISTRY,
+        )
 
+        if mg.start_scheme not in START_SCHEME_REGISTRY:
+            raise bad(
+                f"unknown markov_gate.start_scheme {mg.start_scheme!r}; "
+                f"registered: {sorted(START_SCHEME_REGISTRY)}"
+            )
         if mg.series not in SERIES_REGISTRY:
             raise bad(
                 f"unknown markov_gate.series {mg.series!r}; registered: "
@@ -587,7 +661,12 @@ class NECConfig:
             # hidden_dims round-trips through JSON as a list
             experts=ExpertConfig(**_tupled(d.get("experts", {}), ("hidden_dims",))),
             prior=PriorConfig(**d.get("prior", {})),
-            markov_gate=MarkovGateConfig(**d.get("markov_gate", {})),
+            markov_gate=MarkovGateConfig(
+                **_tupled(
+                    d.get("markov_gate", {}),
+                    ("start_vol_quantiles", "start_vol_windows", "start_persistences"),
+                )
+            ),
             base=BaseConfig(**_tupled(d.get("base", {}), ("hidden_dims",))),
             train=TrainConfig(**d.get("train", {})),
         )

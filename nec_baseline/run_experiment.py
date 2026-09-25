@@ -186,10 +186,22 @@ class Experiment:
     gate_switching_variance: bool = True       # the usual finance setting
     gate_switching_trend: bool = True
     gate_order: int = 0                        # 0 -> MarkovRegression; >0 -> MarkovAR
-    gate_search_reps: int = 20                 # random starts; each is a logged trial
     gate_maxiter: int = 500
     gate_start_seed: int = 0
-    gate_start_jitter: float = 0.5             # see MarkovGateConfig for the trade-off
+    # starting values (brief 04 B): "informed_jitter" | "informed_grid" | "default_jitter"
+    gate_start_scheme: str = "informed_jitter"
+    gate_start_vol_quantiles: tuple[float, ...] = (0.5, 0.75)  # calm-regime share
+    gate_start_vol_windows: tuple[int, ...] = (20, 60)         # TRAILING vol windows
+    gate_start_persistences: tuple[float, ...] = (0.95, 0.99)  # start diagonal
+    gate_start_min_history: int = 20
+    gate_start_min_group_size: int = 10
+    gate_start_draws_per_centre: int = 3       # informed_jitter draws per centre
+    gate_start_jitter_rel: float = 0.1         # relative noise, unconstrained space
+    gate_start_jitter_unit: float = 1.0        # noise floor, dimensionless coords
+    gate_distinct_optima_tol: float = 1.0      # nats: "same optimum" tolerance
+    gate_search_reps: int = 20                 # default_jitter only
+    gate_start_jitter: float = 0.5             # default_jitter only (the diagnosed scheme)
+    gate_prob_floor: float = 1e-12             # clamp before log of filtered probs
     gate_order_by: str = "variance"            # canonical regime order, ascending
     gate_registry_tag: str = "markov_gate_starts"
 
@@ -303,6 +315,17 @@ def _nec_config(exp: Experiment, panel: Panel, sigma_init: float) -> NECConfig:
                                      maxiter=exp.gate_maxiter,
                                      start_seed=exp.gate_start_seed,
                                      start_jitter=exp.gate_start_jitter,
+                                     start_scheme=exp.gate_start_scheme,
+                                     start_vol_quantiles=tuple(exp.gate_start_vol_quantiles),
+                                     start_vol_windows=tuple(exp.gate_start_vol_windows),
+                                     start_persistences=tuple(exp.gate_start_persistences),
+                                     start_min_history=exp.gate_start_min_history,
+                                     start_min_group_size=exp.gate_start_min_group_size,
+                                     start_draws_per_centre=exp.gate_start_draws_per_centre,
+                                     start_jitter_rel=exp.gate_start_jitter_rel,
+                                     start_jitter_unit=exp.gate_start_jitter_unit,
+                                     distinct_optima_tol=exp.gate_distinct_optima_tol,
+                                     prob_floor=exp.gate_prob_floor,
                                      order_by=exp.gate_order_by,
                                      registry_tag=exp.gate_registry_tag),
         base=BaseConfig(enabled=exp.base_enabled,

@@ -88,6 +88,7 @@ from .market_data import DEFAULT_UNIVERSE, MARKET_SYMBOL, load_ohlcv, load_unive
 from .markov_gate import (
     ORDERING_REGISTRY,
     SERIES_REGISTRY,
+    START_SCHEME_REGISTRY,
     MarkovFit,
     MarkovSwitchingRegimePrior,
     date_level_series,
@@ -188,6 +189,7 @@ __all__ = [
     "MarkovFit",
     "SERIES_REGISTRY",
     "ORDERING_REGISTRY",
+    "START_SCHEME_REGISTRY",
     "date_level_series",
     "PriorOutput",
     "PriorContext",

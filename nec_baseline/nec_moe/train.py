@@ -62,12 +62,12 @@ from .diagnostics import (
 )
 from .likelihood import expert_log_likelihood
 from .losses import (
+    OBJECTIVE_REGISTRY,
     LoadBalanceBuffer,
     MixtureNLLOutput,
     correction_penalty_aux,
     expert_decorrelation_aux,
     load_balance_aux,
-    mixture_nll,
 )
 from .model import NECModel, NECOutput
 from .priors import PriorContext
@@ -172,6 +172,8 @@ class Trainer:
                 "(they are Variation-2 ablation levers); disable them for the "
                 "HMM prior"
             )
+        # the primary objective, resolved once through the registry (Q20 seam)
+        self._objective = OBJECTIVE_REGISTRY[t.objective]
         if t.freeze_gate:
             self.freeze_gate()
         # after any freezing: _param_groups filters on requires_grad, so a
@@ -406,7 +408,7 @@ class Trainer:
         log_w = out.prior.log_prior
         if train_objective and out.prior.log_train_weights is not None:
             log_w = out.prior.log_train_weights
-        return out, mixture_nll(log_w, log_lik)
+        return out, self._objective(log_w, log_lik)
 
     def _optimize(self, loss: Tensor) -> None:
         self.opt.zero_grad(set_to_none=True)

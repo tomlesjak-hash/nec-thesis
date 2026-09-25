@@ -276,6 +276,9 @@ class TrainConfig:
     objective purity; each is a pre-registered thesis ablation).
     """
 
+    # Registry key into nec_moe.losses.OBJECTIVE_REGISTRY. Only the existing
+    # mixture NLL is registered; the choice is open (Q20).
+    objective: str = "mixture_nll"
     lr: float = 1e-3
     weight_decay: float = 1e-4
     gate_weight_decay: float = 1e-3  # structural: separation-proofing (M4)
@@ -442,6 +445,13 @@ class NECConfig:
             raise bad(
                 "load_balance_buffer_batches must be >= 1 (and should span many "
                 f"dates), got {t.load_balance_buffer_batches}"
+            )
+        from .losses import OBJECTIVE_REGISTRY
+
+        if t.objective not in OBJECTIVE_REGISTRY:
+            raise bad(
+                f"unknown train.objective {t.objective!r}; registered: "
+                f"{sorted(OBJECTIVE_REGISTRY)}"
             )
         if t.checkpoint_every < 0:
             raise bad(f"checkpoint_every must be >= 0, got {t.checkpoint_every}")

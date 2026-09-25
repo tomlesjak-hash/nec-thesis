@@ -140,6 +140,7 @@ class Experiment:
     transition_diag_bias: float = 2.0  # hmm prior only: persistence-biased init
 
     # ---------------- training ----------------
+    objective: str = "mixture_nll"  # OBJECTIVE_REGISTRY key; only one registered (Q20 open)
     steps: int = 600                # optimizer steps (per fold in evaluate mode)
     lr: float = 1e-3
     batch_size: int = 256
@@ -315,7 +316,8 @@ def _nec_config(exp: Experiment, panel: Panel, sigma_init: float) -> NECConfig:
                         early_stopping_patience=exp.base_early_stopping_patience,
                         val_fraction=exp.base_val_fraction,
                         seed_offset=exp.base_seed_offset),
-        train=TrainConfig(lr=exp.lr, batch_size=exp.batch_size, steps=exp.steps,
+        train=TrainConfig(objective=exp.objective,
+                          lr=exp.lr, batch_size=exp.batch_size, steps=exp.steps,
                           sigma_init=sigma_init,
                           sigma_freeze_steps=exp.sigma_freeze_steps,
                           sequence_ordered=(exp.prior == "hmm"),

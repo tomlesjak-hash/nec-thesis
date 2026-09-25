@@ -113,7 +113,14 @@ def nec_arm(
         name=name,
         build_trainer=build,
         warmstart_key=warmstart_key,
-        config_record={"arm": name, "nec_config": cfg.to_dict()},
+        config_record={
+            "arm": name,
+            # beside each other, deliberately: the penalty weight is not
+            # comparable across objectives, so neither means anything alone
+            "objective": cfg.train.objective,
+            "correction_penalty_weight": cfg.train.correction_penalty_weight,
+            "nec_config": cfg.to_dict(),
+        },
     )
 
 
@@ -122,8 +129,14 @@ def baseline_arm(
 ) -> SweepArm:
     """Baseline arm; ``build(seed)`` returns a fresh model (seed may be unused
     by deterministic baselines — their seed std will simply be 0)."""
+    # A baseline is not trained against the NEC objective at all, so the keys
+    # are present (every row carries them) but explicitly not applicable.
     return SweepArm(
-        name=name, build_baseline=build, config_record={"arm": name}
+        name=name,
+        build_baseline=build,
+        config_record={
+            "arm": name, "objective": None, "correction_penalty_weight": None,
+        },
     )
 
 

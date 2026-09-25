@@ -134,6 +134,12 @@ class TrialRegistry:
                 "selected_trial_id": pick.trial_id,
                 "n_candidates": len(candidates),
                 "mode": mode,
+                # the winner's objective travels with the selection event, so
+                # the selection row is interpretable without a join
+                "objective": pick.config.get("objective"),
+                "correction_penalty_weight": pick.config.get(
+                    "correction_penalty_weight"
+                ),
             },
             notes=f"selection event: best {metric!r} of {len(candidates)}",
         )

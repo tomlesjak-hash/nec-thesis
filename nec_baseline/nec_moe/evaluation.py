@@ -571,7 +571,14 @@ def _gate_report(
                 registry.log(
                     gate_tag,
                     {"llf": llf, "start": float(i), "fold": float(fold.fold)},
-                    config={"arm": gate_tag, "chosen": i == fit.chosen_start},
+                    config={
+                        "arm": gate_tag,
+                        "chosen": i == fit.chosen_start,
+                        "objective": trainer.cfg.train.objective,
+                        "correction_penalty_weight": (
+                            trainer.cfg.train.correction_penalty_weight
+                        ),
+                    },
                     seed=seed,
                     notes=f"markov gate start {i} of {fit.n_starts}, fold {fold.fold}",
                 )

@@ -76,6 +76,7 @@ from .features import (
 )
 from .likelihood import expert_log_likelihood
 from .losses import (
+    OBJECTIVE_REGISTRY,
     LoadBalanceBuffer,
     MixtureNLLOutput,
     correction_penalty_aux,
@@ -168,6 +169,7 @@ __all__ = [
     "expert_log_likelihood",
     "MixtureNLLOutput",
     "mixture_nll",
+    "OBJECTIVE_REGISTRY",
     "LoadBalanceBuffer",
     "load_balance_aux",
     "expert_decorrelation_aux",

@@ -129,11 +129,18 @@ def tune(
     # arm-level aggregate rows -> the registry, so best() records the pick
     # with the candidate count attached (selection provenance)
     arms_tag = f"{tag}.arms"
+    records = {c.name: (c.config_record or {}) for c in candidates}
     for a in report.arms:
+        rec = records.get(a.arm, {})
         registry.log(
             arms_tag,
             {metric: a.mean[metric], f"{metric}_std": a.std[metric]},
-            config={"arm": a.arm, "n_seeds": a.n_seeds},
+            config={
+                "arm": a.arm,
+                "n_seeds": a.n_seeds,
+                "objective": rec.get("objective"),
+                "correction_penalty_weight": rec.get("correction_penalty_weight"),
+            },
             notes=f"tuning aggregate over {a.n_seeds} seeds",
         )
     pick = registry.best(arms_tag, metric, mode=mode)

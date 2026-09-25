@@ -37,6 +37,7 @@ Auxiliary losses (both default OFF, §4.3)
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import torch
@@ -45,6 +46,7 @@ from torch import Tensor
 __all__ = [
     "MixtureNLLOutput",
     "mixture_nll",
+    "OBJECTIVE_REGISTRY",
     "LoadBalanceBuffer",
     "load_balance_aux",
     "expert_decorrelation_aux",
@@ -91,6 +93,24 @@ def mixture_nll(log_prior: Tensor, log_lik: Tensor) -> MixtureNLLOutput:
         log_filtered=log_filtered,
         responsibilities=log_filtered.detach().exp(),
     )
+
+
+#: The primary training objective, selected by ``TrainConfig.objective``.
+#:
+#: A seam, not a choice. The objective is an open question (Q20), and this
+#: registry exists so that answering it later is a registration rather than a
+#: rewrite of the trainer. It holds exactly one entry — the mixture negative
+#: log-likelihood the package has always trained against — and the value is
+#: that same function object, so routing through the registry changes no
+#: numerics at all. Every entry must take ``(log_weights (B, K),
+#: log_lik (B, K))`` and return a :class:`MixtureNLLOutput`.
+#:
+#: The correction-penalty weight is not comparable across objectives (the
+#: penalty is prior-weighted while the data term need not be), which is why
+#: every trial row records the objective beside it.
+OBJECTIVE_REGISTRY: dict[str, Callable[[Tensor, Tensor], MixtureNLLOutput]] = {
+    "mixture_nll": mixture_nll,
+}
 
 
 class LoadBalanceBuffer:

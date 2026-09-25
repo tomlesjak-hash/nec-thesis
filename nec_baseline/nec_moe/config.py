@@ -202,7 +202,10 @@ class MarkovGateConfig:
     """
 
     series: str = "market_excess_return"  # registry key
-    series_feature: str = "mkt_ret_1d"  # sequence-feature name for that key
+    # where the cached Kenneth French daily factors live, for the
+    # market_excess_return key (read cache-first; never downloaded in a run)
+    context_dir: str = "data_cache"
+    series_feature: str = "mkt_ret_1d"  # sequence-feature name, "sequence_feature" key
     series_channel: int = 0  # channel index for the raw-channel key
     k_regimes: int = 2
     trend: str = "c"

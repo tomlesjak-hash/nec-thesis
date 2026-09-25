@@ -115,12 +115,55 @@ def _per_date_mean(panel: Panel, values: Tensor) -> np.ndarray:
     return out.detach().double().numpy()
 
 
+def _french_market_excess(panel: Panel, cfg: MarkovGateConfig) -> np.ndarray:
+    """Kenneth French daily Mkt-RF, aligned to the panel's dates.
+
+    The series brief 03 §2 specified: the market excess return, from the
+    French daily factors already cached for Stage C, so no new data source is
+    involved. Mkt-RF for date ``t`` is the market's return over day ``t``,
+    known at the close of ``t`` — the same timing as the panel's own features
+    at ``t``, and strictly before the forward-return target over
+    ``(t, t + h]``.
+
+    Aligned by calendar date through the panel's ``date_labels``. A panel date
+    absent from the factor file raises: forward-filling a return would invent
+    a day that did not happen.
+    """
+    import pandas as pd
+
+    from .context_data import load_french_factors
+
+    if panel.date_labels is None:
+        raise ValueError(
+            "series='market_excess_return' aligns French factors by calendar "
+            "date, but this panel carries no date_labels (synthetic panels do "
+            "not) — use series='sequence_channel' there"
+        )
+    factors = load_french_factors(cfg.context_dir, momentum=False)
+    codes = torch.unique(panel.date, sorted=True)
+    labels = pd.to_datetime([panel.date_labels[int(c)] for c in codes])
+    missing = labels.difference(factors.index)
+    if len(missing):
+        raise ValueError(
+            f"{len(missing)} panel date(s) have no French factor row, first "
+            f"{[d.date().isoformat() for d in missing[:5]]}"
+        )
+    return factors["mkt_rf"].reindex(labels).to_numpy(dtype=float)
+
+
 #: Which date-level series the Hamilton gate is fitted on. A registry, not a
 #: hardcoded choice, because the series is a modelling decision (§2). Every
 #: entry must be knowable at date ``t``: the target ``y`` is excluded by
 #: construction, being a forward return.
+#:
+#: ``market_excess_return`` is the French Mkt-RF series brief 03 §2
+#: specified. (It previously read a sequence feature named ``mkt_ret_1d``,
+#: which is neither an excess return nor present in the point-in-time panel,
+#: whose sequence features are ret_1d / rel_ret_1d / vol_20d / volume_z_20d;
+#: that reader lives on under the honest name ``sequence_feature``.)
 SERIES_REGISTRY: dict[str, Callable[[Panel, MarkovGateConfig], np.ndarray]] = {
-    "market_excess_return": _named_sequence_feature,
+    "market_excess_return": _french_market_excess,
+    "sequence_feature": _named_sequence_feature,
     "sequence_channel": _raw_sequence_channel,
 }
 
@@ -472,8 +515,12 @@ class MarkovFit:
         if len(optima) > 1:
             m["gate_best_minus_second"] = optima[0] - optima[1]
         for k in range(len(self.variances)):
+            m[f"gate_mean_{k}"] = float(self.means[k])
             m[f"gate_variance_{k}"] = float(self.variances[k])
             m[f"gate_stay_prob_{k}"] = float(self.transition[k, k])
+            # the full row-stochastic matrix, canonically ordered (brief 04 C.4)
+            for j in range(len(self.variances)):
+                m[f"gate_transition_{k}_{j}"] = float(self.transition[k, j])
             d = float(self.expected_durations[k])
             if math.isfinite(d):
                 m[f"gate_expected_duration_{k}"] = d

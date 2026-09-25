@@ -404,7 +404,9 @@ def test_ordering_rule_is_config_and_degenerate_sorts_are_refused():
 
 
 def test_series_is_a_registry_choice_and_must_be_causal():
-    assert set(SERIES_REGISTRY) == {"market_excess_return", "sequence_channel"}
+    assert set(SERIES_REGISTRY) == {
+        "market_excess_return", "sequence_feature", "sequence_channel",
+    }
     panel = _sticky_panel(n_dates=60, n_entities=4)
     cfg = _markov_cfg()
     dates, series = date_level_series(panel, cfg.markov_gate)
@@ -418,8 +420,52 @@ def test_series_is_a_registry_choice_and_must_be_causal():
     with pytest.raises(ValueError, match="not a sequence feature"):
         date_level_series(
             panel,
+            dataclasses.replace(cfg.markov_gate, series="sequence_feature"),
+        )
+    # the French path needs calendar dates to align on, and says so
+    with pytest.raises(ValueError, match="no date_labels"):
+        date_level_series(
+            panel,
             dataclasses.replace(cfg.markov_gate, series="market_excess_return"),
         )
+
+
+def _french_fixture_dir(tmp_path: Path, rows: list[tuple[str, float]]) -> Path:
+    """A cache dir holding a minimal French daily-factors zip (offline)."""
+    import zipfile
+
+    body = "".join(f"{d.replace('-', '')},{r * 100:.4f},0.00,0.00,0.00\n" for d, r in rows)
+    csv = (
+        "This file was created by CMPT_ME_BEME_RETS_DAILY\n\n"
+        ",Mkt-RF,SMB,HML,RF\n" + body + "\nCopyright 2026 Eugene F. Fama and Kenneth R. French\n"
+    )
+    with zipfile.ZipFile(tmp_path / "ff_factors_daily.zip", "w") as z:
+        z.writestr("F-F_Research_Data_Factors_daily.CSV", csv)
+    return tmp_path
+
+
+def test_market_excess_return_is_french_mkt_rf_aligned_by_date(tmp_path: Path):
+    """The key brief 03 §2 specified: French Mkt-RF, aligned by calendar date
+    through the panel's date labels, with a missing date refused rather than
+    filled."""
+    panel = _sticky_panel(n_dates=6, n_entities=3)
+    labels = ["2020-03-02", "2020-03-03", "2020-03-04",
+              "2020-03-05", "2020-03-06", "2020-03-09"]
+    panel = dataclasses.replace(panel, date_labels=labels)
+    rets = [0.0461, -0.0281, 0.0422, -0.0339, -0.0171, -0.0760]
+    ctx = _french_fixture_dir(tmp_path, list(zip(labels, rets, strict=True)))
+    cfg = dataclasses.replace(
+        _markov_cfg().markov_gate, series="market_excess_return", context_dir=str(ctx)
+    )
+    dates, series = date_level_series(panel, cfg)
+    assert np.allclose(series, rets, atol=1e-9)  # decimal, in date order
+
+    # one date missing from the factor file -> refused, not forward-filled
+    short = tmp_path / "short"
+    short.mkdir()
+    _french_fixture_dir(short, list(zip(labels[:-1], rets[:-1], strict=True)))
+    with pytest.raises(ValueError, match="no French factor row"):
+        date_level_series(panel, dataclasses.replace(cfg, context_dir=str(short)))
 
 
 def test_every_start_is_logged_as_a_trial(tmp_path: Path):

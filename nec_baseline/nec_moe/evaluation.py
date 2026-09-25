@@ -31,8 +31,9 @@ training data precedes the test block by construction.
 from __future__ import annotations
 
 import math
+import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -45,7 +46,11 @@ from .registry import TrialRegistry
 
 if TYPE_CHECKING:  # pragma: no cover
     from .baselines import BaselineModel
-from .diagnostics import canonical_expert_order, persistence_metrics
+from .diagnostics import (
+    canonical_expert_order,
+    pairwise_expert_distance,
+    persistence_metrics,
+)
 from .priors import PriorContext
 from .train import Trainer
 from .utils import atomic_torch_save
@@ -334,6 +339,11 @@ class FoldResult:
     # The fitted gate's own summary (durations, stay probabilities, llf,
     # multi-start counts), in canonical order; empty for non-fitted gates.
     gate_metrics: tuple[tuple[str, float], ...] = ()
+    # Wall clock per fold, split into gate fit / base fit / expert training
+    # (brief 04 C.4, for the compute budget in Q11). Metadata about the RUN,
+    # not a result, so excluded from equality: a resumed fold must still
+    # compare equal to the uninterrupted one although the clock differed.
+    timing: tuple[tuple[str, float], ...] = field(default=(), compare=False)
 
     @property
     def ic_improvement(self) -> float | None:
@@ -359,6 +369,9 @@ class WalkForwardResult:
     folds: list[FoldResult]
     pooled_ic: IcSummary  # over all test dates of all folds
     pooled_portfolio: PortfolioSummary | None = None
+    # the frozen base pooled over the same dates by the same code (brief 04
+    # C.4: pooled base values beside every arm); None when the base is off
+    pooled_base_ic: IcSummary | None = None
 
     @property
     def mean_fold_nll(self) -> float:
@@ -374,6 +387,7 @@ class _FoldAccumulator:
         self.cost_rate = cost_rate
         self.folds: list[FoldResult] = []
         self._ics: list[Tensor] = []
+        self._base_ics: list[Tensor] = []
         self._gross: list[Tensor] = []
         self._tno: list[Tensor] = []
 
@@ -392,6 +406,7 @@ class _FoldAccumulator:
         correction: tuple[tuple[str, float], ...] = (),
         gate_permutation: tuple[int, ...] = (),
         gate_metrics: tuple[tuple[str, float], ...] = (),
+        timing: tuple[tuple[str, float], ...] = (),
     ) -> dict[str, Any]:
         """Score a freshly-evaluated fold. Returns the picklable payload that
         fold-level resume persists and :meth:`add_completed` re-ingests."""
@@ -409,6 +424,7 @@ class _FoldAccumulator:
         # ranking, same backtest — so "improvement over the base" is a
         # difference of like-for-like numbers rather than of two protocols.
         base_ic = base_portfolio = None
+        base_ics: Tensor | None = None
         if base_pred is not None:
             _, base_ics = rank_ic_by_date(base_pred, test.y, test.date)
             base_ic = ic_summary(base_ics)
@@ -435,8 +451,10 @@ class _FoldAccumulator:
                 correction=correction,
                 gate_permutation=gate_permutation,
                 gate_metrics=gate_metrics,
+                timing=timing,
             ),
             "ics": ics,
+            "base_ics": base_ics,
             "gross": gross,
             "turnover": tno,
         }
@@ -458,6 +476,9 @@ class _FoldAccumulator:
     def _ingest(self, payload: dict[str, Any]) -> None:
         self.folds.append(payload["fold_result"])
         self._ics.append(payload["ics"])
+        # .get: fold files persisted before brief 04 carry no base series
+        if payload.get("base_ics") is not None:
+            self._base_ics.append(payload["base_ics"])
         if payload["gross"] is not None:
             self._gross.append(payload["gross"])
             self._tno.append(payload["turnover"])
@@ -470,10 +491,18 @@ class _FoldAccumulator:
             if self.backtest_quantiles is not None
             else None
         )
+        # pooled only when every fold has a base series: a partial pool
+        # would silently compare the mixture's dates with a subset of them
+        pooled_base_ic = (
+            ic_summary(torch.cat(self._base_ics))
+            if self._base_ics and len(self._base_ics) == len(self._ics)
+            else None
+        )
         return WalkForwardResult(
             folds=self.folds,
             pooled_ic=ic_summary(torch.cat(self._ics)),
             pooled_portfolio=pooled_portfolio,
+            pooled_base_ic=pooled_base_ic,
         )
 
 
@@ -609,7 +638,9 @@ def _attach_base(
 
 @torch.no_grad()
 def base_and_correction(
-    trainer: Trainer, test: Panel
+    trainer: Trainer,
+    test: Panel,
+    quantiles: tuple[float, ...] = (0.05, 0.25, 0.5, 0.75, 0.95),
 ) -> tuple[Tensor | None, float | None, tuple[tuple[str, float], ...]]:
     """The frozen base's own test predictions/NLL, and the correction applied.
 
@@ -649,6 +680,23 @@ def base_and_correction(
                 float(a.mean() / base_pred.std(unbiased=True).clamp_min(1e-12)),
             ),
         )
+        # the signed distribution, not only its magnitude (brief 04 C.4):
+        # a correction centred on zero and one that is one-signed are
+        # different findings even at the same mean |.|
+        qs = torch.quantile(correction.double(), torch.tensor(quantiles, dtype=torch.float64))
+        stats += tuple(
+            (f"correction_q{round(100 * q):02d}", float(v))
+            for q, v in zip(quantiles, qs, strict=True)
+        )
+        # out-of-sample distance between the fitted corrections themselves:
+        # whether the experts actually learned different functions
+        if out.corrections is not None and out.corrections.shape[1] > 1:
+            d = pairwise_expert_distance(out.corrections)
+            off = d[~torch.eye(d.shape[0], dtype=torch.bool)]
+            stats += (
+                ("correction_min_pairwise_distance", float(off.min())),
+                ("correction_mean_pairwise_distance", float(off.mean())),
+            )
     return base_pred, base_nll, stats
 
 
@@ -731,6 +779,7 @@ def walk_forward_evaluate(
             # so it must NOT rerun — everything is in the checkpoint
             trainer = Trainer.load(fit_ckpt)
             remaining = max(steps - trainer.step_count, 0)
+            t_gate = t_base = 0.0  # not refitted in this process
             _attach_base(trainer, train, fold, base_cache, seed)
         else:
             trainer = make_trainer()
@@ -738,8 +787,12 @@ def walk_forward_evaluate(
             # this fold's training block and frozen, THEN the base is fitted on
             # the same block and frozen, and only then do the experts train
             # against what is left.
+            t0 = time.perf_counter()
             _fit_gate(trainer, panel, train, fold)
+            t_gate = time.perf_counter() - t0
+            t0 = time.perf_counter()
             base_fit = _attach_base(trainer, train, fold, base_cache, seed)
+            t_base = time.perf_counter() - t0
             x = trainer.cfg.experts
             if warmstart_key is not None and not (
                 x.correction_mode and x.zero_init_head
@@ -747,12 +800,14 @@ def walk_forward_evaluate(
                 trainer.warmstart_experts(train.full_batch(), warmstart_key(train))
             del base_fit
             remaining = steps
+        t0 = time.perf_counter()
         if trainer.model.prior.stateful:
             trainer.fit_sequence(
                 train.time_sequence(), steps=remaining, checkpoint_path=fit_ckpt
             )
         else:
             trainer.fit(train, steps=remaining, checkpoint_path=fit_ckpt)
+        t_train = time.perf_counter() - t0
 
         pred, nll = _fold_predictions(trainer, train, test)
         canonical = canonical_expert_order(trainer.model.experts.log_sigma)
@@ -778,6 +833,11 @@ def walk_forward_evaluate(
             correction=correction,
             gate_permutation=gate_perm,
             gate_metrics=gate_metrics,
+            timing=(
+                ("gate_fit_s", t_gate),
+                ("base_fit_s", t_base),
+                ("expert_train_s", t_train),
+            ),
         )
         if done_file is not None:
             payload = dict(

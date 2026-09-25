@@ -180,7 +180,8 @@ class Experiment:
     # reordered, and applied to the test block with FROZEN parameters through
     # the filter. Nothing here is chosen yet.
     gate_series: str = "market_excess_return"  # registry key (see SERIES_REGISTRY)
-    gate_series_feature: str = "mkt_ret_1d"    # sequence-feature name for that key
+    gate_context_dir: str = "data_cache"       # cached French factors (market_excess_return)
+    gate_series_feature: str = "mkt_ret_1d"    # name, for series="sequence_feature"
     gate_series_channel: int = 0               # channel index for "sequence_channel"
     gate_trend: str = "c"
     gate_switching_variance: bool = True       # the usual finance setting
@@ -304,6 +305,7 @@ def _nec_config(exp: Experiment, panel: Panel, sigma_init: float) -> NECConfig:
                           tau_anneal_steps=exp.tau_anneal_steps,
                           transition_diag_bias=exp.transition_diag_bias),
         markov_gate=MarkovGateConfig(series=exp.gate_series,
+                                     context_dir=_repo_path(exp.gate_context_dir),
                                      series_feature=exp.gate_series_feature,
                                      series_channel=exp.gate_series_channel,
                                      k_regimes=exp.n_experts,
@@ -377,6 +379,13 @@ def _auto_sigma(exp: Experiment, cfg_panel: Panel, train: Panel,
     with torch.no_grad():
         resid = train.y - fit.model(train.x_snap)
     return max(float(resid.std()), 1e-6)
+
+
+def _repo_path(path: str) -> str:
+    """Relative paths resolve against this file's directory, like ``CACHE``,
+    so a run behaves the same whatever the working directory."""
+    p = Path(path)
+    return str(p if p.is_absolute() else Path(__file__).resolve().parent / p)
 
 
 def _proxy_channel(exp: Experiment) -> int:

@@ -87,8 +87,6 @@ from .features import (
     SNAPSHOT_FEATURES,
     StageBSpec,
     assemble_panel,
-    build_panel,
-    build_stage_b_panel,
     data_config_from_panel,
     feature_warmup,
     market_frame,
@@ -105,7 +103,6 @@ from .losses import (
     load_balance_aux,
     mixture_nll,
 )
-from .market_data import DEFAULT_UNIVERSE, MARKET_SYMBOL, load_ohlcv, load_universe
 from .markov_gate import (
     ORDERING_REGISTRY,
     SERIES_REGISTRY,
@@ -164,11 +161,9 @@ from .sweep import (
 from .train import DeadParameterWarning, GradientAudit, SequenceEval, Trainer
 from .tuning import TuneResult, tune, validation_tail
 from .universe import (
-    PointInTimeUniverse,
     SpellUniverse,
     Universe,
     filter_point_in_time,
-    load_sp500_universe,
     universe_coverage_report,
 )
 from .utils import assert_shape, set_seed
@@ -260,8 +255,6 @@ __all__ = [
     "StageBSpec",
     "SEQUENCE_FEATURES",
     "SNAPSHOT_FEATURES",
-    "build_panel",
-    "build_stage_b_panel",
     "rolling_beta",
     "data_config_from_panel",
     "DAILY_COLUMNS",
@@ -279,10 +272,6 @@ __all__ = [
     "membership_universe",
     "read_index_returns",
     "read_membership",
-    "DEFAULT_UNIVERSE",
-    "MARKET_SYMBOL",
-    "load_ohlcv",
-    "load_universe",
     "load_vix",
     "load_french_factors",
     "build_context",
@@ -316,10 +305,8 @@ __all__ = [
     "TemperatureFit",
     "fit_temperature",
     "plot_reliability",
-    "PointInTimeUniverse",
     "SpellUniverse",
     "Universe",
-    "load_sp500_universe",
     "filter_point_in_time",
     "universe_coverage_report",
     "sharpe_ratio",

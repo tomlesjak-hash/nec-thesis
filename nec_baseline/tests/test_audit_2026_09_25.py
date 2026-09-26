@@ -27,15 +27,16 @@ from nec_moe import (
     BaseCache,
     Batch,
     NECModel,
-    PointInTimeUniverse,
+    SpellUniverse,
     StageBSpec,
     SyntheticRegimePanel,
     SyntheticSpec,
     Trainer,
+    assemble_panel,
     base_and_correction,
-    build_panel,
     filter_point_in_time,
     fit_base,
+    market_frame,
     nec_arm,
     walk_forward_evaluate,
     walk_forward_folds,
@@ -56,13 +57,12 @@ def _sticky_panel(n_dates: int = 160, n_entities: int = 8, seed: int = 3):
 # --------------------------------------------------------------------------- #
 
 
-def _prices(seed: int, dates: pd.DatetimeIndex) -> pd.DataFrame:
+def _daily(seed: int, dates: pd.DatetimeIndex) -> pd.DataFrame:
     g = np.random.default_rng(seed)
-    close = 100.0 * np.exp(np.cumsum(g.normal(0.0004, 0.02, len(dates))))
+    ret = g.normal(0.0004, 0.02, len(dates))
     vol = 1e6 * np.exp(g.normal(0.0, 0.4, len(dates)))
     return pd.DataFrame(
-        {"open": close, "high": close * 1.01, "low": close * 0.99,
-         "close": close, "volume": vol},
+        {"ret": ret, "volume": vol, "dollar_volume": 100.0 * np.exp(np.cumsum(ret)) * vol},
         index=dates,
     )
 
@@ -71,16 +71,19 @@ def _prices(seed: int, dates: pd.DatetimeIndex) -> pd.DataFrame:
 # each date's members.
 def test_D1_point_in_time_ranks_use_only_that_dates_members():
     dates = pd.bdate_range("2019-01-02", periods=330)
-    tickers = ["aaa", "bbb", "ccc", "ddd", "eee", "fff", "ggg"]
-    prices = {t: _prices(10 + i, dates) for i, t in enumerate(tickers)}
-    market = _prices(99, dates)
-    panel = build_panel(prices, market, StageBSpec(seq_len=10, min_names_per_date=5))
+    permnos = [str(10001 + i) for i in range(7)]
+    daily = {p: _daily(10 + i, dates) for i, p in enumerate(permnos)}
+    spec = StageBSpec(seq_len=10, min_names_per_date=5)
+    mkt = market_frame(pd.Series(np.random.default_rng(99).normal(0, 0.01, len(dates)),
+                                 index=dates), spec)
+    panel = assemble_panel(daily, mkt, spec)
 
-    # ggg joins the index late: before 2020-01-02 it is not a member
-    changes = pd.DataFrame(
-        {"date": pd.to_datetime(["2020-01-02"]), "added": ["ggg"], "removed": [None]}
-    )
-    universe = PointInTimeUniverse(frozenset(tickers), changes)
+    # the last PERMNO joins the index late: before 2020-01-02 it is not a member
+    universe = SpellUniverse(pd.DataFrame({
+        "entity": permnos,
+        "start": pd.to_datetime(["2010-01-04"] * 6 + ["2020-01-02"]),
+        "end": pd.to_datetime(["2030-12-31"] * 7),
+    }))
     pit = filter_point_in_time(panel, universe)
 
     # on every date, each snapshot column must be the rank WITHIN that date's

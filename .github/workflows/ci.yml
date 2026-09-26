@@ -1,6 +1,7 @@
 # CI for the thesis baseline (nec_baseline/). Runs the moment this repo gets a
 # GitHub remote — nothing to configure. Network-dependent tests skip themselves
-# (NEC_NETWORK_TESTS gate), so the suite is hermetic here.
+# (NEC_NETWORK_TESTS gate) and tests that need the licensed CRSP files skip
+# without Quant Model/Data/ (never in the repo), so the suite is hermetic here.
 name: nec-baseline
 
 on:
@@ -27,7 +28,8 @@ jobs:
           # statsmodels is the Hamilton gate's estimator: without it the whole
           # markov-gate suite importorskips and CI goes green having tested
           # none of it (measured: 195 passed / 4 skipped vs 212 / 3 locally).
-          pip install numpy pandas pytest ruff mypy matplotlib lxml statsmodels
+          # pyarrow: the CRSP layer's fixture tests (invented numbers) run here
+          pip install numpy pandas pytest ruff mypy matplotlib statsmodels pyarrow
       - name: Lint (ruff)
         run: python -m ruff check nec_moe/ tests/ scripts/ run_experiment.py
       - name: Type-check (mypy)

@@ -11,9 +11,7 @@ dependencies = ["torch>=2.0", "numpy>=1.24", "pandas>=2.0"]
 
 [project.optional-dependencies]
 test = ["pytest>=8"]
-yahoo = ["yfinance>=0.2"]  # Stage-B prototyping fallback source (unofficial)
 plots = ["matplotlib>=3.8"]
-universe = ["lxml>=4.9"]  # Wikipedia constituent tables (pandas.read_html)
 regimes = ["statsmodels>=0.14"]  # Hamilton gate: MarkovRegression / MarkovAutoregression
 crsp = ["pyarrow>=14"]  # CRSP CIZ extraction and parquet extracts (brief 06 A.5)
 dev = ["ruff>=0.5", "mypy>=1.10"]
@@ -40,7 +38,7 @@ select = ["E", "F", "W", "I", "B", "UP"]
 
 [tool.mypy]
 python_version = "3.12"
-ignore_missing_imports = true  # pandas/yfinance/matplotlib ship no stubs
+ignore_missing_imports = true  # pandas/pyarrow/matplotlib ship no stubs
 check_untyped_defs = true
 warn_redundant_casts = true
 warn_unused_ignores = true

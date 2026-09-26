@@ -48,6 +48,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from nec_moe import (  # noqa: E402
     BaseCache,
     BaseConfig,
+    CRSPSpec,
     DataConfig,
     EncoderConfig,
     ExpertConfig,
@@ -68,16 +69,15 @@ from nec_moe import (  # noqa: E402
     base_and_correction,
     baseline_arm,
     build_context,
-    build_stage_b_panel,
+    build_crsp_panel,
     corrected_claims,
     data_config_from_panel,
-    filter_point_in_time,
     fit_temperature,
     gate_regime_alignment,
     gate_reliability,
     ic_summary,
+    load_extract,
     load_french_factors,
-    load_sp500_universe,
     load_vix,
     nec_arm,
     plot_gate_utilization,
@@ -90,7 +90,6 @@ from nec_moe import (  # noqa: E402
     rank_ic_by_date,
     run_sweep,
     trial_provenance,
-    universe_coverage_report,
     walk_forward_folds,
 )
 
@@ -107,15 +106,16 @@ class Experiment:
     out_dir: str = "results"        # where outputs land (results/<tag>/)
 
     # ---------------- data ----------------
-    data: str = "synthetic"         # "synthetic" | "real" | "panel_file"
-    # real data (data="real"):
-    start: str = "2018-01-01"
+    data: str = "synthetic"         # "synthetic" | "crsp" | "panel_file"
+    # CRSP data (data="crsp"): built from the extract in Data/derived/, which
+    # scripts/extract_crsp.py writes (licensed: it never leaves Data/)
+    start: str = "2015-01-01"
     end: str = "2024-12-31"
-    source: str = "yfinance"        # "yfinance" | "stooq" (see handbook II.4)
-    point_in_time: bool = False     # PIT universe filter + coverage table (slow 1st run)
-    # panel file (data="panel_file") — e.g. the prebuilt PIT panel:
-    panel_file: str = "data_cache/pit_panel_2015_2024.pt"
-    # feature/target spec (real + panel builds):
+    post_delisting_return: str = "cash"   # "cash" | "market"; not a decision (CRSPSpec)
+    # panel file (data="panel_file") — e.g. the prebuilt CRSP PIT panel
+    # (scripts/build_pit_panel.py; relative to this file):
+    panel_file: str = "../Data/derived/pit_panel_crsp_2015-01-01_2024-12-31.pt"
+    # feature/target spec (CRSP builds; a panel file carries its own):
     seq_len: int = 20               # encoder window T
     horizon: int = 5                # forward-return days; ALSO the purge length
     target_kind: str = "raw"        # "raw" | "residual" (market-neutral target)
@@ -260,30 +260,22 @@ def _build_panel(exp: Experiment) -> tuple[Panel, int]:
         )
         return SyntheticRegimePanel(spec).generate(exp.synth_dates, exp.synth_entities), 0
     if exp.data == "panel_file":
-        panel = torch.load(exp.panel_file, weights_only=False)
+        panel = torch.load(_repo_path(exp.panel_file), weights_only=False)
         return panel, exp.horizon
-    if exp.data == "real":
+    if exp.data == "crsp":
         bspec = StageBSpec(
             seq_len=exp.seq_len,
             horizon=exp.horizon,
             target_kind=exp.target_kind,  # type: ignore[arg-type]
         )
-        if exp.point_in_time:
-            u = load_sp500_universe(CACHE)
-            tickers = tuple(sorted(u.members_union(exp.start, exp.end)))
-            panel = build_stage_b_panel(exp.start, exp.end, str(CACHE),
-                                        tickers=tickers, source=exp.source, spec=bspec)
-            panel = filter_point_in_time(panel, u)
-            years = range(int(exp.start[:4]) + 1, int(exp.end[:4]) + 1)
-            print(universe_coverage_report(
-                u, [f"{y}-01-05" for y in years],
-                available=set(panel.entity_labels or ())))
-        else:
-            print("[note] default universe is survivorship-biased — "
-                  "pipeline-grade only (set point_in_time=True for claims)")
-            panel = build_stage_b_panel(exp.start, exp.end, str(CACHE),
-                                        source=exp.source, spec=bspec)
-        return panel, exp.horizon
+        crsp_spec = dataclasses.replace(
+            CRSPSpec(), start=exp.start, end=exp.end,
+            post_delisting_return=exp.post_delisting_return,  # type: ignore[arg-type]
+        )
+        # the default window's extract covers every sub-window of it
+        build = build_crsp_panel(crsp_spec, bspec, extract=load_extract(CRSPSpec()))
+        print(build.coverage)
+        return build.panel, exp.horizon
     raise ValueError(f"unknown data mode {exp.data!r}")
 
 

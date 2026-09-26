@@ -1,9 +1,14 @@
 """Stage C context data: VIX history and Kenneth French daily factors.
 
 The syllabus's Stage C (§3): free regime/context series used for **diagnostics
-and reporting, never as a training signal** (Decision B — the gate stays
+and reporting only, never as a training signal** (Decision B — the gate stays
 unsupervised; VIX enters only as the yardstick the learned regimes are compared
 against, which is what keeps the thesis's secondary research question testable).
+
+These are the only free downloads left in the pipeline. The price, return and
+universe data now come from CRSP (:mod:`nec_moe.crsp`, brief 06); VIX and the
+French factors stay because CRSP has no equivalent of either, and because a
+diagnostic series never reaches the model.
 
 Sources, both official and free:
 
@@ -16,10 +21,10 @@ Sources, both official and free:
   a copyright footer around ``YYYYMMDD`` rows with **percent** values —
   converted to decimal returns here.
 
-Same cache discipline as Stage B: raw downloads land in the cache directory
-and every parser is a pure function of file text, so all tests run offline
-against fixtures. FRED macro series / NBER recession dates remain deferred
-(syllabus: "if needed").
+Raw downloads land in the cache directory (``data_cache/``, public data only;
+nothing derived from CRSP goes there) and every parser is a pure function of
+file text, so all tests run offline against fixtures. FRED macro series / NBER
+recession dates remain deferred (syllabus: "if needed").
 """
 
 from __future__ import annotations

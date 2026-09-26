@@ -55,7 +55,6 @@ from numpy.lib.stride_tricks import sliding_window_view
 
 from .config import DataConfig
 from .data import FeatureSchema, Panel
-from .market_data import DEFAULT_UNIVERSE, MARKET_SYMBOL, load_universe
 
 __all__ = [
     "DAILY_COLUMNS",
@@ -68,10 +67,6 @@ __all__ = [
     "post_fill_used",
     "feature_warmup",
     "assemble_panel",
-    "market_features",
-    "ticker_features",
-    "build_panel",
-    "build_stage_b_panel",
     "data_config_from_panel",
 ]
 
@@ -336,53 +331,11 @@ def stock_features(
         if "mkt_fwd_ret" not in f.columns:
             raise ValueError(
                 "residual target needs the market's forward return: call "
-                "market_features(market_px, spec) with the same spec"
+                "market_frame(mkt_ret, spec) with the same spec"
             )
         beta = rolling_beta(f["ret_1d"], f["mkt_ret_1d"], spec.beta_window)
         f[spec.target] = fwd - beta * f["mkt_fwd_ret"]
     return f.replace([np.inf, -np.inf], np.nan)
-
-
-# --------------------------------------------------------------------------- #
-# Price-frame adapters (the free-data path; brief 06 section B retires them)
-# --------------------------------------------------------------------------- #
-
-
-def _return_price(px: pd.DataFrame) -> pd.Series:
-    """The close that returns are computed from: adjusted if the source has one.
-
-    A dividend-adjusted close gives total returns, and a return only ever
-    involves adjustments inside its own window, so it stays causal. Levels
-    (dollar volume) must use the raw close instead (audit finding D-2).
-    """
-    return px["adj_close"] if "adj_close" in px.columns else px["close"]
-
-
-def _daily_from_ohlcv(px: pd.DataFrame) -> pd.DataFrame:
-    """OHLCV bars -> a daily frame: log return of the return price, raw dollar volume."""
-    return pd.DataFrame(
-        {
-            "ret": np.log(_return_price(px)).diff(),
-            "volume": px["volume"],
-            "dollar_volume": px["close"] * px["volume"],
-        },
-        index=px.index,
-    )
-
-
-def market_features(
-    market_px: pd.DataFrame, spec: StageBSpec | None = None
-) -> pd.DataFrame:
-    """:func:`market_frame` of an OHLCV market symbol's log returns."""
-    return market_frame(np.log(_return_price(market_px)).diff(), spec)
-
-
-def ticker_features(
-    px: pd.DataFrame, mkt: pd.DataFrame, spec: StageBSpec
-) -> pd.DataFrame:
-    """:func:`stock_features` of one OHLCV frame (returns from the adjusted
-    close when the source has one, dollar volume from the raw close)."""
-    return stock_features(_daily_from_ohlcv(px), mkt, spec)
 
 
 # --------------------------------------------------------------------------- #
@@ -499,17 +452,6 @@ def assemble_panel(
     )
 
 
-def build_panel(
-    prices: dict[str, pd.DataFrame],
-    market_px: pd.DataFrame,
-    spec: StageBSpec | None = None,
-) -> Panel:
-    """:func:`assemble_panel` from per-ticker OHLCV frames (the free-data path)."""
-    spec = (spec if spec is not None else StageBSpec()).validate()
-    daily = {t: _daily_from_ohlcv(px) for t, px in prices.items()}
-    return assemble_panel(daily, market_features(market_px, spec), spec)
-
-
 def _cross_sectional_rank(x_snap: torch.Tensor, date: torch.Tensor) -> torch.Tensor:
     """Per-date percentile rank of each snapshot column, centered to [-0.5, 0.5].
 
@@ -531,41 +473,6 @@ def _cross_sectional_rank(x_snap: torch.Tensor, date: torch.Tensor) -> torch.Ten
         out[rows] = ranks / max(n - 1, 1) - 0.5
         start += n
     return out
-
-
-# --------------------------------------------------------------------------- #
-# End-to-end convenience
-# --------------------------------------------------------------------------- #
-
-
-def build_stage_b_panel(
-    start: str,
-    end: str,
-    cache_dir: str,
-    *,
-    tickers: tuple[str, ...] = DEFAULT_UNIVERSE,
-    market_symbol: str = MARKET_SYMBOL,
-    source: str = "stooq",
-    spec: StageBSpec | None = None,
-    refresh: bool = False,
-) -> Panel:
-    """Download (or read cached) daily data and build the Stage-B panel.
-
-    ``source``: ``"stooq"`` (primary; may require the manual browser-download
-    workflow — see :mod:`nec_moe.market_data`) or ``"yfinance"`` (the
-    syllabus's prototyping fallback). Survivorship warning: the default
-    universe is pipeline-verification grade, not thesis-claim grade.
-    """
-    prices, market_px = load_universe(
-        tickers,
-        start,
-        end,
-        cache_dir,
-        market_symbol=market_symbol,
-        source=source,  # type: ignore[arg-type]
-        refresh=refresh,
-    )
-    return build_panel(prices, market_px, spec)
 
 
 def data_config_from_panel(panel: Panel) -> DataConfig:

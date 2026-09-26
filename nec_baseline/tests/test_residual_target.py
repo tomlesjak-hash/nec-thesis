@@ -12,25 +12,23 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from nec_moe import StageBSpec, build_panel, rolling_beta
-from nec_moe.features import market_features, ticker_features
+from nec_moe import StageBSpec, assemble_panel, market_frame, rolling_beta, stock_features
 
 
-def _px_from_returns(r: np.ndarray, seed: int = 0) -> pd.DataFrame:
-    close = 100.0 * np.exp(np.cumsum(r))
+def _daily(r: np.ndarray, seed: int = 0) -> pd.DataFrame:
+    """A daily frame (``DAILY_COLUMNS``) with daily log returns ``r``."""
     idx = pd.bdate_range("2018-01-02", periods=len(r))
     g = np.random.default_rng(seed)
     vol = 1e6 * (1.0 + 0.1 * g.standard_normal(len(r))).clip(0.5)
-    return pd.DataFrame(
-        {"open": close, "high": close, "low": close, "close": close, "volume": vol},
-        index=idx,
-    )
+    price = 100.0 * np.exp(np.cumsum(r))
+    return pd.DataFrame({"ret": r, "volume": vol, "dollar_volume": price * vol}, index=idx)
 
 
-def _market(n: int = 420, seed: int = 7) -> tuple[np.ndarray, pd.DataFrame]:
+def _market(n: int = 420, seed: int = 7) -> tuple[np.ndarray, pd.Series]:
+    """The market's daily log returns, as an array and as a dated series."""
     g = np.random.default_rng(seed)
     r = 0.0002 + 0.01 * g.standard_normal(n)
-    return r, _px_from_returns(r, seed=seed)
+    return r, pd.Series(r, index=pd.bdate_range("2018-01-02", periods=n))
 
 
 def test_rolling_beta_recovers_true_beta_and_is_trailing():
@@ -50,9 +48,9 @@ def test_rolling_beta_recovers_true_beta_and_is_trailing():
 def test_residual_target_is_zero_for_a_market_clone():
     """A ticker that IS the market has β=1 and zero residual forward return."""
     mkt_r, market = _market()
-    px = _px_from_returns(mkt_r, seed=7)  # identical prices
+    daily = _daily(mkt_r, seed=7)  # identical returns
     spec = StageBSpec(target_kind="residual", beta_window=60, horizon=5)
-    f = ticker_features(px, market_features(market, spec), spec)
+    f = stock_features(daily, market_frame(market, spec), spec)
     resid = f[spec.target].dropna()
     assert len(resid) > 200
     assert float(resid.abs().max()) < 1e-10
@@ -63,13 +61,13 @@ def test_residual_target_removes_the_market_component():
     mkt_r, market = _market()
     g = np.random.default_rng(3)
     r = 2.0 * mkt_r + 0.004 * g.standard_normal(len(mkt_r))
-    px = _px_from_returns(r, seed=3)
+    daily = _daily(r, seed=3)
 
     raw_spec = StageBSpec(target_kind="raw", horizon=5)
     res_spec = StageBSpec(target_kind="residual", beta_window=120, horizon=5)
-    mkt = market_features(market, res_spec)
-    f_raw = ticker_features(px, mkt, raw_spec)
-    f_res = ticker_features(px, mkt, res_spec)
+    mkt = market_frame(market, res_spec)
+    f_raw = stock_features(daily, mkt, raw_spec)
+    f_res = stock_features(daily, mkt, res_spec)
 
     joined = pd.DataFrame(
         {
@@ -86,17 +84,16 @@ def test_residual_target_removes_the_market_component():
 
 def test_residual_panel_builds_names_target_and_pays_the_warmup():
     mkt_r, market = _market()
-    prices = {}
+    daily = {}
     for i in range(6):
         g = np.random.default_rng(10 + i)
         r = (0.5 + 0.3 * i) * mkt_r + 0.006 * g.standard_normal(len(mkt_r))
-        prices[f"t{i}"] = _px_from_returns(r, seed=10 + i)
+        daily[f"{10001 + i}"] = _daily(r, seed=10 + i)
 
-    raw = build_panel(prices, market, StageBSpec(seq_len=10, target_kind="raw"))
-    res = build_panel(
-        prices, market,
-        StageBSpec(seq_len=10, target_kind="residual", beta_window=250),
-    )
+    raw_spec = StageBSpec(seq_len=10, target_kind="raw")
+    res_spec = StageBSpec(seq_len=10, target_kind="residual", beta_window=250)
+    raw = assemble_panel(daily, market_frame(market, raw_spec), raw_spec)
+    res = assemble_panel(daily, market_frame(market, res_spec), res_spec)
     assert res.schema.target == "fwd_resid_ret_5d"
     assert raw.schema.target == "fwd_ret_5d"
     # a beta window longer than the longest feature warm-up (mom_120d) costs
@@ -109,8 +106,7 @@ def test_residual_guards():
     with pytest.raises(ValueError, match="beta_window"):
         StageBSpec(target_kind="residual", beta_window=5).validate()
     mkt_r, market = _market(n=200)
-    px = _px_from_returns(mkt_r, seed=7)
     spec = StageBSpec(target_kind="residual", beta_window=60)
-    with pytest.raises(ValueError, match="market_features"):
+    with pytest.raises(ValueError, match="market_frame"):
         # market frame built WITHOUT the spec lacks mkt_fwd_ret
-        ticker_features(px, market_features(market), spec)
+        stock_features(_daily(mkt_r, seed=7), market_frame(market), spec)

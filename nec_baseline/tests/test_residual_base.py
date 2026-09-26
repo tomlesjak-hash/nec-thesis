@@ -31,11 +31,13 @@ from nec_moe import (
     BaseCache,
     BaseConfig,
     NECModel,
+    PriorContext,
     SyntheticRegimePanel,
     SyntheticSpec,
     Trainer,
     TrialRegistry,
     base_cache_key,
+    base_single_gaussian_nll,
     correction_penalty_aux,
     expert_decorrelation_aux,
     expert_log_likelihood,
@@ -778,6 +780,98 @@ def test_corrections_disabled_is_a_scoped_switch():
     with pytest.raises(ValueError, match="correction_mode"):
         with NECModel(small_config()).corrections_disabled():
             pass
+
+
+# --------------------------------------------------------------------------- #
+# Brief 06 C: the old NLL improvement split into variance gain + improvement
+# --------------------------------------------------------------------------- #
+
+
+def _decomposed_folds(prior_kind: str, log_sigma, *, steps: int, zero_init_head: bool = True):
+    panel = _panel(160, 8)
+    cfg = _residual_cfg(prior_kind=prior_kind, sigma_init=0.7, zero_init_head=zero_init_head)
+
+    def make() -> Trainer:
+        torch.manual_seed(0)
+        trainer = Trainer(NECModel(cfg))
+        with torch.no_grad():
+            trainer.model.experts.log_sigma.copy_(torch.tensor(log_sigma).log())
+        return trainer
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeadParameterWarning)
+        return walk_forward_evaluate(
+            panel, make, n_folds=2, test_dates_per_fold=10, purge_dates=5,
+            steps=steps, base_cache=BaseCache(), seed=0,
+        ).folds
+
+
+@pytest.mark.parametrize("prior_kind", ["uniform", "hmm"])
+def test_total_gain_is_variance_gain_plus_improvement(prior_kind: str):
+    """``NLL_single - NLL_full == (NLL_single - NLL_base) + (NLL_base -
+    NLL_full)`` on trained folds with live corrections. No sign is asserted
+    for the variance gain: it has none in general."""
+    folds = _decomposed_folds(prior_kind, [0.5, 2.0], steps=20, zero_init_head=False)
+    for f in folds:
+        assert dict(f.correction)["correction_max_abs"] > 0.0
+        assert f.base_single_nll is not None and f.nll_total_gain is not None
+        assert f.nll_total_gain == pytest.approx(
+            f.nll_variance_gain + f.nll_improvement, abs=1e-9
+        )
+        assert f.nll_total_gain == pytest.approx(f.base_single_nll - f.nll, abs=1e-12)
+
+
+@pytest.mark.parametrize("prior_kind", ["uniform", "soft", "hmm"])
+def test_variance_gain_is_zero_when_every_sigma_is_equal(prior_kind: str):
+    """With one noise scale for every expert the mixture density at the base
+    is that single Gaussian whatever the gate says, so the variance gain is
+    zero; it comes from the experts' noise scales, not the corrections."""
+    for f in _decomposed_folds(prior_kind, [0.9, 0.9], steps=10, zero_init_head=False):
+        assert f.nll_variance_gain == pytest.approx(0.0, abs=1e-5)
+
+
+@pytest.mark.parametrize("prior_kind", ["uniform", "hmm"])
+def test_total_gain_is_the_variance_gain_when_every_correction_is_zero(prior_kind: str):
+    """Zero corrections: NLL_full == NLL_base, so everything the old number
+    reported was the variance gain."""
+    for f in _decomposed_folds(prior_kind, [0.5, 2.0], steps=0):
+        assert dict(f.correction)["correction_max_abs"] == 0.0
+        assert f.nll_improvement == 0.0
+        assert f.nll_total_gain == pytest.approx(f.nll_variance_gain, abs=1e-12)
+
+
+def test_nll_single_is_the_pre_fix_base_nll():
+    """``base_single_gaussian_nll`` is the base NLL as defined at commit
+    9a29368: one Gaussian at the prior-weighted sigma, written out here."""
+    panel = _panel(80, 6)
+    trainer = _fitted(_residual_cfg(zero_init_head=False, sigma_init=0.8), panel)
+    with torch.no_grad():
+        trainer.model.experts.log_sigma.copy_(torch.tensor([0.6, 1.3]).log())
+    trainer.model.eval()
+    with torch.no_grad():
+        out = trainer.model(panel.x_seq, panel.x_snap, PriorContext(date=panel.date))
+        pi = out.prior.log_prior.exp().double()
+        s = (pi * torch.tensor([0.6, 1.3], dtype=torch.float64)).sum(dim=-1)
+        r = panel.y.double() - trainer.model.base(panel.x_snap).double()
+        by_hand = float((0.5 * math.log(2 * math.pi) + s.log() + 0.5 * (r / s) ** 2).mean())
+    assert base_single_gaussian_nll(trainer, panel) == pytest.approx(by_hand, rel=1e-5)
+    assert base_single_gaussian_nll(Trainer(NECModel(small_config())), panel) is None
+
+
+def test_sweep_rows_carry_all_three_nll_quantities(tmp_path):
+    reg = TrialRegistry(tmp_path / "t.jsonl")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeadParameterWarning)
+        run_sweep(_panel(120, 6), [nec_arm("res", _residual_cfg(zero_init_head=False))],
+                  seeds=(0,), registry=reg, tag="t", steps=5, n_folds=2,
+                  test_dates_per_fold=10, purge_dates=5, verbose=False)
+    m = reg.trials("t")[0].metrics
+    for key in ("base_nll", "base_single_nll", "nll_improvement", "nll_variance_gain",
+                "nll_total_gain"):
+        assert key in m, key
+    assert m["nll_total_gain"] == pytest.approx(
+        m["nll_variance_gain"] + m["nll_improvement"], abs=1e-9
+    )
 
 
 # --------------------------------------------------------------------------- #

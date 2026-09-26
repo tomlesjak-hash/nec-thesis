@@ -213,6 +213,20 @@ def _metrics_from_result(res: WalkForwardResult) -> dict[str, float]:
             m["nll_improvement"] = statistics.fmean(
                 f.nll_improvement for f in with_nll if f.nll_improvement is not None
             )
+        # brief 06 C: the old improvement split into the variance gain (the
+        # experts' noise scales under the gate) and the corrections' part;
+        # all three beside each other, neither privileged
+        with_single = [f for f in with_nll if f.base_single_nll is not None]
+        if with_single:
+            m["base_single_nll"] = statistics.fmean(
+                f.base_single_nll for f in with_single  # type: ignore[misc]
+            )
+            m["nll_variance_gain"] = statistics.fmean(
+                f.nll_variance_gain for f in with_single  # type: ignore[misc]
+            )
+            m["nll_total_gain"] = statistics.fmean(
+                f.nll_total_gain for f in with_single  # type: ignore[misc]
+            )
         with_pf = [f for f in scored if f.base_portfolio is not None]
         if with_pf:
             m["base_net_ir"] = statistics.fmean(f.base_portfolio.ir_net for f in with_pf)  # type: ignore[union-attr]

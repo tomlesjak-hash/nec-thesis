@@ -72,6 +72,7 @@ __all__ = [
     "walk_forward_evaluate",
     "walk_forward_evaluate_baseline",
     "base_and_correction",
+    "base_single_gaussian_nll",
 ]
 
 
@@ -417,6 +418,10 @@ class FoldResult:
     # the correction magnitude actually applied out of sample.
     base_ic: IcSummary | None = None
     base_nll: float | None = None
+    # NLL_single: the base scored as ONE Gaussian at the prior-weighted sigma
+    # (base_single_gaussian_nll); base_nll above is NLL_base, the mixture
+    # density at the base (brief 06 section C)
+    base_single_nll: float | None = None
     base_portfolio: PortfolioSummary | None = None
     correction: tuple[tuple[str, float], ...] = ()
     # Brief 03 §4: the canonical relabelling applied to this fold's fitted
@@ -442,10 +447,33 @@ class FoldResult:
 
     @property
     def nll_improvement(self) -> float | None:
-        """Base NLL minus the mixture's: positive = the correction helped."""
+        """``NLL_base - NLL_full``: what the corrections add, and nothing else
+        (exactly zero when every correction is zero). Positive = lower NLL."""
         if self.base_nll is None:
             return None
         return self.base_nll - self.nll
+
+    @property
+    def nll_variance_gain(self) -> float | None:
+        """``NLL_single - NLL_base``: the gain from scoring the base under the
+        mixture's noise structure instead of one Gaussian.
+
+        It comes from the experts' per-regime noise scales weighted by the
+        gate, not from the corrections: it is exactly zero when every
+        ``sigma_k`` is equal, and it has no sign in general. It is reported
+        beside :attr:`nll_improvement`, not instead of it; neither is the
+        better measure of the model.
+        """
+        if self.base_single_nll is None or self.base_nll is None:
+            return None
+        return self.base_single_nll - self.base_nll
+
+    @property
+    def nll_total_gain(self) -> float | None:
+        """``NLL_single - NLL_full`` = variance gain + improvement (brief 06 C)."""
+        if self.base_single_nll is None:
+            return None
+        return self.base_single_nll - self.nll
     # Chain persistence of this window's fitted prior, in canonical state
     # order; empty for priors with no transition matrix. Pairs, not a dict,
     # to match the file's frozen/hashable convention — read with ``dict(...)``.
@@ -499,6 +527,7 @@ class _FoldAccumulator:
         persistence: tuple[tuple[str, float], ...] = (),
         base_pred: Tensor | None = None,
         base_nll: float | None = None,
+        base_single_nll: float | None = None,
         correction: tuple[tuple[str, float], ...] = (),
         gate_permutation: tuple[int, ...] = (),
         gate_metrics: tuple[tuple[str, float], ...] = (),
@@ -543,6 +572,7 @@ class _FoldAccumulator:
                 persistence=persistence,
                 base_ic=base_ic,
                 base_nll=base_nll,
+                base_single_nll=base_single_nll,
                 base_portfolio=base_portfolio,
                 correction=correction,
                 gate_permutation=gate_permutation,
@@ -807,6 +837,36 @@ def base_and_correction(
     return base_pred, base_nll, stats
 
 
+def base_single_gaussian_nll(trainer: Trainer, test: Panel) -> float | None:
+    """``NLL_single``: the frozen base scored as a single Gaussian.
+
+    ``N(y; f0(x), s^2)`` with ``s = sum_k pi_k sigma_k``, the prior-weighted
+    noise scale of a one-shot forward pass. This is exactly the base NLL as
+    ``base_and_correction`` defined it before the E-1 fix (commit 9a29368),
+    kept so the old number can be split into its two parts (brief 06 C):
+
+    - ``nll_variance_gain = NLL_single - NLL_base``: from the experts'
+      per-regime noise scales weighted by the gate, not from the corrections;
+    - ``nll_improvement = NLL_base - NLL_full``: from the corrections alone.
+
+    Their sum is ``nll_total_gain = NLL_single - NLL_full``. Neither part is
+    the better measure; both are reported.
+    """
+    model = trainer.model
+    if model.base is None:
+        return None
+    model.eval()
+    with torch.no_grad():
+        base_pred = model.base(test.x_snap)
+        out = model(test.x_seq, test.x_snap, PriorContext(date=test.date))
+        pi = out.prior.log_prior.exp()
+        sigma = (pi * out.log_sigma.exp().unsqueeze(0)).sum(dim=-1)
+        resid = test.y - base_pred
+        return float(
+            (0.5 * math.log(2 * math.pi) + sigma.log() + 0.5 * (resid / sigma) ** 2).mean()
+        )
+
+
 def walk_forward_evaluate(
     panel: Panel,
     make_trainer: Callable[[], Trainer],
@@ -940,6 +1000,7 @@ def walk_forward_evaluate(
             else ()
         )
         base_pred, base_nll, correction = base_and_correction(trainer, test, train=train)
+        base_single_nll = base_single_gaussian_nll(trainer, test)
         gate_perm, gate_metrics = _gate_report(
             trainer, fold, registry, registry_tag, seed, trial_provenance(panel)
         )
@@ -950,6 +1011,7 @@ def walk_forward_evaluate(
             persistence=persistence,
             base_pred=base_pred,
             base_nll=base_nll,
+            base_single_nll=base_single_nll,
             correction=correction,
             gate_permutation=gate_perm,
             gate_metrics=gate_metrics,

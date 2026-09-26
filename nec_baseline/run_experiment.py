@@ -67,6 +67,7 @@ from nec_moe import (  # noqa: E402
     Trainer,
     TrialRegistry,
     base_and_correction,
+    base_single_gaussian_nll,
     baseline_arm,
     build_context,
     build_crsp_panel,
@@ -501,8 +502,14 @@ def _quick(exp: Experiment, panel: Panel, purge: int, out: Path,
     if trainer.model.base is not None:
         b_pred, b_nll, corr = base_and_correction(trainer, test, train=train)
         if b_pred is not None and b_nll is not None:
+            # brief 06 C: NLL_single, NLL_base, NLL_full and the three gains
+            b_single = base_single_gaussian_nll(trainer, test)
             trial["base_nll"] = b_nll
             trial["nll_improvement"] = b_nll - nll
+            if b_single is not None:
+                trial["base_single_nll"] = b_single
+                trial["nll_variance_gain"] = b_single - b_nll
+                trial["nll_total_gain"] = b_single - nll
             try:
                 _, b_ics = rank_ic_by_date(b_pred, test.y, test.date)
                 b_ic = ic_summary(b_ics).mean_ic

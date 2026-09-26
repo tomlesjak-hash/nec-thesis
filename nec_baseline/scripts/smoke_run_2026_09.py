@@ -368,6 +368,9 @@ def _fold_metrics(f: FoldResult) -> dict[str, float]:
               "ic_improvement": f.ic_improvement}
     if f.base_nll is not None:
         m |= {"base_nll": f.base_nll, "nll_improvement": f.nll_improvement}
+    if f.base_single_nll is not None:  # brief 06 C: NLL_single and the split
+        m |= {"base_single_nll": f.base_single_nll,
+              "nll_variance_gain": f.nll_variance_gain, "nll_total_gain": f.nll_total_gain}
     if f.live_param_count is not None:
         m["live_param_count"] = float(f.live_param_count)
     m |= dict(f.correction) | dict(f.gate_metrics) | dict(f.timing)
@@ -391,6 +394,10 @@ def _pooled_metrics(res: WalkForwardResult) -> dict[str, float]:
     bn = _pooled_nll(res, "base_nll")
     if bn is not None:
         m |= {"base_nll": bn, "nll_improvement": bn - float(m["nll"] or 0.0)}
+    bs = _pooled_nll(res, "base_single_nll")
+    if bs is not None and bn is not None:
+        m |= {"base_single_nll": bs, "nll_variance_gain": bs - bn,
+              "nll_total_gain": bs - float(m["nll"] or 0.0)}
     return {k: float(v) for k, v in m.items() if v is not None}
 
 
@@ -735,15 +742,20 @@ def write_report(s: SmokeSettings, panel: Panel, folds, purge: int, st: RunState
         for name, r in runs.items():
             pm = _pooled_metrics(r)
             rows.append([name, "pooled", _f(pm["nll"]), _f(pm.get("base_nll")),
-                         _f(pm.get("nll_improvement"), 5)])
+                         _f(pm.get("base_single_nll")), _f(pm.get("nll_improvement"), 5),
+                         _f(pm.get("nll_variance_gain"), 5), _f(pm.get("nll_total_gain"), 5)])
             for f in r.folds:
                 rows.append([name, str(f.fold), _f(f.nll), _f(f.base_nll),
-                             _f(f.nll_improvement, 5)])
+                             _f(f.base_single_nll), _f(f.nll_improvement, 5),
+                             _f(f.nll_variance_gain, 5), _f(f.nll_total_gain, 5)])
         w("Out-of-sample negative log likelihood per test row (pooled = row-weighted "
-          "mean of the folds); improvement = base minus mixture, positive means the "
-          "correction lowered it:\n")
-        w(_table(["arm", "fold", "NLL", "base NLL (same sigma)", "NLL improvement"],
-                 rows, L))
+          "mean of the folds). NLL_base is the mixture density at the base (every "
+          "correction zero), NLL_single the base as one Gaussian at the prior-weighted "
+          "sigma. Improvement = NLL_base - NLL (the corrections' part); variance gain "
+          "= NLL_single - NLL_base (the experts' noise scales under the gate); total "
+          "= their sum. Neither part is the better measure:\n")
+        w(_table(["arm", "fold", "NLL", "NLL_base", "NLL_single", "NLL improvement",
+                  "variance gain", "total gain"], rows, L))
         rows = []
         for name, r in runs.items():
             for f in r.folds:

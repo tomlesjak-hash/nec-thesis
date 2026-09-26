@@ -29,11 +29,22 @@ rest.
 
 Usage (from ``nec_baseline/``)::
 
-    python3.14 scripts/smoke_run_2026_09.py
+    python3.14 scripts/smoke_run_2026_09.py          # brief 04 C, free data
+    python3.14 scripts/smoke_run_2026_09.py --crsp   # brief 06 F, CRSP panel
 
 Outputs: ``Master Thesis/Smoke_Run_2026-09-25.md`` with figures in
 ``Master Thesis/Smoke_Run_2026-09-25_figures/``; the trial registry and the raw
 numbers in ``results/smoke_2026_09/``.
+
+``--crsp`` (brief 06 F) runs the same settings with only the data source
+changed, to the prebuilt CRSP panel in ``Data/derived/``. Its report,
+``Master Thesis/Smoke_Run_2026-09-26_CRSP.md``, contains **only** the data
+statistics, the gate per fold, that the experts trained (and their live
+parameter count) and the wall clock: no out-of-sample performance number,
+because the pre-registration is not written yet (Q15). Those numbers are
+still computed by the harness; they stay in the registry and raw results,
+which are derived from CRSP and so are written to ``Data/derived/`` (licensed,
+gitignored), and nothing prints them.
 """
 
 from __future__ import annotations
@@ -60,10 +71,12 @@ sys.path.insert(0, str(ROOT))
 import run_experiment as rx
 from nec_moe import (
     BaseCache,
+    CRSPSpec,
     NECConfig,
     Panel,
     PriorContext,
     TrialRegistry,
+    load_extract,
     load_vix,
     nec_arm,
     trial_provenance,
@@ -143,9 +156,36 @@ class SmokeSettings:
     correction_quantiles: tuple[float, ...] = (0.05, 0.25, 0.5, 0.75, 0.95)
     hist_bins: int = 80
     figure_dpi: int = 130
+    # brief 06 F: False writes the integration report only (no out-of-sample
+    # performance number anywhere: report, figures or stdout)
+    report_performance: bool = True
+    coverage_path: Path | None = None  # the CRSP panel's coverage table
 
 
 SMOKE = SmokeSettings()
+
+#: brief 06 F: brief 04 C's settings with only the data source changed
+_CRSP = CRSPSpec()
+SMOKE_CRSP = dataclasses.replace(
+    SMOKE,
+    experiment=dataclasses.replace(
+        _experiment(), tag="smoke_2026_09_crsp", panel_file=str(_CRSP.panel_path)
+    ),
+    tag="smoke_2026_09_crsp",
+    label="DIAGNOSTIC ONLY — CRSP integration run; no performance numbers",
+    source=(
+        f"{_CRSP.data_source}: CRSP CIZ daily stock file ({_CRSP.stock_file}), S&P 500 "
+        f"membership spells of INDNO {_CRSP.membership_indno}, market series INDNO "
+        f"{_CRSP.market_indno}, delisting returns in DlyRet, post-delisting fill "
+        f"'{_CRSP.post_delisting_return}'; prebuilt {_CRSP.panel_path.name}; gate "
+        "series Kenneth French daily Mkt-RF; VIX from CBOE"
+    ),
+    report_path=THESIS / "Smoke_Run_2026-09-26_CRSP.md",
+    figures_dir=THESIS / "Smoke_Run_2026-09-26_CRSP_figures",
+    results_dir=_CRSP.derived_dir / "smoke_2026_09_crsp",
+    report_performance=False,
+    coverage_path=_CRSP.derived_dir / f"pit_coverage_crsp_{_CRSP.start}_{_CRSP.end}.csv",
+)
 
 
 # =========================================================================== #
@@ -331,17 +371,19 @@ def run_arm(
     registry.context = {"run_arm": name, "run_seed": seed, "record": "pooled"}
     registry.log(s.tag, _pooled_metrics(res), config=_arm_config(name, cfg, exp),
                  seed=seed, notes=f"{name} seed {seed} pooled")
-    base_ic = res.pooled_base_ic.mean_ic if res.pooled_base_ic else float("nan")
-    print(f"[arm] {name} seed {seed}: pooled IC {res.pooled_ic.mean_ic:+.4f} "
-          f"(base {base_ic:+.4f})")
+    if s.report_performance:
+        base_ic = res.pooled_base_ic.mean_ic if res.pooled_base_ic else float("nan")
+        print(f"[arm] {name} seed {seed}: pooled IC {res.pooled_ic.mean_ic:+.4f} "
+              f"(base {base_ic:+.4f})")
     # C.5 leakage condition: pooled and every fold
     worst = [(f"fold {f.fold}", f.ic_improvement) for f in res.folds]
     if res.pooled_base_ic is not None:
         worst.append(("pooled", res.pooled_ic.mean_ic - res.pooled_base_ic.mean_ic))
     for where, d in worst:
         if d is not None and d > s.max_ic_improvement:
+            by = f" by {d:+.4f}" if s.report_performance else ""
             raise StopRun(
-                f"C.5: arm {name!r} seed {seed} improves on the base by {d:+.4f} "
+                f"C.5: arm {name!r} seed {seed} improves on the base{by} "
                 f"in mean rank IC ({where}), above the {s.max_ic_improvement} "
                 "threshold. Almost certainly leakage; stopped to find where"
             )
@@ -839,6 +881,202 @@ def write_report(s: SmokeSettings, panel: Panel, folds, purge: int, st: RunState
     s.report_path.write_text("\n".join(md))
 
 
+def _delisting_check() -> dict[str, int]:
+    """A.4.2 on the extract: delisting-return rows whose DlyRet equals DelRet."""
+    ex = load_extract(CRSPSpec())
+    rows = ex.stock[ex.stock["DlyDelFlg"] == "Y"][["PERMNO", "DlyCalDt", "DlyRet"]]
+    j = ex.delists.merge(rows, left_on=["PERMNO", "DelDlyDt"],
+                         right_on=["PERMNO", "DlyCalDt"], how="inner")
+    both = j["DelRet"].notna() & j["DlyRet"].notna()
+    equal = both & ((j["DelRet"] - j["DlyRet"]).abs() <= 1e-12)
+    return {
+        "rows": int(len(rows)), "matched": int(len(j)), "equal": int(equal.sum()),
+        "missing_both": int((j["DelRet"].isna() & j["DlyRet"].isna()).sum()),
+    }
+
+
+def write_integration_report(s: SmokeSettings, panel: Panel, purge: int, st: RunState,
+                             figures: dict[str, Path]) -> None:
+    """Brief 06 F: data, gate per fold, experts trained, wall clock. **No
+    out-of-sample performance number** (no IC, ICIR, NLL or NLL gain, pooled
+    or per fold), and aggregate statistics only (licence rule)."""
+    exp = s.experiment
+    L = s.label
+    labels = list(panel.date_labels or ())
+    build = panel.metadata.get("build", {})
+    rel = lambda p: f"{s.figures_dir.name}/{p.name}"  # noqa: E731
+    md: list[str] = []
+    w = md.append
+    w("# Smoke run 2026-09-26 on CRSP: integration check (brief 06 F)\n")
+    w(f"> **{L}.** The brief 04 C smoke run repeated with only the data source "
+      "changed, to confirm the pipeline runs end to end on CRSP. This report "
+      "holds only data statistics, the gate per fold, whether the experts "
+      "trained, and the wall clock. **No out-of-sample performance number is "
+      "reported** (no IC, ICIR, NLL or NLL gain, pooled or per fold): the "
+      "pre-registration is not written yet (WORK_QUEUE item 8, Q15). The harness "
+      "computed them; they stay in the registry under `Data/derived/`, unread.\n")
+    if st.stopped:
+        w(f"> **STOPPED.** {st.stopped}\n")
+
+    w("## 1. Run\n")
+    w(f"Settings of brief 04 C, unchanged: K = {exp.n_experts} (placeholder, Q18), "
+      f"objective `{exp.objective}` (Q20), base on, `correction_mode`, "
+      "`zero_init_head`, frozen gate; Hamilton gate on French daily Mkt-RF "
+      f"(`{exp.gate_series}`), starts `{exp.gate_start_scheme}`; "
+      f"{exp.n_folds} folds x {exp.test_dates_per_fold} test dates, purge {purge} "
+      f"(= horizon {exp.horizon}); seeds {list(exp.seeds)}; {exp.steps} expert steps "
+      "per fold; arms: Hamilton-gated and uniform-gated residual mixtures over one "
+      f"shared base. Data: `{Path(exp.panel_file).name}`. Every registry row "
+      f"carries `data_source` = `{panel.data_source}`, `post_delisting_return` = "
+      f"`{panel.metadata.get('post_delisting_return')}` and `hidden_init`.\n")
+    w(_table(["fold", "fitted (train) dates", "purge", "test dates"],
+             [[str(sp["fold"]), f"{sp['train'][0]} to {sp['train'][1]} "
+               f"({sp['n_train']})", f"{sp['purge']}",
+               f"{sp['test'][0]} to {sp['test'][1]} ({sp['n_test']})"]
+              for sp in st.fold_spans], L))
+
+    # ---------------------------------------------------------------- data
+    w("## 2. Data\n")
+    mpd, npd = build.get("members_per_date", {}), build.get("panel_names_per_date", {})
+    band = build.get("member_count_band", ["?", "?"])
+    w(f"- Release `{build.get('release')}`; universe: S&P 500 membership spells of "
+      f"INDNO {build.get('membership_indno')} (bounds inclusive); market series "
+      f"INDNO {build.get('market_indno')}, `log(1 + DlyTotRet)`.")
+    w(f"- Rows: {len(panel):,}; dates: {len(torch.unique(panel.date))} "
+      f"({labels[int(panel.date.min())]} to {labels[int(panel.date.max())]}); "
+      f"PERMNOs with rows: {len(torch.unique(panel.entity))} of "
+      f"{build.get('ever_members')} ever-members.")
+    w(f"- Index members per date: min {mpd.get('min', 0):.0f}, median "
+      f"{mpd.get('median', 0):.0f}, max {mpd.get('max', 0):.0f} (band {band[0]} to "
+      f"{band[1]}: inside). Panel rows per date: min {npd.get('min', 0):.0f}, median "
+      f"{npd.get('median', 0):.0f}, max {npd.get('max', 0):.0f}. Dual-class companies "
+      f"(one PERMCO, two member PERMNOs) are kept as two PERMNOs: "
+      f"{build.get('dual_class_companies')} such companies, "
+      f"{build.get('dual_class_companies_per_date', {}).get('min', 0):.0f} to "
+      f"{build.get('dual_class_companies_per_date', {}).get('max', 0):.0f} on any date.")
+    if s.coverage_path is not None and s.coverage_path.exists():
+        cov = pd.read_csv(s.coverage_path)
+        w("\nCoverage by year (members during the year, and those with at least one "
+          "panel row; a member without rows lacks the feature warm-up or usable "
+          "returns in that year):\n")
+        w(_table(["year", "members", "with rows", "without rows", "coverage"],
+                 [[str(r.year), str(r.members), str(r.with_rows), str(r.without_rows),
+                   f"{r.coverage:.3f}"] for r in cov.itertuples()], L))
+    dl = _delisting_check()
+    by_action = ", ".join(f"{k} {v}" for k, v in build.get("member_delistings_by_action",
+                                                           {}).items())
+    codes = ", ".join(f"{k}: {v}" for k, v in build.get("without_return_codes", {}).items())
+    w(f"- Delistings inside the window: {build.get('member_delistings')} of stocks that "
+      f"were S&P 500 members on their last trading day ({by_action}).")
+    w(f"- Delisting finding (A.4.2): CIZ `DlyRet` already includes the delisting return "
+      "(`MetaSIZtoCIZ` maps legacy `DLRET` to both `DelRet` and `DlyRet`). In the "
+      f"extract, all {dl['matched']} of {dl['rows']} delisting-return rows match their "
+      f"delisting record; `DlyRet` equals `DelRet` on {dl['equal']} and both are missing "
+      f"on {dl['missing_both']}. So nothing is compounded in (rule a). "
+      f"{build.get('member_delistings_without_return')} member delistings have no "
+      f"delisting return ({codes}; DelActionType/DelReasonType): their targets stay "
+      "missing, nothing is imputed. Forward windows past a delisting are completed "
+      f"with the post-delisting fill (`{build.get('post_delisting_return')}`, not a "
+      f"decision); it touched {build.get('post_delisting_fill_rows')} panel rows.\n")
+
+    # ---------------------------------------------------------------- gate
+    w("## 3. The gate, per fold\n")
+    w("Canonical order: regime 0 has the lower variance. Fitted on each fold's "
+      "training block only, frozen, applied causally (filtered, never smoothed). "
+      "Convergence and the multi-start record (brief 04 B.3):\n")
+    rows = []
+    for g in st.gate:
+        if "error" in g:
+            rows.append([str(g["fold"]), "FAILED: " + g["error"]] + [""] * 7)
+            continue
+        m = g["metrics"]
+        bms = m.get("gate_best_minus_second")
+        rows.append([
+            str(g["fold"]), str(int(m["gate_n_starts"])), str(int(m["gate_n_converged"])),
+            str(int(m["gate_n_failed"])), str(int(m["gate_n_nonconverged"])),
+            str(int(m["gate_n_distinct_optima"])),
+            "n/a (one optimum)" if bms is None else f"{bms:.3f}",
+            f"{g['stationary'][0]:.3f} / {g['stationary'][1]:.3f}",
+            f"{g['durations'][0]:.1f} / {g['durations'][1]:.1f}",
+        ])
+    w(_table(["fold", "starts", "converged", "failed (raised)", "non-converged",
+              "distinct optima", "best minus second (nats)",
+              "stationary prob (0 / 1)", "expected duration, days (0 / 1)"], rows, L))
+    w(f"Stop thresholds (brief 06 F): no start converged; a stationary probability "
+      f"below {s.min_stationary_prob}; an expected duration below "
+      f"{s.min_expected_duration} days.\n")
+    if st.gate_probs:
+        w("Filtered probability of the high-variance regime against VIX: Spearman rank "
+          "correlation on the fitted and on the test dates (a sanity check of the "
+          "regimes, not a performance number):\n")
+        rows = []
+        for fold, frame in st.gate_probs.items():
+            corr = frame.attrs.get("vix_spearman", {})
+            rows.append([str(fold), _f(corr.get("fitted"), 3), _f(corr.get("test"), 3)])
+        w(_table(["fold", "rho(P_high, VIX) fitted", "rho(P_high, VIX) test"], rows, L))
+        for fold in st.gate_probs:
+            if f"gate_fold{fold}" in figures:
+                w(f"![Fold {fold} gate against VIX. {L}]"
+                  f"({rel(figures[f'gate_fold{fold}'])})\n")
+
+    # ------------------------------------------------------------- experts
+    w("## 4. Experts\n")
+    rows = []
+    for (name, seed), r in st.runs.items():
+        live = sorted({f.live_param_count for f in r.folds if f.live_param_count is not None})
+        rows.append([name, str(seed), f"{len(r.folds)} / {exp.n_folds}",
+                     str(exp.steps), ", ".join(str(v) for v in live)])
+    w(_table(["arm", "seed", "folds trained", "steps per fold", "live parameters"],
+             rows, L))
+    w("Live parameters: the gradient audit's count at the first backward pass "
+      "(encoder, gate and prior frozen; `log_sigma` held by the sigma freeze at that "
+      "instant), i.e. the expert networks.\n")
+    if st.flags:
+        w("\n".join(f"- **FLAG:** {x}" for x in st.flags) + "\n")
+    else:
+        w("Automatic checks passed: every arm of a (seed, fold) used the same fitted "
+          "base, and the harness's gate reproduced the pre-flight gate exactly "
+          "(log-likelihood and the whole filtered-probability table).\n")
+    for (name, seed), msgs in st.warnings.items():
+        if msgs:
+            w(f"Warnings raised during {name}, seed {seed}: "
+              + "; ".join(f"`{m.split(':')[0]}`" for m in msgs) + ".\n")
+
+    # -------------------------------------------------------------- timing
+    w("## 5. Wall clock per fold (seconds)\n")
+    probe = "n/a" if st.probe_base_s is None else f"{st.probe_base_s:.1f} s"
+    w("Gate fit, base fit and expert training, as the harness times them. A base fit "
+      "near zero is a `BaseCache` hit; each (seed, fold)'s real base cost is its one "
+      f"cache miss, in the second table (the sigma probe fitted fold 0 of seed "
+      f"{exp.seeds[0]} before the arms: {probe}).\n")
+    rows = []
+    for (name, seed), r in st.runs.items():
+        for f in r.folds:
+            t = dict(f.timing)
+            rows.append([name, str(seed), str(f.fold), f"{t['gate_fit_s']:.1f}",
+                         f"{t['base_fit_s']:.1f}", f"{t['expert_train_s']:.1f}",
+                         f"{sum(t.values()):.1f}"])
+    w(_table(["arm", "seed", "fold", "gate fit", "base fit", "expert training", "total"],
+             rows, L))
+    miss: dict[tuple[int, int], float] = {}
+    for (_, seed), r in st.runs.items():
+        for f in r.folds:
+            miss[(seed, f.fold)] = max(miss.get((seed, f.fold), 0.0),
+                                       dict(f.timing)["base_fit_s"])
+    if st.probe_base_s is not None and (exp.seeds[0], 0) in miss:
+        miss[(exp.seeds[0], 0)] = st.probe_base_s
+    if miss:
+        w(_table(["seed", "fold", "base fit (cache miss), s"],
+                 [[str(sd), str(fd), f"{v:.1f}"] for (sd, fd), v in sorted(miss.items())],
+                 L))
+    w(f"Total wall clock of the script: {time.perf_counter() - st.started:.0f} s. "
+      f"Environment: {st.env.get('summary', '')}.\n")
+    w("---\n")
+    w(f"*{L}.* Generated by `nec_baseline/scripts/smoke_run_2026_09.py --crsp` at "
+      f"commit `{st.env.get('commit', '?')}`.\n")
+    s.report_path.write_text("\n".join(md))
+
+
 # =========================================================================== #
 #  Main
 # =========================================================================== #
@@ -942,10 +1180,13 @@ def main(s: SmokeSettings = SMOKE) -> int:
                 corrections_on_test(t, panel.subset_dates(f.test_dates))
                 for t, f in zip(trainers, folds, strict=True)
             ]
-    if per_arm:
+    if per_arm and s.report_performance:  # out-of-sample model output
         figures["corrections"] = plot_corrections(s, per_arm)
 
-    write_report(s, panel, folds, purge, st, figures)
+    if s.report_performance:
+        write_report(s, panel, folds, purge, st, figures)
+    else:
+        write_integration_report(s, panel, purge, st, figures)
     raw = {
         "label": s.label, "source": s.source, "stopped": st.stopped,
         "settings": json.loads(json.dumps(dataclasses.asdict(exp))),
@@ -965,4 +1206,4 @@ def main(s: SmokeSettings = SMOKE) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(SMOKE_CRSP if "--crsp" in sys.argv[1:] else SMOKE))

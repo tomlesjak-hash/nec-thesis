@@ -97,10 +97,12 @@ import pandas as pd
 from .data import Panel
 from .features import (
     StageBSpec,
+    _valid_rows,
     assemble_panel,
     feature_warmup,
     market_frame,
     post_fill_used,
+    stock_features,
 )
 from .universe import SpellUniverse, filter_point_in_time
 
@@ -117,8 +119,11 @@ __all__ = [
     "read_delists",
     "read_security_info",
     "membership_universe",
+    "flag_meanings",
     "extract_crsp",
+    "extract_return_duration_flags",
     "load_extract",
+    "missing_return_split",
     "crsp_daily_frames",
     "build_crsp_panel",
 ]
@@ -170,6 +175,16 @@ DELIST_COLUMNS: dict[str, str] = {
     "DelRetMissType": "string",
     "DelDlyDt": "date32",
 }
+#: From the full daily security file, read only for the missing-return
+#: diagnostic: ``DlyRetDurFlg`` (flag type ``RD``, how many trading days a
+#: return spans) exists in ``StkDlySecurityData`` alone, not in the primary file.
+RETURN_DURATION_COLUMNS: dict[str, str] = {
+    "PERMNO": "int64",
+    "DlyCalDt": "date32",
+    "DlyRetMissFlg": "string",
+    "DlyRetDurFlg": "string",
+}
+SECURITY_FILE = "StkDlySecurityData"
 SECURITY_INFO_COLUMNS: dict[str, str] = {
     "PERMNO": "int64",
     "SecInfoStartDt": "date32",
@@ -418,6 +433,15 @@ def read_security_info(spec: CRSPSpec) -> pd.DataFrame:
     return _read_table(spec, "StkSecurityInfoHist", SECURITY_INFO_COLUMNS)
 
 
+def flag_meanings(spec: CRSPSpec, flag_type: str) -> dict[str, str]:
+    """Code -> description of one flag type (e.g. ``RM``, ``RD``), from ``MetaFlagInfo``."""
+    df = _read_table(spec, "MetaFlagInfo", {
+        "FlagType": "string", "FlagValue": "string", "FlagDesc": "string",
+    })
+    rows = df[df["FlagType"] == flag_type]
+    return dict(zip(rows["FlagValue"], rows["FlagDesc"], strict=True))
+
+
 def membership_universe(spells: pd.DataFrame) -> SpellUniverse:
     """The spells as a :class:`SpellUniverse` keyed by PERMNO strings."""
     return SpellUniverse(
@@ -585,9 +609,38 @@ def extract_crsp(spec: CRSPSpec, *, verbose: bool = True) -> Path:
     return root
 
 
+def extract_return_duration_flags(spec: CRSPSpec, *, verbose: bool = True) -> Path:
+    """Add ``DlyRetDurFlg`` for the extract's PERMNOs and dates, for diagnostics only.
+
+    The flag says how many trading days a return spans (``D1``..``DU``: one
+    trading day; ``P1``..``P9``: 2 to 10 trading days; ``MR``: missing). It is
+    only in the 42 GB ``StkDlySecurityData``, so that file is streamed once,
+    resumably, keeping four columns (``RETURN_DURATION_COLUMNS``) of the same
+    PERMNOs and date bounds as the main extract, into ``retdur/``. The panel
+    never reads it; the missing-return report does when it is present.
+    """
+    spec.validate()
+    root = spec.extract_dir
+    info_path = root / "extract.json"
+    if not info_path.exists():
+        raise FileNotFoundError(f"no CRSP extract at {root}: run extract_crsp first")
+    info = json.loads(info_path.read_text())
+    spells = pd.read_parquet(root / "membership.parquet")
+    members = sorted(int(p) for p in spells["PERMNO"].unique())  # the main extract's PERMNOs
+    lo, hi = pd.Timestamp(info["extract_lo"]), pd.Timestamp(info["extract_hi"])
+    _stream_extract(spec, SECURITY_FILE, root / "retdur", RETURN_DURATION_COLUMNS,
+                    members, lo, hi, verbose)
+    return root / "retdur"
+
+
 @dataclass
 class CRSPExtract:
-    """The loaded extract: everything the panel build reads."""
+    """The loaded extract: everything the panel build reads.
+
+    ``duration_flags`` (``DlyRetDurFlg`` by PERMNO and date) is present only
+    after :func:`extract_return_duration_flags`; only the missing-return
+    diagnostic uses it.
+    """
 
     info: dict[str, Any]
     stock: pd.DataFrame
@@ -596,6 +649,7 @@ class CRSPExtract:
     spells: pd.DataFrame
     delists: pd.DataFrame
     security_info: pd.DataFrame
+    duration_flags: pd.DataFrame | None = None
 
 
 def _read_parts(folder: Path, column_types: dict[str, str]) -> pd.DataFrame:
@@ -618,6 +672,12 @@ def load_extract(spec: CRSPSpec) -> CRSPExtract:
         raise RuntimeError(f"the extract at {root} is incomplete: rerun scripts/extract_crsp.py")
     market = pd.read_parquet(root / "market.parquet")["DlyTotRet"]
     market.index = pd.DatetimeIndex(market.index).astype("datetime64[ns]")
+    retdur = root / "retdur" / "manifest.json"
+    durations = (
+        _read_parts(root / "retdur", RETURN_DURATION_COLUMNS)
+        if retdur.exists() and json.loads(retdur.read_text()).get("complete")
+        else None
+    )
     return CRSPExtract(
         info=info,
         stock=_read_parts(root / "stock", STOCK_COLUMNS),
@@ -626,6 +686,7 @@ def load_extract(spec: CRSPSpec) -> CRSPExtract:
         spells=pd.read_parquet(root / "membership.parquet"),
         delists=pd.read_parquet(root / "delists.parquet"),
         security_info=pd.read_parquet(root / "security_info.parquet"),
+        duration_flags=durations,
     )
 
 
@@ -815,8 +876,9 @@ def build_crsp_panel(
         "post_delisting_return": spec.post_delisting_return,
         "stage_b": dataclasses.asdict(stage_b),
     }
+    mkt = market_frame(mkt_ret, stage_b)
     candidates = assemble_panel(
-        frames, market_frame(mkt_ret, stage_b), stage_b,
+        frames, mkt, stage_b,
         data_source=spec.data_source, metadata=metadata, window=(spec.start, spec.end),
     )
     panel = filter_point_in_time(candidates, universe)
@@ -835,6 +897,13 @@ def build_crsp_panel(
     report = _build_report(
         spec, extract, universe, window, member_counts, panel, counts, fill_rows, ever
     )
+    split = missing_return_split(extract, frames, mkt, stage_b, window)
+    if split["totals"]["panel_rows"] != len(panel):
+        raise AssertionError(
+            f"missing-return split counted {split['totals']['panel_rows']} panel rows, "
+            f"the panel has {len(panel)}: the diagnostic does not see the panel's rows"
+        )
+    report["missing_return_split"] = split
     panel.metadata["build"] = report
     coverage = _coverage_by_year(universe, window, panel)
     if verbose:
@@ -843,6 +912,158 @@ def build_crsp_panel(
               f"{report['members_per_date']}; post-delisting fill touched "
               f"{fill_rows} rows")
     return CRSPBuild(panel=panel, report=report, coverage=coverage)
+
+
+def _window_any(mask: np.ndarray, back: int, fwd: int) -> tuple[np.ndarray, np.ndarray]:
+    """Per position t: any(mask[t-back+1 .. t]) and any(mask[t+1 .. t+fwd]),
+    both truncated at the ends of the series."""
+    n = len(mask)
+    c = np.concatenate([[0], np.cumsum(mask.astype(np.int64))])
+    t = np.arange(n)
+    backward = (c[t + 1] - c[np.maximum(t - back + 1, 0)]) > 0
+    forward = (c[np.minimum(t + fwd, n - 1) + 1] - c[t + 1]) > 0
+    return backward, forward
+
+
+def missing_return_split(
+    extract: CRSPExtract,
+    frames: dict[str, pd.DataFrame],
+    mkt: pd.DataFrame,
+    stage_b: StageBSpec,
+    window: pd.DatetimeIndex,
+) -> dict[str, Any]:
+    """Which rows rule A.4.1 drops, and whether the missing return is past or future.
+
+    A diagnostic only: it changes nothing in the panel. A candidate row is a
+    member on a tradable day inside the window. It is **dropped by a missing
+    return** if it is invalid as built but valid once every missing return of
+    its stock is set to 0 (so rows lost to the warm-up, a missing volume or a
+    thin date are counted apart, as ``other_invalid``). Those rows split by
+    where the missing return sits relative to date t:
+
+    - (a) only in the backward feature window, the ``feature_warmup`` returns
+      through t (past information);
+    - (b) only in the forward target window ``(t, t + horizon]`` (a future
+      event: the row is lost because of what happens after t);
+    - (c) in both;
+    - (d) the forward window holds a delisting row whose own return is
+      missing, counted on its own line whatever the backward window holds.
+
+    Post-delisting fill days are not missing. For the missing returns behind
+    (b), the report gives their ``DlyRetMissFlg`` codes (``"no CRSP row"``
+    for a calendar day without a row) and, when the duration flags were
+    extracted, the ``DlyRetDurFlg`` of the first non-missing return after
+    each gap (a run of consecutive missing days): ``P1``..``P9`` there mean
+    CRSP's next return already spans the missing days. Aggregate counts only.
+    """
+    back_n, fwd_n = feature_warmup(stage_b), stage_b.horizon
+    start, end = window[0], window[-1]
+    stock = extract.stock
+    delisting_day = (
+        stock.loc[stock["DlyDelFlg"] == DELISTING_ROW].set_index("PERMNO")["DlyCalDt"]
+    )
+    flags = stock.set_index(["PERMNO", "DlyCalDt"])["DlyRetMissFlg"]
+    durations = None
+    if extract.duration_flags is not None:
+        durations = extract.duration_flags.set_index(["PERMNO", "DlyCalDt"])["DlyRetDurFlg"]
+    spells = {int(k): g for k, g in extract.spells.groupby("PERMNO")}
+    keys = ("a_backward_only", "b_forward_only", "c_both", "d_missing_delisting_return")
+    totals = dict.fromkeys((*keys, "other_invalid", "unexplained", "panel_rows"), 0)
+    by_year: dict[int, dict[str, int]] = {}
+    behind_b: list[tuple[int, pd.Timestamp]] = []
+    next_after_gap: list[tuple[int, pd.Timestamp] | None] = []
+
+    for label, daily in frames.items():
+        permno = int(label)
+        idx = pd.DatetimeIndex(daily.index)
+        fill = daily["fill_ret"].notna().to_numpy()
+        miss = daily["ret"].isna().to_numpy() & ~fill
+        on_delisting = idx == delisting_day.get(permno, pd.NaT)
+        miss_ord, miss_del = miss & ~on_delisting, miss & on_delisting
+        back_any, _ = _window_any(miss, back_n, fwd_n)
+        _, fwd_ord = _window_any(miss_ord, back_n, fwd_n)
+        _, fwd_del = _window_any(miss_del, back_n, fwd_n)
+        tradable = daily["tradable"].to_numpy(dtype=bool)
+        valid = _valid_rows(stock_features(daily, mkt, stage_b), stage_b,
+                            daily["tradable"]).to_numpy()
+        if miss.any():
+            filled = daily.copy()
+            filled.loc[miss, "ret"] = 0.0  # counterfactual only: never enters the panel
+            valid_cf = _valid_rows(stock_features(filled, mkt, stage_b), stage_b,
+                                   filled["tradable"]).to_numpy()
+        else:
+            valid_cf = valid
+        sp = spells.get(permno)
+        member = np.zeros(len(idx), dtype=bool)
+        if sp is not None:
+            for s0, e0 in zip(sp["MbrStartDt"], sp["MbrEndDt"], strict=True):
+                member |= (idx >= s0) & (idx <= e0)
+        candidate = member & tradable & (idx >= start) & (idx <= end)
+        totals["panel_rows"] += int((candidate & valid).sum())
+        dropped = candidate & ~valid
+        totals["other_invalid"] += int((dropped & ~valid_cf).sum())
+        by_missing = dropped & valid_cf
+        cats = {
+            "d_missing_delisting_return": by_missing & fwd_del,
+            "a_backward_only": by_missing & ~fwd_del & back_any & ~fwd_ord,
+            "b_forward_only": by_missing & ~fwd_del & fwd_ord & ~back_any,
+            "c_both": by_missing & ~fwd_del & back_any & fwd_ord,
+        }
+        totals["unexplained"] += int((by_missing & ~fwd_del & ~back_any & ~fwd_ord).sum())
+        years = idx.year.to_numpy()
+        for key, m in cats.items():
+            totals[key] += int(m.sum())
+            for y in np.unique(years[m]):
+                row = by_year.setdefault(int(y), dict.fromkeys(keys, 0))
+                row[key] += int((m & (years == y)).sum())
+
+        # the missing returns behind (b), and the gaps they sit in
+        behind = np.zeros(len(idx), dtype=bool)
+        for t in np.flatnonzero(cats["b_forward_only"]):
+            behind[t + 1 : t + 1 + fwd_n] |= miss_ord[t + 1 : t + 1 + fwd_n]
+        behind_b += [(permno, idx[i]) for i in np.flatnonzero(behind)]
+        i = 0
+        while i < len(idx):
+            if miss_ord[i]:
+                j = i
+                while j + 1 < len(idx) and miss_ord[j + 1]:
+                    j += 1
+                if behind[i : j + 1].any():
+                    nxt = j + 1
+                    ok = nxt < len(idx) and not miss[nxt] and not fill[nxt]
+                    next_after_gap.append((permno, idx[nxt]) if ok else None)
+                i = j + 1
+            else:
+                i += 1
+
+    codes: dict[str, int] = {}
+    for missing_day in behind_b:
+        code = str(flags.get(missing_day, "no CRSP row"))
+        codes[code] = codes.get(code, 0) + 1
+    duration_counts: dict[str, int] | None = None
+    if durations is not None:
+        duration_counts = {}
+        for next_day in next_after_gap:
+            flag = (
+                "no later return" if next_day is None
+                else str(durations.get(next_day, "no row"))
+            )
+            duration_counts[flag] = duration_counts.get(flag, 0) + 1
+    return {
+        "backward_window_returns": back_n,
+        "forward_window_returns": fwd_n,
+        "totals": totals,
+        "b_share_of_panel_rows": (
+            totals["b_forward_only"] / totals["panel_rows"] if totals["panel_rows"] else 0.0
+        ),
+        "by_year": {str(y): by_year[y] for y in sorted(by_year)},
+        "behind_b_missing_returns": len(behind_b),
+        "behind_b_gaps": len(next_after_gap),
+        "behind_b_missing_codes": dict(sorted(codes.items())),
+        "next_return_duration_flags": (
+            None if duration_counts is None else dict(sorted(duration_counts.items()))
+        ),
+    }
 
 
 def _build_report(

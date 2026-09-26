@@ -35,6 +35,8 @@ from nec_moe import (  # noqa: E402
     build_crsp_panel,
     data_config_from_panel,
     extract_crsp,
+    extract_return_duration_flags,
+    flag_meanings,
     load_extract,
     membership_universe,
     nec_arm,
@@ -360,6 +362,75 @@ def test_a_delisting_without_a_return_stays_missing(fixture, builds):
     assert rep["member_delistings"] == 2
     assert rep["member_delistings_without_return"] == 1
     assert rep["without_return_codes"] == {"MER/ABC": 1}
+
+
+# --------------------------------------------------------------------------- #
+# Diagnostic: rows dropped by a missing return, past versus future
+# --------------------------------------------------------------------------- #
+
+GAP1 = pd.Timestamp("2020-04-01")  # 10002: two missing returns three trading days apart
+GAP2 = fx.CAL[fx.CAL.get_loc(GAP1) + 3]
+
+
+@pytest.fixture(scope="module")
+def gap_build(tmp_path_factory) -> crsp.CRSPBuild:
+    f = fx.write_fixture(tmp_path_factory.mktemp("gaps") / "Data",
+                         extra_missing={10002: (GAP1, GAP2)})
+    spec = _spec(f.root)
+    extract_crsp(spec, verbose=False)
+    extract_return_duration_flags(spec, verbose=False)
+    return build_crsp_panel(spec, STAGE_B, extract=load_extract(spec), verbose=False)
+
+
+def test_missing_return_split_separates_past_and_future_windows(gap_build):
+    """Exact counts. 10003 misses one return: the 5 rows before it lose their
+    target (b), every row from it to the window's end loses its features (a).
+    10002 misses two, 3 days apart: 5 rows (b) before the first, 3 rows (c)
+    between them (the first in the past window, the second in the future
+    one), (a) from the second on. 10006's missing delisting return costs its
+    last 5 member rows (d), on their own line."""
+    split = gap_build.report["missing_return_split"]
+    end = pd.Timestamp(fx.END)
+
+    def days(a: pd.Timestamp, b: pd.Timestamp) -> int:
+        return int(((fx.CAL >= a) & (fx.CAL <= b)).sum())
+
+    expected = {
+        "a_backward_only": days(fx.MISSING_DAY, end) + days(GAP2, end),
+        "b_forward_only": 2 * H,
+        "c_both": fx.CAL.get_loc(GAP2) - fx.CAL.get_loc(GAP1),
+        "d_missing_delisting_return": H,
+    }
+    totals = split["totals"]
+    assert {k: totals[k] for k in expected} == expected
+    assert totals["other_invalid"] == 0 and totals["unexplained"] == 0
+    assert totals["panel_rows"] == len(gap_build.panel)
+    assert split["by_year"] == {"2020": expected}
+    assert split["b_share_of_panel_rows"] == pytest.approx(2 * H / len(gap_build.panel))
+    assert (split["backward_window_returns"], split["forward_window_returns"]) == (120, H)
+    # behind (b): 10003's missing day and both of 10002's (the second sits in
+    # the forward window of the last (b) rows), three one-day gaps, and the
+    # first return after each spans its gap
+    assert split["behind_b_missing_returns"] == 3 and split["behind_b_gaps"] == 3
+    assert split["behind_b_missing_codes"] == {"NT": 3}
+    assert split["next_return_duration_flags"] == {"P1": 3}
+
+
+def test_flag_meanings_come_from_meta_flag_info(fixture):
+    rd = flag_meanings(_spec(fixture.root), "RD")
+    assert rd == {"D1": "fixture: one day", "P1": "fixture: two trading days",
+                  "MR": "fixture: missing"}
+    assert flag_meanings(_spec(fixture.root), "RM")["NT"] == "fixture: not tracked"
+
+
+def test_missing_return_split_changes_nothing_in_the_panel(fixture, builds):
+    """The diagnostic reads the panel's rows and never alters them: the
+    build without extra gaps still has only 10003's and 10006's losses."""
+    split = builds["cash"].report["missing_return_split"]
+    assert split["totals"]["b_forward_only"] == H
+    assert split["totals"]["d_missing_delisting_return"] == H
+    assert split["totals"]["c_both"] == 0
+    assert split["next_return_duration_flags"] is None  # duration flags not extracted
 
 
 # --------------------------------------------------------------------------- #

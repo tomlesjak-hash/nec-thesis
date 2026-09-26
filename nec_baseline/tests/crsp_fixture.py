@@ -73,6 +73,24 @@ HEADERS = {
         "DelPaymentType", "Ticker", "TradingSymbol", "PERMCO", "SICCD", "NAICS", "ICBIndustry",
         "UESIndustry", "NASDCompno", "NASDIssuno", "IssuerNm"
     )),
+    "StkDlySecurityData": "|".join((
+        "PERMNO", "YYYYMMDD", "DlyCalDt", "DlyDelFlg", "DlyPrc", "DlyPrcFlg", "DlyCap",
+        "DlyCapFlg", "DlyPrevPrc", "DlyPrevPrcFlg", "DlyPrevDt", "DlyPrevCap", "DlyPrevCapFlg",
+        "DlyRet", "DlyRetx", "DlyRetI", "DlyRetMissFlg", "DlyRetDurFlg", "DlyOrdDivAmt",
+        "DlyNonOrdDivAmt", "DlyFacPrc", "DlyDistRetFlg", "DlyVol", "DlyClose", "DlyLow",
+        "DlyHigh", "DlyBid", "DlyAsk", "DlyOpen", "DlyNumTrd", "DlyMMCnt", "DlyPrcVol"
+    )),
+    "MetaFlagInfo": "|".join((
+        "FlagType", "FlagValue", "FlagTypeDesc", "FlagDesc", "FlagDef", "FlagCoverageFlg",
+        "FlagKey"
+    )),
+}
+
+#: invented flag descriptions (the codes are CRSP's, the texts are not)
+FLAG_TEXT = {
+    ("RM", "NA"): "fixture: not missing", ("RM", "NT"): "fixture: not tracked",
+    ("RM", "DM"): "fixture: delisting amount missing", ("RD", "D1"): "fixture: one day",
+    ("RD", "P1"): "fixture: two trading days", ("RD", "MR"): "fixture: missing",
 }
 
 
@@ -95,8 +113,21 @@ def _next_day(ts: pd.Timestamp) -> pd.Timestamp:
     return CAL[CAL.get_loc(ts) + 1]
 
 
-def write_fixture(root: Path, *, as_zip: bool = False, extracted: bool = True) -> Fixture:
-    """Write the fixture's ``.dat`` files under ``root`` (and/or a zip of them)."""
+def write_fixture(
+    root: Path,
+    *,
+    as_zip: bool = False,
+    extracted: bool = True,
+    extra_missing: dict[int, tuple[pd.Timestamp, ...]] | None = None,
+) -> Fixture:
+    """Write the fixture's ``.dat`` files under ``root`` (and/or a zip of them).
+
+    ``extra_missing`` adds missing returns (code ``NT``) on the given days of
+    the given PERMNOs, on top of the cast in the module docstring.
+    ``StkDlySecurityData`` carries invented duration flags: ``MR`` on a
+    missing day, ``P<k>`` on the first return after ``k`` missing days (it
+    spans them), ``D1`` otherwise.
+    """
     g = np.random.default_rng(20260926)
     folder = root / "crspdata" / f"{RELEASE}_ascii"
     files: dict[str, list[str]] = {name: [header] for name, header in HEADERS.items()}
@@ -124,6 +155,8 @@ def write_fixture(root: Path, *, as_zip: bool = False, extracted: bool = True) -
         price = 50.0 * np.exp(np.cumsum(np.log1p(r)))
         if permno == 10003:
             r[MISSING_DAY] = np.nan
+        for day in (extra_missing or {}).get(permno, ()):
+            r[day] = np.nan
         if permno == 10004:
             split = days >= SPLIT_DAY
             price[split] /= 2.0
@@ -135,9 +168,20 @@ def write_fixture(root: Path, *, as_zip: bool = False, extracted: bool = True) -
             r[delisting_day] = DELIST_RET if permno == 10005 else np.nan
             vol[delisting_day] = 0.0
         returns[permno] = r
+        gap = 0  # consecutive missing days just before `day`
         for day in days:
             is_del = day == delisting_day
             ret = r[day]
+            duration = "MR" if np.isnan(ret) else (f"P{gap}" if gap else "D1")
+            miss_flag = ("DM" if is_del else "NT") if np.isnan(ret) else "NA"
+            files["StkDlySecurityData"].append(_row(
+                HEADERS["StkDlySecurityData"], PERMNO=permno,
+                YYYYMMDD=day.strftime("%Y%m%d"), DlyCalDt=_d(day),
+                DlyDelFlg="Y" if is_del else "N",
+                DlyRet=None if np.isnan(ret) else f"{ret:.8f}",
+                DlyRetMissFlg=miss_flag, DlyRetDurFlg=duration, DlyVol=f"{vol[day]:.0f}",
+            ))
+            gap = gap + 1 if np.isnan(ret) else 0
             files["StkDlySecurityPrimaryData"].append(_row(
                 HEADERS["StkDlySecurityPrimaryData"], PERMNO=permno, DlyCalDt=_d(day),
                 DlyDelFlg="Y" if is_del else "N",
@@ -204,6 +248,13 @@ def write_fixture(root: Path, *, as_zip: bool = False, extracted: bool = True) -
                 SecInfoEndDt=_d(e), ShareClass="B" if permno == 10002 else "A",
                 Ticker=ticker, PERMCO=permco, IssuerNm="INVENTED CO",
             ))
+
+    for i, ((ftype, value), text) in enumerate(FLAG_TEXT.items()):
+        files["MetaFlagInfo"].append(_row(
+            HEADERS["MetaFlagInfo"], FlagType=ftype, FlagValue=value,
+            FlagTypeDesc=f"fixture flag type {ftype}", FlagDesc=text, FlagDef=text,
+            FlagCoverageFlg="Y", FlagKey=900000 + i,
+        ))
 
     texts = {name: "\n".join(lines) + "\n" for name, lines in files.items()}
     if extracted:

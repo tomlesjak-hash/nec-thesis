@@ -16,8 +16,14 @@ LICENCE: everything this writes is derived from CRSP and stays inside
 ``Data/``, which is gitignored. Never copy it elsewhere.
 
 Usage:  python3.14 scripts/extract_crsp.py [start] [end]
+        python3.14 scripts/extract_crsp.py --return-duration-flags
         (defaults 2015-01-01 .. 2024-12-31; run from nec_baseline/; needs the
         ``crsp`` extra, i.e. pyarrow)
+
+``--return-duration-flags`` adds ``DlyRetDurFlg`` to an existing extract, for
+the missing-return diagnostic only. That flag exists only in the 42 GB
+``StkDlySecurityData``, which is then streamed once (resumable) and filtered to
+four columns of the extract's PERMNOs and dates.
 """
 
 from __future__ import annotations
@@ -29,17 +35,19 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from nec_moe import CRSPSpec, extract_crsp  # noqa: E402
+from nec_moe import CRSPSpec, extract_crsp, extract_return_duration_flags  # noqa: E402
 
 
-def main(*window: str) -> None:
+def main(*args: str) -> None:
+    durations = "--return-duration-flags" in args
+    window = [a for a in args if not a.startswith("--")]
     spec = CRSPSpec()
     if window:
         spec = dataclasses.replace(spec, start=window[0], end=window[1])
     t0 = time.time()
-    root = extract_crsp(spec)
+    root = extract_return_duration_flags(spec) if durations else extract_crsp(spec)
     print(f"[extract] done in {time.time() - t0:.0f}s: {root}")
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:3])
+    main(*sys.argv[1:])

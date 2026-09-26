@@ -34,6 +34,11 @@ detail stays in the source documents; this file points to them.
 ## 2. Log (newest first)
 
 ### 2026-09-26 (brief 06 implemented)
+- **Question added.** Q23, which market series the Hamilton gate is fitted on (French Mkt-RF or a
+  CRSP index). Open; the gate keeps French Mkt-RF for now.
+- **Diagnostic (2026-09-27).** Rows dropped only because a missing return sits in the forward target
+  window: **15** of 1,264,598 (0.0012%), from 3 missing prices whose next CRSP return spans the gap
+  (P1); nothing changed (`Smoke_Run_2026-09-26_CRSP.md` section 6).
 - **Commits** (not pushed): step 0, the audit fixes (9c10945) and these documents (87216a2); A, the
   CRSP data layer (2552a32); B, free data retired (494c21e); C, the NLL split (f44f573); D, the
   `hidden_init` switch (3cef208); E, G-5 accepted (6dd3276); F, the CRSP integration run (d5c78d6);
@@ -112,13 +117,15 @@ detail stays in the source documents; this file points to them.
 
 ## 3. Open, in one place
 
-- **Advisor questions open:** Q1, Q2, Q4, Q5, Q6 (design half), Q8, Q9, Q10, Q12 to Q18, Q20, Q21, Q22.
+- **Advisor questions open:** Q1, Q2, Q4, Q5, Q6 (design half), Q8, Q9, Q10, Q12 to Q18, Q20, Q21, Q22, Q23.
 - **Audit findings still open:** B-2 (the base withholds its validation tail with early stopping
   off; interacts with Q16), and the majors B-1, E-3, O-1, O-3, S-2, S-3, M-5, G-2, G-3.
 - **Next in `WORK_QUEUE.md`:** documentation drift and `DECISIONS.md`, diagnostics (ICC, gate
   permutation test), the remaining gates, pre-registration.
 
 ## 4. Parked ideas
+
+- Switching the gate's input from French Mkt-RF to a CRSP index series (Q23).
 
 - Time decay of old data (Q16 d).
 - Keeping crash periods at full weight, regime-clock decay, and testing which periods matter (Q16 e).

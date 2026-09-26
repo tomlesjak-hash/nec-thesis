@@ -1360,6 +1360,41 @@ and with a monthly horizon it becomes about a month of unseen market data at eve
 
 **Ask the advisor:** (a) or (b), and is it worth a sentence in the methodology either way?
 
+---
+
+### Q23. Which market series should the Hamilton gate be fitted on?
+
+**Status:** open, raised 2026-09-26 from the CRSP integration run (brief 06 F). Nothing decided; the
+code keeps its current input until this is answered. Something to settle later, not now.
+
+**What the code does.** The gate is fitted on Kenneth French's daily market excess return (Mkt-RF),
+series key `market_excess_return` in `markov_gate.py`'s `SERIES_REGISTRY`, as brief 03 specified.
+Everything else in the pipeline now comes from CRSP: the features, the residual target and the
+S&P 500 universe use the CRSP value-weighted S&P 500 index (INDNO 1000500).
+
+**What French's series is.** It is not low-quality free data. French builds Mkt from CRSP: the
+value-weighted return of all US-incorporated stocks on NYSE, AMEX and Nasdaq, minus the one-month
+Treasury bill rate. The issues are provenance (an external file, published with a lag) and
+consistency (the whole market, while the rest of the pipeline uses the S&P 500).
+
+**Options.**
+- **(a) Keep French Mkt-RF.** Standard in the literature, and an excess return.
+- **(b) CRSP S&P 500 index total return (INDNO 1000500).** One market definition across the gate,
+  the features and the target. Raw return rather than excess, because the CRSP download has no
+  daily risk-free rate.
+- **(c) CRSP whole-market index (INDNO 1000200, NYSE/NYSE American/Nasdaq/Arca value-weighted).**
+  The closest CRSP copy of French's series, again without the risk-free rate.
+
+**Why the risk-free rate barely matters here.** At daily frequency the T-bill return is of the
+order of 0.005% a day, against a daily market standard deviation of about 1%, and the Hamilton gate
+separates regimes mainly by variance. Dropping it shifts every regime mean by the same tiny constant.
+
+**Cost of changing.** Small: the gate's input is a registry key, so (b) or (c) is one new entry.
+Whichever is not chosen can stay registered as a robustness check.
+
+**Ask the advisor:** (a), (b) or (c)? Is consistency with the pipeline's market definition worth
+departing from the literature's standard excess-return series?
+
 ## RESOLVED
 
 ### Q3. Data access, CRSP and Compustat through the university? [RESOLVED 2026-09-19]

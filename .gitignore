@@ -31,3 +31,7 @@ NEC_textbook/*.out
 Trexquant/cache/
 Trexquant/panel/
 MLFB/
+
+# Licensed CRSP / Compustat data: redistribution prohibited by the CRSP Data Media Agreement.
+# Never commit anything in this folder.
+Data/

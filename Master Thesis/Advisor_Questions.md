@@ -813,6 +813,10 @@ there is to report the degradation, not to chase it.
 ### Q16. How much data is needed, and how should it be split across regimes?
 **Status:** open, raised by Tom 2026-09-15. Bears directly on Q3, since it turns data access from a
 convenience into a requirement.
+**Updated 2026-09-25:** time-decay weighting worked out in detail under point 2, with reading and a
+new question (d). Not implemented; no code until this is decided.
+**Updated 2026-09-26:** ask (e) added, on keeping crash periods out of the decay and on testing which
+historical periods matter. Not implemented.
 
 **The tension, stated plainly.** The regimes where the gate should matter most are the rare ones. They
 are rare by construction, they must appear in training for an expert to specialise in them and in test
@@ -881,10 +885,74 @@ make, and every crisis is used for both purposes at different points in the eval
    than a hard cut-off, which is what a rolling window is, or equal weighting of all history, which is
    what an expanding window is, each observation is weighted by a decay factor so that older data
    counts but counts less, with the rate set by a stated half-life. Commercial risk models are built
-   this way. It is worth noting for this thesis in particular that **the half-life is a persistence
-   parameter**, playing the same role for the training sample that the switching penalty plays for the
-   jump model gate, so the three schemes are points on a continuum rather than separate choices: a
-   half-life of zero is the rolling window and an infinite one is the expanding window.
+   this way. The half-life plays a persistence role for the training sample loosely analogous to the
+   switching penalty in the jump model gate. An infinite half-life is exactly the expanding window. A
+   rolling window is **not** a half-life of zero, which would put all the weight on the last date; it is
+   a different shape, a hard cut-off, of which exponential decay is the smooth counterpart.
+
+   **Time decay, worked out in detail (added 2026-09-25). Nothing is implemented; this is a design
+   question, not a queued change.**
+
+   *The scheme Tom wants.* Retrain as new data arrives, as the walk-forward already does, but weight
+   each training date `t` by its age relative to the last training date `T`, with half-life `h`:
+
+       w_t = 2^(-(T - t) / h)
+
+   and train on the weighted average loss, `sum_{i,t} w_t * loss_{i,t} / sum_{i,t} w_t`. Weights are
+   per **date**, so every stock on the same date gets the same weight. Dividing by the sum keeps the
+   loss on the same scale for every `h`, so the learning rate and the correction penalty weight do not
+   silently change meaning. `h` infinite recovers the current expanding window exactly.
+
+   *The tension with the thesis, which is the reason this is a question rather than a feature.* Decay
+   rests on the view that **markets drift**, so old data describes a world that no longer exists; that
+   is López de Prado's stated rationale, citing Lo's adaptive markets hypothesis. The regime model rests
+   on the opposite view for part of the variation, that **regimes recur**, so 2008 remains informative
+   about the next crisis. The two are competing explanations of the same apparent non-stationarity.
+   The collision is concrete: with a two-year half-life, at a fold ending in 2020 the 2008 data carries
+   weight `2^-6`, about 1.6 per cent. The crisis regime is the one with the least data, and nearly all
+   of it is old, so calendar-time decay starves it hardest. This is the same argument as the one above
+   against rolling windows, in a softer form.
+
+   *It caps the effective sample, whatever the length of history.* The effective sample size of
+   weighted data is `n_eff = (sum w)^2 / sum w^2`. For exponential decay over a long history this is
+   `2h / ln 2`, about **2.9 half-lives**, independent of how much data exists. A two-year half-life on
+   monthly data gives roughly 69 effective months against 720 in sixty years, perhaps three or four
+   stress episodes. Since episodes, not dates, are what limit the number of regimes (see the
+   consequence for `K` below), decay feeds directly into Q18.
+
+   *Where it could apply, component by component.*
+   - **Base.** The most defensible place, and only as an option: the base captures the
+     regime-independent relationship, which is precisely what slow drift would affect. Note that this
+     cuts against the architectural argument above, which wants the base on the longest possible
+     sample. A decayed base against an undecayed base is itself a test of whether the gate absorbs
+     the adaptation.
+   - **Experts.** Optional and risky. A crisis expert learns mostly from old, rare episodes.
+   - **Gate.** No, by default. The regime model exists to learn from all past regimes. statsmodels also
+     offers no weighted Markov switching likelihood, so decay here would mean writing a custom
+     estimator.
+
+   *If adopted.* `h` becomes a hyperparameter, set per component, selected on the training block only
+   and logged as a selection event like every other. `n_eff` should be reported in every run. And an
+   `h`-infinite arm must be kept regardless, because Gu, Kelly and Xiu, the benchmark, use an expanding
+   window refitted once a year **with no decay**; dropping that arm would break comparability with them.
+
+   *Reading, about an hour in total.*
+   - López de Prado, M. (2018), *Advances in Financial Machine Learning*, Wiley, **section 4.7 "Time
+     Decay"**, with 4.4 and 4.5 on sample uniqueness for context (in the Books folder). Checked against
+     the text: his scheme is **piecewise linear, not exponential**, with a parameter `c` running from no
+     decay (`c = 1`) to erasing the oldest data (`c < 0`), and it decays over **cumulative uniqueness**
+     rather than calendar time, because "a chronological decay would reduce weights too fast in the
+     presence of redundant observations", meaning overlapping labels. The exponential version is left
+     as his exercise 4.4.
+   - Lo, A. W. (2017), *Adaptive Markets: Financial Evolution at the Speed of Thought*, Princeton
+     University Press. The argument that market relationships evolve, which is the case for decay.
+     Skim the framing chapters only.
+   - J.P. Morgan/Reuters (1996), *RiskMetrics Technical Document*, 4th edition. The canonical
+     exponentially weighted estimator in finance, a daily decay factor of 0.94 for volatility. Used
+     for risk estimation rather than model training, but the same mechanism and the source of the
+     "industry practice" claim above.
+   - Gu, S., Kelly, B. and Xiu, D. (2020), *Review of Financial Studies* 33(5), the sample-splitting
+     section, for the expanding, annually refitted, undecayed protocol of the benchmark.
 
 3. **Crises differ from one another, and no split fixes that.** The honest response is to test it
    rather than assume it. A **leave-one-episode-out** analysis, training with 2008 excluded and testing
@@ -906,6 +974,40 @@ keeping the number of regimes small, independent of the testability argument in 
     compared against.
 (c) Is the leave-one-episode-out analysis worth the additional runs, and should it be a headline result
     or a robustness check?
+(d) Time decay: should older data be down-weighted at all, given that the thesis argues regimes recur?
+    If yes, on which components (base only, base and experts, never the gate), and is it acceptable
+    that it departs from the undecayed expanding protocol of Gu, Kelly and Xiu, provided an undecayed
+    arm is kept?
+(e) Crash periods and decay. Tom's idea (2026-09-26): old data from crashes is exactly what the model
+    needs to keep, so decay should not wash it out. Three versions, from simplest to most ambitious:
+    - **Exempt fixed windows** (for example 2008 to 2009 and March 2020) from decay, weight 1
+      throughout. Legitimate only if each window is labelled using data before that fold's training
+      cutoff; choosing the windows after seeing test results is data snooping.
+    - **Regime-clock decay** (proposed, untested). Each expert's decay clock ticks only while its own
+      regime is active, using the frozen gate's probabilities, so for the stress expert 2008 is only
+      "a few stress-months ago". It fits the architecture because the gate already supplies the
+      clock, and it addresses the tension in point 2 between decay and recurring regimes directly.
+    - **Test which historical periods matter** (an extension, not part of the main study). After the
+      main analysis shows which periods each expert works best in, measure how much each historical
+      period contributes to out-of-sample performance, and propose that as the basis for choosing
+      what not to down-weight. It generalises the leave-one-episode-out analysis in point 3. Any
+      period chosen this way must be reported as a diagnostic or future work, never fed back into
+      the reported model, or it is selection on the test set (Q15).
+
+    *Reading, about two hours.*
+    - Ghorbani, A. and Zou, J. (2019), "Data Shapley: Equitable valuation of data for machine
+      learning", *ICML*, PMLR 97. How much each training point, or block of points, is worth to a
+      model's test performance.
+    - Koh, P. W. and Liang, P. (2017), "Understanding black-box predictions via influence functions",
+      *ICML*, PMLR 70. A cheaper approximation of the same quantity without retraining.
+    - Mulliner, A., Harvey, C. R., Xia, C., Fang, E. and Van Hemert, O. (2025), "Regimes", *Journal
+      of Portfolio Management* 52(4), 6-25 (SSRN 5164863). Weights historical dates by how similar
+      their economic state variables are to today's, on six equity factors over 1985 to 2024, and
+      finds information in the most dissimilar periods too ("anti-regimes"). The closest finance
+      precedent to weighting history by regime rather than by calendar time.
+
+    Ask: are crash-preserving weights worth including, and if so as a main-study arm or as the
+    proposed extension?
 
 ---
 
@@ -1169,6 +1271,94 @@ conclusion, and it should be put to the advisor rather than settled unilaterally
 **What to ask.** Which objective, and is it acceptable for it to differ from the evaluation metric?
 And, if the likelihood is retained, is the posterior re-weighting of experts under a frozen gate a
 feature or a leak?
+
+---
+
+### Q21. At what frequency should the gate and the cross-section run, and what is the target horizon?
+
+**Status:** open, raised 2026-09-26. Tom's current preference is a **daily gate and a daily
+cross-section**, but it is kept open until it has been discussed. Nothing in the code commits to an
+answer: the CRSP loader (brief 06) builds the daily panel the pipeline already uses, and the horizon
+stays a config field.
+
+**Three questions that have to be answered together.**
+
+1. **Gate frequency.** How often the regime probabilities are updated. A daily Hamilton filter sees
+   about 21 times as many observations as a monthly one, so its transition matrix is better
+   identified and it reacts to volatility clustering within days rather than weeks.
+2. **Cross-section frequency.** How often the stocks are ranked against each other, which is also how
+   often the portfolio is rebalanced. The options are (a) daily gate with a daily cross-section,
+   (b) daily gate with a monthly cross-section, where the gate probability on the last trading day of
+   each month is the input to that month's cross-section, and (c) monthly for both.
+3. **Target horizon `h`.** The forward return being predicted: next day (`h = 1`), next week
+   (`h = 5`, what the code uses now as `fwd_ret_5d`), or next month (`h` of about 21). Any `h > 1` at
+   daily frequency creates overlapping targets, which the code now handles with a Hansen-Hodrick
+   long-run variance at lag `h - 1` (audit finding E-2), and sets the purge gap to `h` days (see Q22).
+
+**Considerations.**
+
+- **Predictability is weaker and noisier at daily horizons.** Next-day cross-sectional returns are
+  dominated by short-term reversal and by bid-ask bounce: a trade at the bid followed by one at the
+  ask looks like a return even when the price has not moved. Gu, Kelly and Xiu, the benchmark, use
+  monthly data partly for this reason. A daily cross-section is a legitimate choice but needs one
+  sentence of justification and a comparison that nets out transaction costs.
+- **Turnover.** Daily rebalancing multiplies turnover, so the portfolio metrics in Q9 are only
+  meaningful after costs.
+- **Comparability.** A monthly cross-section is directly comparable with Gu, Kelly and Xiu and with
+  most of the asset-pricing literature; a daily one is not.
+- **Compute.** A daily cross-section has about 21 times the rows of a monthly one over the same
+  window, which feeds straight into the compute budget the advisor asked for.
+- **Fundamentals** (Compustat) update quarterly, so they are equally stale at either frequency and do
+  not bear on the choice.
+
+**Reading, about an hour.**
+- Roll, R. (1984), "A simple implicit measure of the effective bid-ask spread in an efficient
+  market", *Journal of Finance* 39(4). Why bid-ask bounce creates spurious negative autocorrelation in
+  short-horizon returns.
+- Jegadeesh, N. (1990), "Evidence of predictable behavior of security returns", *Journal of Finance*
+  45(3), and Lehmann, B. (1990), "Fads, martingales, and market efficiency", *Quarterly Journal of
+  Economics* 105(1). Short-term reversal at monthly and weekly horizons.
+- Gu, S., Kelly, B. and Xiu, D. (2020), *Review of Financial Studies* 33(5), the data section, for
+  why the benchmark is monthly.
+
+**Ask the advisor:**
+(a) Which pairing: daily/daily, daily gate with a monthly cross-section, or monthly/monthly?
+(b) Which target horizon `h`?
+(c) If the cross-section is daily, is comparability with Gu, Kelly and Xiu still required, for
+    example through a monthly robustness arm?
+
+---
+
+### Q22. Should the gate's filter run through the purge gap?
+
+**Status:** open, raised 2026-09-26 from audit finding G-1. Nothing decided; the code keeps its
+current behaviour until this is answered.
+
+**What the purge gap is.** In walk-forward testing the last `h` days before each test block are
+dropped from training, because their targets (forward returns) reach into the test period and would
+leak test information into training. The gap exists for the **labels**.
+
+**What the code does.** The frozen Hamilton filter is run over the training dates and then directly
+over the test dates, so it also skips the market returns of the gap days. On the first test date it
+has not seen the last `h` days of market data, and one transition step bridges `h + 1` trading days.
+
+**Why it is a question at all.** The gap's market returns are public by the first test date, so
+feeding them to the filter is not look-ahead: it is what a trader would know on that date. Skipping
+them uses less information, not more, so the current behaviour is safe but slightly stale.
+
+**Measured size (audit 2026-09-25, smoke panel).** The largest change in P(high-volatility regime) on
+any test date is 0.0079, always on the first test date, and above 0.001 on at most two test dates per
+fold. Small, but not zero.
+
+**Options.**
+- (a) Keep the skip. Simplest to describe; wastes `h` days of information at each fold boundary.
+- (b) Run the filter over the contiguous span up to the last test date. Causal, and adds only the
+  gap's market returns.
+
+**Interaction with Q21.** The gap is `h` days long, so with `h = 1` the question almost disappears,
+and with a monthly horizon it becomes about a month of unseen market data at every fold boundary.
+
+**Ask the advisor:** (a) or (b), and is it worth a sentence in the methodology either way?
 
 ## RESOLVED
 

@@ -24,8 +24,8 @@ from __future__ import annotations
 import dataclasses
 import math
 from collections.abc import Iterator
-from dataclasses import dataclass
-from typing import Literal
+from dataclasses import dataclass, field
+from typing import Any, Literal
 
 import torch
 from torch import Tensor
@@ -128,7 +128,14 @@ class Panel:
     entities, then date 1's, …) — the ordering the stateful trainer's
     per-date threading relies on. ``date`` and ``entity`` are integer codes;
     ``date_labels``/``entity_labels`` (optional) map codes back to calendar
-    dates and tickers for reporting.
+    dates and entity ids (CRSP PERMNOs on the real panel) for reporting.
+
+    ``data_source`` names where the rows came from (``"crsp_ciz202512"``,
+    ``"synthetic"``); every trial logged on the panel carries it, so no result
+    can be mistaken for another source's (brief 06 A.6). ``metadata`` holds
+    the build's provenance (release, index numbers, construction switches such
+    as ``post_delisting_return``) and aggregate build statistics. Neither is
+    a row field: subsetting keeps both.
     """
 
     x_seq: Tensor  # (N, T, d_seq) float32
@@ -139,6 +146,8 @@ class Panel:
     schema: FeatureSchema
     date_labels: tuple[str, ...] | None = None
     entity_labels: tuple[str, ...] | None = None
+    data_source: str = "unspecified"
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         n = self.x_seq.shape[0]
@@ -361,4 +370,5 @@ class SyntheticRegimePanel:
             betas=betas,
             transition=trans,
             spec=s,
+            data_source="synthetic",
         )

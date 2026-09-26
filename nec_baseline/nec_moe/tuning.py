@@ -35,7 +35,7 @@ from torch import Tensor
 
 from .data import Panel
 from .evaluation import WalkForwardFold, walk_forward_folds
-from .registry import TrialRegistry
+from .registry import TrialRegistry, trial_provenance
 from .sweep import SweepArm, SweepReport, run_sweep
 
 __all__ = ["validation_tail", "TuneResult", "tune"]
@@ -144,6 +144,7 @@ def tune(
                 "n_seeds": a.n_seeds,
                 "objective": rec.get("objective"),
                 "correction_penalty_weight": rec.get("correction_penalty_weight"),
+                **trial_provenance(train_panel),
             },
             notes=f"tuning aggregate over {a.n_seeds} seeds",
         )

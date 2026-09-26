@@ -45,7 +45,9 @@ import urllib.request
 import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Protocol
 
+import numpy as np
 import pandas as pd
 import torch
 
@@ -56,11 +58,64 @@ __all__ = [
     "EARLIEST_RELIABLE",
     "fetch_sp500_wiki",
     "parse_sp500_tables",
+    "Universe",
+    "SpellUniverse",
     "PointInTimeUniverse",
     "load_sp500_universe",
     "filter_point_in_time",
     "universe_coverage_report",
 ]
+
+
+class Universe(Protocol):
+    """Anything that can say which entities were index members on a date."""
+
+    def members_asof(self, date: str | pd.Timestamp) -> frozenset[str]: ...
+
+
+@dataclass(frozen=True)
+class SpellUniverse:
+    """Index membership as spells: ``entity`` is a member on every date ``d``
+    with ``start <= d <= end``. **Both bounds are inclusive.**
+
+    This is the shape of CRSP's ``StkIndMembership`` (``MbrStartDt``,
+    ``MbrEndDt``), which :mod:`nec_moe.crsp` loads into it with PERMNOs as the
+    entity labels. The inclusive reading is CRSP's: the metadata classes the
+    start as the first trading date and the end as the last daily date, and
+    on the real S&P 500 spells only the inclusive reading keeps the member
+    count free of a one-day dip at every index change (see ``CRSPSpec``).
+    """
+
+    spells: pd.DataFrame = field(repr=False)  # entity (str), start, end (Timestamp)
+
+    def __post_init__(self) -> None:
+        missing = {"entity", "start", "end"} - set(self.spells.columns)
+        if missing:
+            raise ValueError(f"spells need columns entity, start, end; missing {missing}")
+        if (self.spells["end"] < self.spells["start"]).any():
+            raise ValueError("a membership spell ends before it starts")
+
+    def members_asof(self, date: str | pd.Timestamp) -> frozenset[str]:
+        d = pd.Timestamp(date)
+        s = self.spells
+        return frozenset(s.loc[(s["start"] <= d) & (d <= s["end"]), "entity"])
+
+    def members_union(
+        self, start: str | pd.Timestamp, end: str | pd.Timestamp
+    ) -> frozenset[str]:
+        """Every entity that was a member on at least one date in ``[start, end]``."""
+        lo, hi = pd.Timestamp(start), pd.Timestamp(end)
+        s = self.spells
+        return frozenset(s.loc[(s["start"] <= hi) & (lo <= s["end"]), "entity"])
+
+    def count_by_date(self, dates: pd.DatetimeIndex) -> np.ndarray:
+        """Number of members on each date (one row per spell, so an entity
+        with two spells covering the same date would count twice; CRSP spells
+        of one PERMNO do not overlap)."""
+        d = dates.to_numpy()[:, None]
+        start = self.spells["start"].to_numpy()[None, :]
+        end = self.spells["end"].to_numpy()[None, :]
+        return ((start <= d) & (d <= end)).sum(axis=1)
 
 SP500_WIKI_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
 
@@ -228,7 +283,7 @@ def load_sp500_universe(
     )
 
 
-def filter_point_in_time(panel: Panel, universe: PointInTimeUniverse) -> Panel:
+def filter_point_in_time(panel: Panel, universe: Universe) -> Panel:
     """Keep only rows whose entity was an index member on that row's date.
 
     Kills survivorship component 1 (backward-looking selection) on an already-
@@ -248,17 +303,13 @@ def filter_point_in_time(panel: Panel, universe: PointInTimeUniverse) -> Panel:
             "filter_point_in_time needs date_labels and entity_labels "
             "(synthetic panels have no calendar to be point-in-time about)"
         )
-    members_by_code = {
-        code: universe.members_asof(label)
-        for code, label in enumerate(panel.date_labels)
-    }
-    keep = torch.tensor(
-        [
-            panel.entity_labels[int(e)] in members_by_code[int(d)]
-            for d, e in zip(panel.date, panel.entity, strict=True)
-        ],
-        dtype=torch.bool,
-    )
+    # member[d, e]: entity e was in the index on date code d
+    ent_code = {label: i for i, label in enumerate(panel.entity_labels)}
+    member = torch.zeros(len(panel.date_labels), len(ent_code), dtype=torch.bool)
+    for code, label in enumerate(panel.date_labels):
+        cols = [ent_code[m] for m in universe.members_asof(label) if m in ent_code]
+        member[code, cols] = True
+    keep = member[panel.date, panel.entity]
     dropped = int((~keep).sum())
     if dropped:
         print(
@@ -276,7 +327,7 @@ def filter_point_in_time(panel: Panel, universe: PointInTimeUniverse) -> Panel:
 
 
 def universe_coverage_report(
-    universe: PointInTimeUniverse,
+    universe: Universe,
     dates: list[str],
     available: set[str],
 ) -> pd.DataFrame:

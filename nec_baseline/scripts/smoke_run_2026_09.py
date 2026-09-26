@@ -66,6 +66,7 @@ from nec_moe import (
     TrialRegistry,
     load_vix,
     nec_arm,
+    trial_provenance,
     walk_forward_evaluate,
     walk_forward_folds,
 )
@@ -167,9 +168,11 @@ class SmokeRegistry(TrialRegistry):
         super().__init__(path)
         self.smoke_tag, self.source = tag, source
         self.context: dict[str, Any] = {}
+        #: the panel's provenance keys (brief 06 A.6), set once the panel is built
+        self.provenance: dict[str, Any] = {}
 
     def log(self, tag, metrics, *, config=None, seed=None, notes=""):
-        cfg = dict(config or {})
+        cfg = {**self.provenance, **dict(config or {})}
         cfg.setdefault("family", tag)
         cfg |= {"source": self.source, **self.context}
         return super().log(self.smoke_tag, metrics, config=cfg, seed=seed, notes=notes)
@@ -858,6 +861,7 @@ def main(s: SmokeSettings = SMOKE) -> int:
     figures: dict[str, Path] = {}
 
     panel, purge = rx._build_panel(exp)
+    registry.provenance = trial_provenance(panel)
     if purge != exp.horizon:
         raise AssertionError(f"purge {purge} != horizon {exp.horizon}")
     folds = walk_forward_folds(panel.date, n_folds=exp.n_folds,

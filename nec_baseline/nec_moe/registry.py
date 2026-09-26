@@ -15,6 +15,13 @@ its statistical meaning. This registry makes that number un-losable:
 
 Tags group trials into the families over which corrections are computed, e.g.
 one tag per experiment sweep ("routing_sweep_v1").
+
+Every row carries its **provenance** in ``config`` (:data:`PROVENANCE_KEYS`):
+the panel's ``data_source`` and the construction switches a result depends on
+(brief 06 A.6). :meth:`TrialRegistry.log` refuses a row without them, so no
+result can be mistaken for one from another source or built under another
+setting. ``None`` means "not applicable", e.g. ``post_delisting_return`` on a
+synthetic panel that has no delistings.
 """
 
 from __future__ import annotations
@@ -26,9 +33,25 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-__all__ = ["TrialRecord", "TrialRegistry"]
+__all__ = ["PROVENANCE_KEYS", "TrialRecord", "TrialRegistry", "trial_provenance"]
 
 _SELECTION_SUFFIX = "#selection"
+
+#: Config keys every logged trial must carry (see the module docstring).
+PROVENANCE_KEYS: tuple[str, ...] = ("data_source", "post_delisting_return")
+
+
+def trial_provenance(panel: Any) -> dict[str, Any]:
+    """The provenance keys of a trial run on ``panel``.
+
+    ``data_source`` and, from the panel's build metadata, the post-delisting
+    fill (``None`` on panels without one, such as synthetic panels).
+    """
+    metadata = getattr(panel, "metadata", None) or {}
+    return {
+        "data_source": getattr(panel, "data_source", "unspecified"),
+        "post_delisting_return": metadata.get("post_delisting_return"),
+    }
 
 
 @dataclass(frozen=True)
@@ -70,7 +93,14 @@ class TrialRegistry:
         seed: int | None = None,
         notes: str = "",
     ) -> TrialRecord:
-        """Append one trial. ``metrics`` values must be finite floats or None-free."""
+        """Append one trial. ``metrics`` values must be finite floats or None-free,
+        and ``config`` must carry every key of :data:`PROVENANCE_KEYS`."""
+        missing = [k for k in PROVENANCE_KEYS if k not in (config or {})]
+        if missing:
+            raise ValueError(
+                f"trial config lacks the provenance keys {missing}; add "
+                "trial_provenance(panel) (None where a key does not apply)"
+            )
         if _SELECTION_SUFFIX in tag:
             raise ValueError(
                 f"tag must not contain {_SELECTION_SUFFIX!r} (reserved for "
@@ -140,6 +170,9 @@ class TrialRegistry:
                 "correction_penalty_weight": pick.config.get(
                     "correction_penalty_weight"
                 ),
+                # and so does its provenance: a selection row is a registry
+                # entry like any other
+                **{k: pick.config.get(k) for k in PROVENANCE_KEYS},
             },
             notes=f"selection event: best {metric!r} of {len(candidates)}",
         )

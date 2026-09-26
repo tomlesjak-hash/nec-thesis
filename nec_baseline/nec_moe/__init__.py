@@ -35,6 +35,18 @@ from .config import (
     target_horizon,
 )
 from .context_data import build_context, load_french_factors, load_vix
+from .crsp import (
+    CRSPBuild,
+    CRSPExtract,
+    CRSPSpec,
+    TickerLookup,
+    build_crsp_panel,
+    extract_crsp,
+    load_extract,
+    membership_universe,
+    read_index_returns,
+    read_membership,
+)
 from .data import (
     Batch,
     FeatureSchema,
@@ -70,13 +82,18 @@ from .experts import (
     build_emission,
 )
 from .features import (
+    DAILY_COLUMNS,
     SEQUENCE_FEATURES,
     SNAPSHOT_FEATURES,
     StageBSpec,
+    assemble_panel,
     build_panel,
     build_stage_b_panel,
     data_config_from_panel,
+    feature_warmup,
+    market_frame,
     rolling_beta,
+    stock_features,
 )
 from .likelihood import expert_log_likelihood
 from .losses import (
@@ -134,7 +151,7 @@ from .priors import (
     UniformRegimePrior,
     build_prior,
 )
-from .registry import TrialRecord, TrialRegistry
+from .registry import PROVENANCE_KEYS, TrialRecord, TrialRegistry, trial_provenance
 from .sweep import (
     ArmSummary,
     SweepArm,
@@ -148,6 +165,8 @@ from .train import DeadParameterWarning, GradientAudit, SequenceEval, Trainer
 from .tuning import TuneResult, tune, validation_tail
 from .universe import (
     PointInTimeUniverse,
+    SpellUniverse,
+    Universe,
     filter_point_in_time,
     load_sp500_universe,
     universe_coverage_report,
@@ -245,6 +264,21 @@ __all__ = [
     "build_stage_b_panel",
     "rolling_beta",
     "data_config_from_panel",
+    "DAILY_COLUMNS",
+    "assemble_panel",
+    "feature_warmup",
+    "market_frame",
+    "stock_features",
+    "CRSPSpec",
+    "CRSPExtract",
+    "CRSPBuild",
+    "TickerLookup",
+    "build_crsp_panel",
+    "extract_crsp",
+    "load_extract",
+    "membership_universe",
+    "read_index_returns",
+    "read_membership",
     "DEFAULT_UNIVERSE",
     "MARKET_SYMBOL",
     "load_ohlcv",
@@ -259,6 +293,8 @@ __all__ = [
     "RegimeAlignmentReport",
     "TrialRecord",
     "TrialRegistry",
+    "PROVENANCE_KEYS",
+    "trial_provenance",
     "plot_training_dashboard",
     "plot_gate_utilization",
     "plot_ic_series",
@@ -281,6 +317,8 @@ __all__ = [
     "fit_temperature",
     "plot_reliability",
     "PointInTimeUniverse",
+    "SpellUniverse",
+    "Universe",
     "load_sp500_universe",
     "filter_point_in_time",
     "universe_coverage_report",

@@ -42,7 +42,7 @@ from torch import Tensor
 
 from .base import BaseCache, BaseFit
 from .data import Panel
-from .registry import TrialRegistry
+from .registry import TrialRegistry, trial_provenance
 
 if TYPE_CHECKING:  # pragma: no cover
     from .baselines import BaselineModel
@@ -678,6 +678,7 @@ def _gate_report(
     registry: TrialRegistry | None,
     tag: str | None,
     seed: int,
+    provenance: dict[str, Any] | None = None,
 ) -> tuple[tuple[int, ...], tuple[tuple[str, float], ...]]:
     """The fitted gate's permutation + metrics, and its multi-start trials.
 
@@ -706,6 +707,7 @@ def _gate_report(
                         "correction_penalty_weight": (
                             trainer.cfg.train.correction_penalty_weight
                         ),
+                        **(provenance or {}),
                     },
                     seed=seed,
                     notes=f"markov gate start {i} of {fit.n_starts}, fold {fold.fold}",
@@ -938,7 +940,9 @@ def walk_forward_evaluate(
             else ()
         )
         base_pred, base_nll, correction = base_and_correction(trainer, test, train=train)
-        gate_perm, gate_metrics = _gate_report(trainer, fold, registry, registry_tag, seed)
+        gate_perm, gate_metrics = _gate_report(
+            trainer, fold, registry, registry_tag, seed, trial_provenance(panel)
+        )
         payload = acc.add(
             fold, pred, train, test, nll,
             expert_order=order,

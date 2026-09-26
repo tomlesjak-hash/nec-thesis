@@ -91,6 +91,12 @@ Stream from the zip. Never unzip the whole archive; it is 66 GB.
 
 ### A.3 Config
 
+> **Erratum (2026-09-26, approved by Tom):** `1000502` below is wrong. It has no rows in
+> `StkIndMembership.dat`: it is S&P's index level series, with no constituents. The S&P 500
+> membership spells are under `1000500` ("CRSP Index of the S&P 500 Universe", family `1100500`),
+> the same INDNO as the market series: 2,084 spells over 1,956 PERMNOs, 502 to 508 members per
+> trading day in 2015-2024. The evidence is recorded in the `CRSPSpec` docstring.
+
 Add a `CRSPSpec` (or extend `StageBSpec`) with, at minimum:
 
 - `crsp_dir`: path to `Data/`, default relative to the repo.

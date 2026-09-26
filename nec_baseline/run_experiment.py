@@ -89,6 +89,7 @@ from nec_moe import (  # noqa: E402
     plot_transition_matrix,
     rank_ic_by_date,
     run_sweep,
+    trial_provenance,
     universe_coverage_report,
     walk_forward_folds,
 )
@@ -533,7 +534,8 @@ def _quick(exp: Experiment, panel: Panel, purge: int, out: Path,
         )
     results |= {k: v for k, v in trial.items() if k != "nll"}
     registry.log(exp.tag, trial, config={"mode": "quick",
-                 **dataclasses.asdict(exp)}, seed=exp.seeds[0])
+                 **dataclasses.asdict(exp), **trial_provenance(panel)},
+                 seed=exp.seeds[0])
     return results
 
 

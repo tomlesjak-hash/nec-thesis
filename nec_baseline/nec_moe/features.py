@@ -1,15 +1,24 @@
-"""Stage B feature engineering: prices -> the Panel contract (design doc §6).
+"""Stage B feature engineering: daily returns and volume -> the Panel contract (design doc §6).
+
+Input: one **daily frame** per entity (:data:`DAILY_COLUMNS`): the daily log
+return, raw share volume, raw dollar volume, a cumulative share-adjustment
+factor, whether the day is a tradable row, and the post-delisting fill. The
+CRSP layer (:mod:`nec_moe.crsp`) builds these frames from ``DlyRet``,
+``DlyPrc``, ``DlyVol`` and ``DlyCumFacShr``; nothing here knows the source.
 
 Timing convention (the anti-leakage rule, stated once and enforced by test)
 ---------------------------------------------------------------------------
-A row (date t, ticker i) represents a prediction made **at the close of t**:
+A row (date t, entity i) represents a prediction made **at the close of t**:
 
 - every feature at t is computed from information through the close of t
-  (trailing rolling windows, diffs of past closes — pandas rolling/diff are
-  trailing by construction);
+  (trailing rolling windows over past daily returns and volumes; pandas
+  rolling windows are trailing by construction). Price levels are never an
+  input: the drawdown compounds returns inside its own trailing window, and
+  share volumes are put on one share basis with split factors dated inside
+  the window (brief 06 A.4.4 and A.4.6);
 - the target is the *forward* return — the only column allowed to touch the
   future. Two kinds (``StageBSpec.target_kind``):
-  ``"raw"``: ``fwd_ret_{h}d = log(C_{t+h} / C_t)``;
+  ``"raw"``: ``fwd_ret_{h}d`` = the sum of the next ``h`` daily log returns;
   ``"residual"``: ``fwd_resid_ret_{h}d = fwd_ret − β_t · mkt_fwd_ret`` — the
   market-neutralized target the syllabus prescribes so the model cannot score
   by just learning market direction. ``β_t`` is a **trailing** rolling OLS
@@ -37,7 +46,7 @@ The result is a plain :class:`~nec_moe.data.Panel` — everything downstream
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
@@ -49,16 +58,42 @@ from .data import FeatureSchema, Panel
 from .market_data import DEFAULT_UNIVERSE, MARKET_SYMBOL, load_universe
 
 __all__ = [
+    "DAILY_COLUMNS",
     "SEQUENCE_FEATURES",
     "SNAPSHOT_FEATURES",
     "StageBSpec",
     "rolling_beta",
+    "market_frame",
+    "stock_features",
+    "post_fill_used",
+    "feature_warmup",
+    "assemble_panel",
     "market_features",
     "ticker_features",
     "build_panel",
     "build_stage_b_panel",
     "data_config_from_panel",
 ]
+
+#: Columns of the per-entity daily frame the feature layer consumes.
+#:
+#: - ``ret``: daily log return; NaN where the return is missing (never 0);
+#: - ``volume``: raw share volume of the day;
+#: - ``dollar_volume``: raw price times raw share volume of the same day;
+#: - ``share_factor``: cumulative factor that puts share counts on one basis
+#:   (CRSP ``DlyCumFacShr``); only its ratios inside a trailing window are used;
+#: - ``tradable``: the day is an ordinary trading row, so a panel row may sit
+#:   on it (False on a delisting-return row and on post-delisting fill days);
+#: - ``fill_ret``: the post-delisting return on the days after an entity's
+#:   final return, NaN everywhere else. It only completes forward windows.
+DAILY_COLUMNS: tuple[str, ...] = (
+    "ret",
+    "volume",
+    "dollar_volume",
+    "share_factor",
+    "tradable",
+    "fill_ret",
+)
 
 SEQUENCE_FEATURES: tuple[str, ...] = (
     "ret_1d",
@@ -140,73 +175,153 @@ def rolling_beta(r: pd.Series, mkt_r: pd.Series, window: int) -> pd.Series:
     return r.rolling(window).cov(mkt_r) / mkt_r.rolling(window).var()
 
 
-def _return_price(px: pd.DataFrame) -> pd.Series:
-    """The close that returns are computed from: adjusted if the source has one.
+#: The longest trailing window of the feature list (``mom_120d``) and the
+#: window of the sequence channels that need one (``vol_20d``,
+#: ``volume_z_20d``), in trading days. Properties of the named features, not
+#: knobs: changing them renames a feature.
+_LONGEST_SNAPSHOT_WINDOW = 120
+_SEQUENCE_CHANNEL_WINDOW = 20
 
-    A dividend-adjusted close gives total returns, and a return only ever
-    involves adjustments inside its own window, so it stays causal. Levels
-    (dollar volume) must use the raw close instead (audit finding D-2).
+
+def feature_warmup(spec: StageBSpec) -> int:
+    """Trading days of history a row needs before its first valid date.
+
+    The longest of: the snapshot windows, the sequence window of channels that
+    are themselves 20-day statistics, and the residual target's beta window.
     """
-    return px["adj_close"] if "adj_close" in px.columns else px["close"]
+    need = max(_LONGEST_SNAPSHOT_WINDOW, spec.seq_len - 1 + _SEQUENCE_CHANNEL_WINDOW)
+    if spec.target_kind == "residual":
+        need = max(need, spec.beta_window)
+    return need
 
 
-def market_features(
-    market_px: pd.DataFrame, spec: StageBSpec | None = None
-) -> pd.DataFrame:
-    """Market-symbol series needed for relative features: ret_1d/ret_20d/vol_20d.
+def _forward_sum(r: pd.Series, horizon: int) -> pd.Series:
+    """Sum of the next ``horizon`` values, t+1..t+h; NaN if any is missing."""
+    return r.rolling(horizon).sum().shift(-horizon)
 
-    With ``spec`` given, also emits ``mkt_fwd_ret`` — the market's forward
-    ``horizon``-day log return, computed on the **market's own calendar** (so a
-    ticker with missing days still gets the correctly aligned market move) and
-    used only inside the residual target. It is forward-looking by definition,
-    exactly like the target it feeds; it is never a feature.
+
+def market_frame(mkt_ret: pd.Series, spec: StageBSpec | None = None) -> pd.DataFrame:
+    """Market series needed for relative features: ret_1d/ret_20d/vol_20d.
+
+    ``mkt_ret`` is the market's daily log return on its own calendar (on the
+    CRSP panel, ``log(1 + DlyTotRet)`` of ``CRSPSpec.market_indno``). With
+    ``spec`` given, also emits ``mkt_fwd_ret``, the market's forward
+    ``horizon``-day log return on the **market's own calendar** (so an entity
+    with missing days still gets the correctly aligned market move), used only
+    inside the residual target. It is forward-looking by definition, exactly
+    like the target it feeds; it is never a feature.
     """
-    logc = np.log(_return_price(market_px))
-    r1 = logc.diff()
     out = pd.DataFrame(
         {
-            "mkt_ret_1d": r1,
-            "mkt_ret_20d": logc.diff(20),
-            "mkt_vol_20d": r1.rolling(20).std(),
+            "mkt_ret_1d": mkt_ret,
+            "mkt_ret_20d": mkt_ret.rolling(20).sum(),
+            "mkt_vol_20d": mkt_ret.rolling(20).std(),
         }
     )
     if spec is not None:
-        out["mkt_fwd_ret"] = logc.shift(-spec.horizon) - logc
+        out["mkt_fwd_ret"] = _forward_sum(mkt_ret, spec.horizon)
     return out
 
 
-def ticker_features(
-    px: pd.DataFrame, mkt: pd.DataFrame, spec: StageBSpec
-) -> pd.DataFrame:
-    """All named feature columns + the forward-return target, for one ticker.
+def _window_drawdown(r: pd.Series, window: int) -> pd.Series:
+    """Drawdown against the trailing ``window``-date high of a total-return index.
 
-    Indexed by the ticker's own trading dates (market columns joined on date;
-    dates the market lacks end up NaN and are dropped by panel validity).
-
-    Returns, drawdown and the target come from the return price (the adjusted
-    close when the source has one); dollar volume comes from the raw close
-    times volume, the dollar amount actually traded that day. A
-    dividend-back-adjusted close in that product would carry dividends paid
-    after ``t`` (audit finding D-2).
+    The index is compounded from the daily log returns **inside the window
+    only** (brief 06 A.4.4): the window's first date is the base, level 0 in
+    logs, and the ``window - 1`` returns after it build the rest. The value at
+    t therefore depends on returns through t alone, and a missing return
+    anywhere in the window makes it missing rather than silently zero.
     """
-    c, v = _return_price(px), px["volume"]
-    raw_c = px["close"]
-    logc = np.log(c)
-    r1 = logc.diff()
-    f = pd.DataFrame(index=px.index)
-    f["ret_1d"] = r1
-    f["ret_5d"] = logc.diff(5)
-    f["ret_20d"] = logc.diff(20)
-    f["ret_60d"] = logc.diff(60)
-    f["mom_120d"] = logc.diff(120)
-    f["vol_5d"] = r1.rolling(5).std()
-    f["vol_20d"] = r1.rolling(20).std()
-    f["vol_60d"] = r1.rolling(60).std()
-    f["downside_vol_20d"] = r1.clip(upper=0.0).rolling(20).std()
-    f["drawdown_60d"] = c / c.rolling(60).max() - 1.0
-    f["dollar_vol_20d"] = np.log((raw_c * v).rolling(20).mean())
-    vol_roll = v.rolling(20)
-    f["volume_z_20d"] = (v - vol_roll.mean()) / vol_roll.std()
+    x = r.to_numpy(dtype=float)
+    n = window - 1  # returns inside a window of `window` dates
+    out = np.full(len(x), np.nan)
+    if len(x) >= n:
+        cum = np.cumsum(sliding_window_view(x, n), axis=1)
+        peak = np.maximum(cum.max(axis=1), 0.0)  # 0 is the window's first date
+        out[n - 1 :] = np.exp(cum[:, -1] - peak) - 1.0
+    return pd.Series(out, index=r.index)
+
+
+def _split_invariant_volume_z(
+    volume: pd.Series, share_factor: pd.Series, window: int
+) -> pd.Series:
+    """Z-score of today's share volume against its trailing ``window``.
+
+    Every volume in the window is put on today's share basis with the ratio of
+    cumulative share factors, ``v_s * F_s / F_t`` (brief 06 A.4.6). The ratio
+    depends only on splits dated inside ``(s, t]``, so no factor anchored to
+    the end of the sample reaches the value, and a 2-for-1 split inside the
+    window leaves the z-score unchanged. ``F`` is CRSP's ``DlyCumFacShr``:
+    shares times ``F`` is continuous across a split.
+    """
+    v = volume.to_numpy(dtype=float)
+    fac = share_factor.to_numpy(dtype=float)
+    out = np.full(len(v), np.nan)
+    if len(v) >= window:
+        fw = sliding_window_view(fac, window)
+        adj = sliding_window_view(v, window) * (fw / fw[:, -1:])
+        with np.errstate(invalid="ignore", divide="ignore"):
+            out[window - 1 :] = (adj[:, -1] - adj.mean(axis=1)) / adj.std(axis=1, ddof=1)
+    return pd.Series(out, index=volume.index)
+
+
+def _target_returns(daily: pd.DataFrame) -> pd.Series:
+    """The daily returns the forward target compounds.
+
+    The entity's own returns (a delisting-return row included), completed
+    after its final return by the post-delisting fill. ``fill_ret`` is NaN
+    everywhere else, so a missing return inside the entity's life stays
+    missing.
+    """
+    r = daily["ret"]
+    if "fill_ret" not in daily.columns:
+        return r
+    return r.fillna(daily["fill_ret"])
+
+
+def post_fill_used(daily: pd.DataFrame, spec: StageBSpec) -> pd.Series:
+    """True where the row's forward window uses at least one post-delisting fill day."""
+    if "fill_ret" not in daily.columns:
+        return pd.Series(False, index=daily.index)
+    filled = daily["fill_ret"].notna().astype(float)
+    return _forward_sum(filled, spec.horizon).fillna(0.0) > 0
+
+
+def stock_features(
+    daily: pd.DataFrame, mkt: pd.DataFrame, spec: StageBSpec
+) -> pd.DataFrame:
+    """All named feature columns + the forward-return target, for one entity.
+
+    ``daily`` holds :data:`DAILY_COLUMNS` (``share_factor``, ``tradable`` and
+    ``fill_ret`` are optional) on the entity's own dates; market columns are
+    joined on date, and dates the market lacks end up NaN and are dropped by
+    panel validity.
+
+    Returns, drawdown and the target come from the daily log return; dollar
+    volume is the raw price times raw volume of each day, the dollars actually
+    traded (brief 06 A.4.5; audit finding D-2).
+    """
+    r = daily["ret"]
+    v = daily["volume"]
+    factor = (
+        daily["share_factor"]
+        if "share_factor" in daily.columns
+        else pd.Series(1.0, index=daily.index)
+    )
+    f = pd.DataFrame(index=daily.index)
+    f["ret_1d"] = r
+    f["ret_5d"] = r.rolling(5).sum()
+    f["ret_20d"] = r.rolling(20).sum()
+    f["ret_60d"] = r.rolling(60).sum()
+    f["mom_120d"] = r.rolling(120).sum()
+    f["vol_5d"] = r.rolling(5).std()
+    f["vol_20d"] = r.rolling(20).std()
+    f["vol_60d"] = r.rolling(60).std()
+    f["downside_vol_20d"] = r.clip(upper=0.0).rolling(20).std()
+    f["drawdown_60d"] = _window_drawdown(r, 60)
+    with np.errstate(divide="ignore"):
+        f["dollar_vol_20d"] = np.log(daily["dollar_volume"].rolling(20).mean())
+    f["volume_z_20d"] = _split_invariant_volume_z(v, factor, 20)
 
     f = f.join(mkt, how="left")
     f["rel_ret_1d"] = f["ret_1d"] - f["mkt_ret_1d"]
@@ -214,7 +329,7 @@ def ticker_features(
     f["rel_vol_20d"] = f["vol_20d"] / f["mkt_vol_20d"]
 
     # the target — the ONLY forward-looking column(s)
-    fwd = logc.shift(-spec.horizon) - logc
+    fwd = _forward_sum(_target_returns(daily), spec.horizon)
     if spec.target_kind == "raw":
         f[spec.target] = fwd
     else:  # residual: market-neutralized forward return
@@ -229,36 +344,94 @@ def ticker_features(
 
 
 # --------------------------------------------------------------------------- #
+# Price-frame adapters (the free-data path; brief 06 section B retires them)
+# --------------------------------------------------------------------------- #
+
+
+def _return_price(px: pd.DataFrame) -> pd.Series:
+    """The close that returns are computed from: adjusted if the source has one.
+
+    A dividend-adjusted close gives total returns, and a return only ever
+    involves adjustments inside its own window, so it stays causal. Levels
+    (dollar volume) must use the raw close instead (audit finding D-2).
+    """
+    return px["adj_close"] if "adj_close" in px.columns else px["close"]
+
+
+def _daily_from_ohlcv(px: pd.DataFrame) -> pd.DataFrame:
+    """OHLCV bars -> a daily frame: log return of the return price, raw dollar volume."""
+    return pd.DataFrame(
+        {
+            "ret": np.log(_return_price(px)).diff(),
+            "volume": px["volume"],
+            "dollar_volume": px["close"] * px["volume"],
+        },
+        index=px.index,
+    )
+
+
+def market_features(
+    market_px: pd.DataFrame, spec: StageBSpec | None = None
+) -> pd.DataFrame:
+    """:func:`market_frame` of an OHLCV market symbol's log returns."""
+    return market_frame(np.log(_return_price(market_px)).diff(), spec)
+
+
+def ticker_features(
+    px: pd.DataFrame, mkt: pd.DataFrame, spec: StageBSpec
+) -> pd.DataFrame:
+    """:func:`stock_features` of one OHLCV frame (returns from the adjusted
+    close when the source has one, dollar volume from the raw close)."""
+    return stock_features(_daily_from_ohlcv(px), mkt, spec)
+
+
+# --------------------------------------------------------------------------- #
 # Panel assembly
 # --------------------------------------------------------------------------- #
 
 
-def _valid_rows(f: pd.DataFrame, spec: StageBSpec) -> pd.Series:
-    """Rows usable as samples: snapshot + target + full trailing seq window."""
+def _valid_rows(
+    f: pd.DataFrame, spec: StageBSpec, tradable: pd.Series | None = None
+) -> pd.Series:
+    """Rows usable as samples: a tradable day with snapshot + target + a full
+    trailing seq window."""
     snap_ok = f[list(SNAPSHOT_FEATURES)].notna().all(axis=1)
     target_ok = f[spec.target].notna()
     seq_ok_today = f[list(SEQUENCE_FEATURES)].notna().all(axis=1)
     window_ok = (
         seq_ok_today.astype(float).rolling(spec.seq_len).sum() == spec.seq_len
     )
-    return snap_ok & target_ok & window_ok
+    ok = snap_ok & target_ok & window_ok
+    if tradable is not None:
+        ok &= tradable.reindex(f.index, fill_value=False).astype(bool)
+    return ok
 
 
-def build_panel(
-    prices: dict[str, pd.DataFrame],
-    market_px: pd.DataFrame,
+def assemble_panel(
+    daily: dict[str, pd.DataFrame],
+    mkt: pd.DataFrame,
     spec: StageBSpec | None = None,
+    *,
+    data_source: str = "unspecified",
+    metadata: dict[str, Any] | None = None,
+    window: tuple[str, str] | None = None,
 ) -> Panel:
-    """Assemble the contract-shaped :class:`Panel` from per-ticker OHLCV."""
+    """Assemble the contract-shaped :class:`Panel` from per-entity daily frames.
+
+    ``mkt`` is :func:`market_frame` output for the same ``spec``; its index is
+    the calendar the per-date name counts are taken on. Entity labels are the
+    keys of ``daily`` (PERMNOs on the CRSP panel), sorted. ``window`` keeps
+    only rows dated inside ``[start, end]``; history before it still feeds
+    the features, and returns after it still feed the targets.
+    """
     spec = (spec if spec is not None else StageBSpec()).validate()
-    mkt = market_features(market_px, spec)
 
     frames: dict[str, pd.DataFrame] = {}
     valid: dict[str, pd.Series] = {}
-    for t, px in prices.items():
-        f = ticker_features(px, mkt, spec)
+    for t, d in daily.items():
+        f = stock_features(d, mkt, spec)
         frames[t] = f
-        valid[t] = _valid_rows(f, spec)
+        valid[t] = _valid_rows(f, spec, d["tradable"] if "tradable" in d.columns else None)
 
     # dates with a thick enough valid cross-section
     counts: pd.Series = sum(
@@ -266,6 +439,9 @@ def build_panel(
         start=pd.Series(0, index=mkt.index),
     )
     kept_dates = counts.index[counts >= spec.min_names_per_date]
+    if window is not None:
+        lo, hi = pd.Timestamp(window[0]), pd.Timestamp(window[1])
+        kept_dates = kept_dates[(kept_dates >= lo) & (kept_dates <= hi)]
     if len(kept_dates) < 10:
         raise ValueError(
             f"only {len(kept_dates)} dates have >= {spec.min_names_per_date} "
@@ -281,7 +457,7 @@ def build_panel(
         keep = valid[t] & f.index.isin(kept_dates)
         if not keep.any():
             continue
-        # trailing windows over the ticker's own rows (positions, not calendar)
+        # trailing windows over the entity's own rows (positions, not calendar)
         seq_mat = f[list(SEQUENCE_FEATURES)].to_numpy(dtype=np.float32)
         windows = sliding_window_view(seq_mat, spec.seq_len, axis=0)  # (P, d, T)
         pos = np.flatnonzero(keep.to_numpy())
@@ -318,7 +494,20 @@ def build_panel(
         schema=schema,
         date_labels=tuple(str(d.date()) for d in kept_dates),
         entity_labels=tuple(tickers),
+        data_source=data_source,
+        metadata=dict(metadata or {}),
     )
+
+
+def build_panel(
+    prices: dict[str, pd.DataFrame],
+    market_px: pd.DataFrame,
+    spec: StageBSpec | None = None,
+) -> Panel:
+    """:func:`assemble_panel` from per-ticker OHLCV frames (the free-data path)."""
+    spec = (spec if spec is not None else StageBSpec()).validate()
+    daily = {t: _daily_from_ohlcv(px) for t, px in prices.items()}
+    return assemble_panel(daily, market_features(market_px, spec), spec)
 
 
 def _cross_sectional_rank(x_snap: torch.Tensor, date: torch.Tensor) -> torch.Tensor:
@@ -331,12 +520,16 @@ def _cross_sectional_rank(x_snap: torch.Tensor, date: torch.Tensor) -> torch.Ten
     re-ranks after filtering a rank-normalized panel.
     """
     out = torch.empty_like(x_snap)
-    for d in torch.unique(date):
-        m = date == d
-        block = x_snap[m]
-        n = block.shape[0]
-        ranks = block.argsort(dim=0).argsort(dim=0).float()
-        out[m] = ranks / max(n - 1, 1) - 0.5
+    # one stable sort by date, then each date is a contiguous block: O(N log N)
+    # rather than one full scan of the rows per date
+    order = torch.argsort(date, stable=True)
+    _, counts = torch.unique_consecutive(date[order], return_counts=True)
+    start = 0
+    for n in counts.tolist():
+        rows = order[start : start + n]
+        ranks = x_snap[rows].argsort(dim=0).argsort(dim=0).float()
+        out[rows] = ranks / max(n - 1, 1) - 0.5
+        start += n
     return out
 
 

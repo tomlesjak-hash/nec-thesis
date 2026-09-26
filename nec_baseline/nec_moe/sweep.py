@@ -48,7 +48,7 @@ from .data import Panel
 from .evaluation import WalkForwardResult, walk_forward_evaluate, walk_forward_evaluate_baseline
 from .model import NECModel
 from .multiple_testing import benjamini_hochberg, ic_pvalue
-from .registry import TrialRegistry
+from .registry import TrialRegistry, trial_provenance
 from .train import Trainer
 
 __all__ = [
@@ -353,7 +353,10 @@ def run_sweep(
                     hac_kernel=hac_kernel,
                 )
             metrics = _metrics_from_result(res)
-            registry.log(tag, metrics, config=arm.config_record, seed=seed)
+            registry.log(
+                tag, metrics, config={**(arm.config_record or {}), **trial_provenance(panel)},
+                seed=seed,
+            )
             per_arm[arm.name].append(metrics)
             if verbose:
                 print(

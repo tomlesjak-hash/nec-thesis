@@ -30,42 +30,58 @@ from nec_moe.evaluation import ic_summary
 # Registry
 # --------------------------------------------------------------------------- #
 
+#: every registry row must carry its provenance (brief 06 A.6)
+PROV = {"data_source": "synthetic", "post_delisting_return": None}
+
 
 def test_registry_roundtrip_and_persistence(tmp_path: Path):
     path = tmp_path / "trials.jsonl"
     reg = TrialRegistry(path)
-    reg.log("sweep", {"ic": 0.02, "sharpe": 0.11}, config={"prior": "soft"}, seed=0)
-    reg.log("sweep", {"ic": -0.01, "sharpe": -0.05}, seed=1)
-    reg.log("other", {"ic": 0.5})
+    reg.log("sweep", {"ic": 0.02, "sharpe": 0.11}, config={"prior": "soft", **PROV}, seed=0)
+    reg.log("sweep", {"ic": -0.01, "sharpe": -0.05}, config=PROV, seed=1)
+    reg.log("other", {"ic": 0.5}, config=PROV)
     # reopen: the registry is the file, not the object
     reg2 = TrialRegistry(path)
     assert reg2.n_trials() == 3
     assert reg2.n_trials("sweep") == 2
     assert reg2.metric_values("sweep", "sharpe") == [0.11, -0.05]
-    assert reg2.trials("sweep")[0].config == {"prior": "soft"}
+    assert reg2.trials("sweep")[0].config == {"prior": "soft", **PROV}
 
 
 def test_registry_best_records_selection_event(tmp_path: Path):
     reg = TrialRegistry(tmp_path / "t.jsonl")
     for i, s in enumerate([0.1, 0.3, 0.2]):
-        reg.log("sweep", {"sharpe": s}, seed=i)
+        reg.log("sweep", {"sharpe": s}, config=PROV, seed=i)
     pick = reg.best("sweep", "sharpe")
     assert pick.metrics["sharpe"] == pytest.approx(0.3)
     events = reg.selection_events("sweep")
     assert len(events) == 1
     assert events[0].config["n_candidates"] == 3
     assert events[0].config["selected_trial_id"] == pick.trial_id
+    # the selection row is a registry entry too, and carries the provenance
+    assert {k: events[0].config[k] for k in PROV} == PROV
     # selection events never contaminate the trial family itself
     assert reg.n_trials("sweep") == 3
     # and the reserved suffix cannot be logged directly
     with pytest.raises(ValueError, match="reserved"):
-        reg.log("sweep#selection", {"x": 1.0})
+        reg.log("sweep#selection", {"x": 1.0}, config=PROV)
+
+
+def test_registry_refuses_a_row_without_provenance(tmp_path: Path):
+    """Brief 06 A.6: no result may be mistaken for another source's, so a row
+    without ``data_source`` or ``post_delisting_return`` is refused."""
+    reg = TrialRegistry(tmp_path / "t.jsonl")
+    with pytest.raises(ValueError, match="provenance"):
+        reg.log("sweep", {"ic": 0.1})
+    with pytest.raises(ValueError, match="post_delisting_return"):
+        reg.log("sweep", {"ic": 0.1}, config={"data_source": "synthetic"})
+    assert reg.n_trials() == 0
 
 
 def test_registry_rejects_nonfinite_metrics(tmp_path: Path):
     reg = TrialRegistry(tmp_path / "t.jsonl")
     with pytest.raises(ValueError, match="not finite"):
-        reg.log("sweep", {"ic": float("nan")})
+        reg.log("sweep", {"ic": float("nan")}, config=PROV)
 
 
 # --------------------------------------------------------------------------- #
@@ -192,7 +208,9 @@ def test_registry_to_corrections_workflow(tmp_path: Path):
     for i, true_ic in enumerate([0.06, 0.0, 0.0, 0.0]):  # one real signal, 3 nulls
         ics = true_ic + 0.05 * torch.randn(150, generator=g)
         s = ic_summary(ics)
-        reg.log("routing_sweep", {"mean_ic": s.mean_ic, "p": ic_pvalue(s)}, seed=i)
+        reg.log(
+            "routing_sweep", {"mean_ic": s.mean_ic, "p": ic_pvalue(s)}, config=PROV, seed=i
+        )
         families[i] = ic_pvalue(s)
 
     pvals = [r.metrics["p"] for r in reg.trials("routing_sweep")]

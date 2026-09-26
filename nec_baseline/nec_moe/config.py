@@ -287,8 +287,9 @@ class MarkovGateConfig:
     start_vol_quantiles: tuple[float, ...] = (0.5, 0.75)
     start_vol_windows: tuple[int, ...] = (20, 60)
     start_persistences: tuple[float, ...] = (0.95, 0.99)
-    # dates of defined trailing vol before the expanding-quantile split may
-    # assign a regime (earlier dates are left unassigned), and the smallest
+    # dates of defined trailing vol before the expanding-quantile split (the
+    # specification accepted 2026-09-26, audit G-5) may assign a regime
+    # (earlier dates are left unassigned), and the smallest
     # group a centre may be built from -- both guard against a regime's mean
     # and variance being estimated from a handful of dates.
     start_min_history: int = 20
@@ -304,8 +305,9 @@ class MarkovGateConfig:
     start_draws_per_centre: int = 3
     start_jitter_rel: float = 0.1
     start_jitter_unit: float = 1.0
-    # converged log-likelihoods within this many nats are one optimum when
-    # counting distinct optima (brief 04 B.3)
+    # converged log-likelihoods within this many nats of their neighbour are
+    # one optimum when counting distinct optima: clustering by gap, the
+    # specification accepted 2026-09-26 (brief 04 B.3 as amended, audit G-5)
     distinct_optima_tol: float = 1.0
     prob_floor: float = 1e-12  # clamp before log: keeps rows normalizable
     order_by: str = "variance"  # "variance" | "mean" — ascending (§4)

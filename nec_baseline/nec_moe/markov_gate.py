@@ -221,11 +221,12 @@ def causal_vol_assignment(
       centred one, which would put ``w/2`` future observations into every
       date's value even at initialisation;
     - cut points from an **expanding** quantile of those volatilities, again
-      over dates ``<= t`` only. A full-sample quantile would be the simpler
-      choice and would be legal here (the fit sees the whole training block
-      anyway), but it would let a later date move the split at an earlier
-      one; the expanding version makes "no future observation enters" true
-      date by date and checkable by perturbation.
+      over dates ``<= t`` only. This is the specification (brief 04 B.2 as
+      amended; accepted 2026-09-26, audit G-5 (a)): the cut at date ``t``
+      uses volatilities through ``t``, not a quantile over the whole training
+      block, so no later date can move the split at an earlier one and "no
+      future observation enters" holds date by date, checkable by
+      perturbation.
 
     ``calm_share`` is the share of dates placed in the calmest regime; for
     ``k > 2`` the remaining mass is split evenly among the others. Returns an
@@ -448,8 +449,11 @@ START_SCHEME_REGISTRY: dict[str, Callable[..., list[np.ndarray | None]]] = {
 def distinct_optima(llfs: list[float], tol: float) -> list[float]:
     """Distinct converged optima, best first: values within ``tol`` nats merge.
 
-    Clustering by gap rather than rounding to a grid, so two values a hair
-    apart either side of a rounding boundary are not counted as two optima.
+    The specification (brief 04 B.3 as amended; accepted 2026-09-26, audit
+    G-5 (b)): optima are clustered by a **gap** of at most ``tol`` (1 nat by
+    default) between neighbouring sorted values, not by rounding to a 1-nat
+    grid, so two values a hair apart on either side of a rounding boundary
+    count as one optimum.
     """
     out: list[float] = []
     for x in sorted(llfs, reverse=True):

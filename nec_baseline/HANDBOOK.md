@@ -54,7 +54,7 @@ code:
 3. **The Bayes combine** — `losses.py::mixture_nll`. One fused `logsumexp` produces the
    training objective *and* the posterior over experts.
 4. **Everything that makes results defensible** — data contracts (`data.py`,
-   `features.py`, `market_data.py`, `universe.py`, `context_data.py`), the judging
+   `features.py`, `crsp.py`, `universe.py`, `context_data.py`), the judging
    machinery (`evaluation.py`, `baselines.py`), diagnostics (`diagnostics.py`,
    `alignment.py`, `calibration.py`, `plots.py`), the honesty layer (`registry.py`,
    `multiple_testing.py`), and the protocol layer that composes them into experiments
@@ -715,50 +715,75 @@ and only that, is what makes the headline comparison evidence.
 
 ## I.15 The data stack
 
-### `market_data.py` — cached daily OHLCV (Stage B)
+### `crsp.py` — CRSP daily data, the licensed source (Stage B)
 
-**The cache CSV is the interface**: `data_cache/{symbol}.us.{start}.{end}.csv` with
-header `Date,Open,High,Low,Close,Volume`. Everything downstream reads only this format,
-so the pipeline is source-agnostic and fully offline once cached — which is also the
-manual-download workflow and how the tests run.
+**Licence first.** CRSP is licensed to the university; redistribution is prohibited.
+`Quant Model/Data/` is gitignored. Everything derived from it (extracts, parquet files,
+built panels, coverage tables, registries of CRSP runs) is written to `Data/derived/`
+and nowhere else: never `data_cache/`, `results/`, `figs/` or `Master Thesis/`. Test
+fixtures are CIZ-format files with the real headers and **invented numbers**
+(`tests/crsp_fixture.py`); tests that read the real files are marked `crsp_data` and skip
+without `Data/`. Committed reports quote aggregate statistics only.
 
-- `load_ohlcv(symbol, start, end, cache_dir, source, refresh)` → DataFrame
-  (DatetimeIndex; columns `open/high/low/close/volume`; duplicate dates deduped;
-  non-positive closes rejected).
-- `source="stooq"` (syllabus primary): `stooq_url()` builds the endpoint; the fetcher
-  detects Stooq's JavaScript anti-bot wall and **raises with instructions** (browser URL
-  + exact cache filename) rather than circumventing it — a deliberate ethics/robustness
-  stance. `source="yfinance"` (the syllabus's sanctioned prototyping fallback) fetches
-  unadjusted bars plus the adjusted close (`Date,Open,High,Low,Close,Adj Close,Volume`,
-  file `<symbol>.us.<start>.<end>.raw.csv`): returns use `Adj Close`, dollar volume uses
-  the raw `Close` x `Volume`, so no level feature carries dividends paid after its date
-  (audit finding D-2). Legacy auto-adjusted yfinance files are never read.
-- `load_universe(tickers, …, min_tickers=5)` loads the whole list plus the market
-  symbol (`spy`), collecting and reporting per-ticker failures; too few successes is an
-  error (a 3-name "panel" would be meaningless silently).
-- `DEFAULT_UNIVERSE` (~30 current large caps) exists to verify the pipeline; its
-  docstring is a survivorship warning, not an endorsement.
+- `CRSPSpec`: `crsp_dir` (default `Quant Model/Data/`), `release="ciz202512"`,
+  `stock_file="StkDlySecurityPrimaryData"`, `market_indno=1000500` (CRSP VW index of the
+  S&P 500 universe, `DlyTotRet`; `1000200` is the wider-market alternative),
+  `membership_indno=1000500` (the S&P 500 spells; `1000502` has no constituents, see the
+  docstring's evidence), `start/end` 2015-01-01..2024-12-31, `post_delisting_return`
+  (`"cash"` | `"market"`, not a decision), the member-count band `500..510`, and the
+  extract's lookback/lead and block size. `data_source` is `"crsp_<release>"`.
+- File access: the extracted `Data/crspdata/<release>_ascii/<file>.dat` if present, else
+  streamed from `Data/<release>_ascii.zip`; never unzipped whole.
+- `extract_crsp(spec)` (script `scripts/extract_crsp.py`): streams the stock file and
+  `StkDlyCumulativeAdjFactor` once each in blocks, keeps the window's ever-members from
+  `start - extract_lookback_days` to `end + extract_lead_days`, writes parquet parts,
+  and records every block's byte offset, so a rerun resumes. Membership, market series,
+  delisting records and security-info history go alongside.
+- `build_crsp_panel(spec, stage_b)` → `CRSPBuild(panel, report, coverage)`: daily frames
+  per PERMNO on the market calendar, `assemble_panel` over every ever-member, then the
+  point-in-time filter with re-rank. Refuses an extract that is too short for the
+  features' warm-up or the horizon, and a member count outside the band. The report is
+  aggregate only (rows, dates, members per date, delistings, fill rows, dual-class
+  count).
 
-### `features.py` — prices → Panel, under one timing rule
+Construction rules, each checked against `MetaColumnInfo`/`MetaFlagInfo`/`MetaSIZtoCIZ`
+and tested: daily log return `log(1 + DlyRet)`, missing stays missing; **`DlyRet`
+already includes the delisting return** (legacy `DLRET` maps to both `DelRet` and
+`DlyRet`; on the real data they agree on every delisting row), so the delisting row is
+kept as the stock's final return and is never a panel row; a forward window that runs
+past the final return is **completed with the post-delisting fill**, so no row is
+dropped because of a future delisting; dollar volume `|DlyPrc| x DlyVol`; drawdown
+compounded inside its own window; share volume put on one share basis with ratios of
+`DlyCumFacShr` inside the window (the factor is anchored at the end of the sample);
+membership bounds inclusive; entities are PERMNOs and `TickerLookup` gives a
+date-aware ticker for report labels only.
 
-**The rule** (stated once, tested mechanically): a row (date t, ticker i) is a
+### `features.py` — daily returns → Panel, under one timing rule
+
+**The rule** (stated once, tested mechanically): a row (date t, entity i) is a
 prediction made *at the close of t*. Every feature uses information through t; the
-forward target `fwd_ret_{h}d = log(C_{t+h}/C_t)` is the **only** forward-looking
-column; cross-sectional rank-normalization uses only date-t's own cross-section.
-`test_no_lookahead` truncates the series at t and asserts every feature at t is
-identical — copy its pattern whenever you add a feature.
+forward target `fwd_ret_{h}d` (the sum of the next h daily log returns) is the **only**
+forward-looking column; cross-sectional rank-normalization uses only date-t's own
+cross-section. `test_no_lookahead` truncates the series at t and asserts every feature
+at t is identical — copy its pattern whenever you add a feature.
+
+The input is one **daily frame** per entity (`DAILY_COLUMNS`: `ret`, `volume`,
+`dollar_volume`, `share_factor`, `tradable`, `fill_ret`) plus the market's daily log
+return; nothing in `features.py` knows the source. `stock_features` computes one
+entity's features and target; `market_frame` the market columns; `assemble_panel` the
+`Panel`.
 
 The named features (order = channel order; all trailing):
 
 | snapshot column | formula |
 |---|---|
-| `ret_1d/5d/20d/60d` | `log C_t − log C_{t−k}` |
+| `ret_1d/5d/20d/60d` | sum of the last k daily log returns |
 | `mom_120d` | 120-day log return |
 | `vol_5d/20d/60d` | rolling std of daily log returns |
 | `downside_vol_20d` | rolling std of `min(r, 0)` |
-| `drawdown_60d` | `C_t / max(C_{t−59..t}) − 1` |
-| `dollar_vol_20d` | `log(mean₂₀(C·V))` |
-| `volume_z_20d` | `(V − mean₂₀V)/std₂₀V` |
+| `drawdown_60d` | `I_t / max(I_{t−59..t}) − 1`, `I` compounded from returns inside the window |
+| `dollar_vol_20d` | `log(mean₂₀(|P|·V))`, raw price times raw volume |
+| `volume_z_20d` | `(V_t − mean₂₀V')/std₂₀V'`, `V'_s = V_s·F_s/F_t` (split factors inside the window) |
 | `rel_ret_20d` | `ret_20d − mkt_ret_20d` |
 | `rel_vol_20d` | `vol_20d / mkt_vol_20d` |
 
@@ -766,39 +791,30 @@ Sequence channels (`d_seq=4`, natural units, per-row trailing window of `seq_len
 `ret_1d`, `rel_ret_1d`, `vol_20d`, `volume_z_20d` — the observable regime signals the
 encoder reads.
 
-Assembly mechanics worth knowing: `_valid_rows` demands a full trailing window + all
-snapshot features + the target; windows are built with `sliding_window_view` over each
-ticker's *own* rows (positions, not calendar — a missing day shifts the window, it does
-not create NaNs); dates keep only cross-sections with ≥ `min_names_per_date` names;
+Assembly mechanics worth knowing: `_valid_rows` demands a tradable day, a full trailing
+window, all snapshot features and the target; windows are built with
+`sliding_window_view` over each entity's rows (the CRSP layer puts every stock on the
+market calendar, so a day without a CRSP row is a missing return and invalidates the
+windows that hold it); dates keep only cross-sections with ≥ `min_names_per_date` names;
 snapshot features are per-date **rank-normalized to [−0.5, 0.5]** when `cs_rank=True`
 (point-in-time safe by construction, and the natural normalization for a rank-IC
 target); final sort is date-major. `StageBSpec(seq_len=20, horizon=5, cs_rank=True,
 min_names_per_date=5)`; `spec.target` names the target column.
 `data_config_from_panel(panel)` derives the matching `DataConfig`.
 
-### `universe.py` — approximately point-in-time membership (partial Module 12)
+### `universe.py` — point-in-time membership
 
-Survivorship has two components, and the module is explicit about which it fixes:
-
-1. **Backward-looking selection** — *fixed*. Membership at any date is reconstructed
-   from Wikipedia's S&P 500 constituent-change table by **reverse-chronological event
-   undo**: start from today's membership; for each event *after* the as-of date, newest
-   first, un-add the added and re-add the removed. Worked example: today = {A, C};
-   events: 2023 (+C, −B), 2021 (+A, −Z). `members_asof(2022)`: undo 2023 ⇒ {A, B};
-   result {A, B}. Undoing in reverse order makes leave-and-rejoin resolve correctly.
-2. **Missing departed names** — *not fixed, made measurable*. Free sources rarely serve
-   delisted tickers and never delisting returns. `universe_coverage_report(universe,
-   dates, available)` publishes members / with-data / coverage per date — the honest
-   number to print next to any backtest.
-
-Reliability is *measured*, not assumed: the change table is ~complete only from the
-2010s (`EARLIEST_RELIABLE = "2011-01-01"`; `members_asof` warns below it).
-`members_union(start, end)` is the candidate list to *attempt* downloading;
-`stable_members` the untouched-throughout subset; `filter_point_in_time(panel,
-universe)` drops rows whose entity wasn't a member on that row's date (requires
-`date_labels`/`entity_labels`; preserves date-major order). The defensible posture this
-buys: *"survivorship-mitigated with documented residual coverage"* — never
-"survivorship-free" (that requires CRSP).
+`SpellUniverse` holds index membership as spells (`entity`, `start`, `end`), **both
+bounds inclusive** — the shape of CRSP's `StkIndMembership`, which
+`crsp.membership_universe` loads with PERMNOs as entities. `members_asof(d)`,
+`members_union(start, end)` and `count_by_date(dates)` answer the obvious questions.
+`filter_point_in_time(panel, universe)` keeps a row only if its entity was a member on
+the row's date (requires `date_labels`/`entity_labels`; preserves date-major order) and
+re-ranks a rank-normalized panel among the survivors (audit D-1); it accepts anything
+with `members_asof` (the `Universe` protocol). `universe_coverage_report` gives members /
+with-data / coverage per date. CRSP carries departed names and their delisting returns,
+so both survivorship components are covered by the data itself; the coverage report
+still says how many members lack usable rows.
 
 ### `context_data.py` — VIX and French factors (Stage C)
 
@@ -810,7 +826,10 @@ missing markers → NaN, not −99% returns). `build_context(vix, factors)` join
 derives `abs_mkt` and `mkt_vol_20d` (annualized 20-day realized market vol).
 **Diagnostics only, never training inputs** (Decision B): the moment VIX enters
 training, "do learned experts correspond to volatility regimes?" stops being a testable
-question.
+question. One exception, by brief 03 §2: the Hamilton gate's registered series
+`market_excess_return` is French daily Mkt-RF, so that series is the gate's input (never
+a target or an expert feature). These are the only free downloads left; CRSP has no
+equivalent of either.
 
 ## I.16 `alignment.py` — the interpretability tooling
 
@@ -924,7 +943,8 @@ repairs NLL *and* ECE on the untouched test block.
 | `test_residual_target.py` | rolling β recovers truth and is trailing (no-lookahead probe); market clone ⇒ zero residual target; β=2 name ⇒ market-neutral target |
 | `test_plots.py` | every figure renders headlessly and saves a real PNG; input guards |
 | `test_smoke.py` | end-to-end training + regime recovery (AUC > 0.8) + a broken-gradient guard that must fail |
-| `test_stage_b.py`, `test_stage_c.py`, `test_universe.py` | data parsers against fixtures that reproduce real-file quirks; the no-lookahead probe; point-in-time rollback across known epochs; coverage math; opt-in live tests |
+| `test_stage_b.py`, `test_stage_c.py`, `test_universe.py` | feature values by hand, the no-lookahead probe, panel contract; context parsers against fixtures that reproduce real-file quirks; inclusive membership spells; coverage math |
+| `test_crsp.py` | every CRSP construction rule on an invented-number CIZ fixture (delisting return reaches the target, the post-delisting fill, missing never zero, split-invariant volume, inclusive bounds, PERMNO labels, provenance, market INDNO, resumable extract); three `crsp_data` tests on the real files that skip without `Data/` |
 
 `python3.14 -m pytest tests/ -q` — the whole offline suite, deterministic, ~38 s
 (132 tests + 3 network-gated skips). Lint and types:
@@ -1003,8 +1023,8 @@ CI (`.github/workflows/ci.yml`, repo root) runs the same three checks on CPU tor
 goes live the day the repo gets a remote.
 
 Dependencies: `torch`, `numpy`, `pandas` are load-bearing. Optional, imported lazily:
-`yfinance` (price fallback), `lxml` (Wikipedia universe tables), `matplotlib` (your
-figures). Everything is CPU; typical times on this machine: smoke test ~8 s, a
+`pyarrow` (the CRSP extract, extra `crsp`), `statsmodels` (the Hamilton gate),
+`matplotlib` (your figures). Everything is CPU; typical times on this machine: smoke test ~8 s, a
 600-step real-panel fit ~1–2 min, the full suite ~38 s.
 
 Git protects the work: the repo root is the project folder; commit early and often
@@ -1066,35 +1086,55 @@ losses — and if you enable one, that run is an *ablation arm*, logged as such.
 
 ## II.4 Getting real data (Stage B), step by step
 
-### The quick path (default universe — pipeline-grade only)
+The real data is CRSP (release `ciz202512`), licensed to the university. **Licence rules:**
+`Quant Model/Data/` is gitignored; everything derived from CRSP (extracts, parquet, built
+panels, coverage tables, registries of CRSP runs) goes to `Data/derived/` and nowhere else;
+test fixtures are invented; committed reports quote aggregate statistics only.
+
+### Build the panel (once)
+
+From `nec_baseline/`, with the `crsp` extra installed (`pip install -e '.[crsp]'`, i.e.
+pyarrow):
+
+```bash
+python3.14 scripts/extract_crsp.py        # streams the CIZ files once, resumable
+python3.14 scripts/build_pit_panel.py     # the PIT panel, coverage table, build report
+```
+
+The extract (`Data/derived/crsp_extract_ciz202512_2015-01-01_2024-12-31/`, ~74 MB) holds
+the rows of the 736 PERMNOs that were S&P 500 members in 2015-2024, from about 18 months
+before the window to two months after it, plus their membership spells, delisting
+records, security-info history and the market series. The build writes
+`pit_panel_crsp_2015-01-01_2024-12-31.pt` (~500 MB; 1,264,598 rows, 2,516 dates),
+`pit_coverage_crsp_2015-01-01_2024-12-31.csv` and an aggregate `.report.json` next to it.
+Both scripts take an optional `[start] [end]`; the build reads the default extract, which
+covers every sub-window.
+
+### Use it
 
 ```python
 from nec_moe import (NECConfig, EncoderConfig, ExpertConfig, TrainConfig, NECModel,
-                     Trainer, build_stage_b_panel, StageBSpec, data_config_from_panel)
+                     Trainer, CRSPSpec, StageBSpec, build_crsp_panel, data_config_from_panel)
 
-panel = build_stage_b_panel(
-    "2015-01-01", "2024-12-31", "data_cache",
-    source="yfinance",                       # see "sources" below
-    spec=StageBSpec(seq_len=20, horizon=5),
-)
+build = build_crsp_panel(CRSPSpec(), StageBSpec(seq_len=20, horizon=5))
+panel = build.panel     # or torch.load(CRSPSpec().panel_path, weights_only=False)
 print(len(panel), "rows,", len(panel.date_labels), "dates,",
-      len(panel.entity_labels), "tickers")   # ≈ 71,700 / 2,490 / 30
+      len(panel.entity_labels), "PERMNOs")   # 1,264,598 / 2,516 / 713
+print(build.coverage)                        # PUBLISH this next to any result
 
 cfg = NECConfig(
     data=data_config_from_panel(panel),
     encoder=EncoderConfig(hidden_dim=32),
-    experts=ExpertConfig(hidden_dim=32),
+    experts=ExpertConfig(hidden_dims=(64, 32)),
     train=TrainConfig(sigma_init=0.05,       # ≈ std of 5-day returns!
                       sigma_freeze_steps=100, lr=1e-3, batch_size=512),
 )
-trainer = Trainer(NECModel(cfg))
-trainer.warmstart_experts(panel.full_batch(),
-                          sort_key=panel.x_seq[:, -1, 2])   # channel 2 = vol_20d
 ```
 
-First run downloads (~1–2 min for 31 symbols); every rerun is fully offline from the
-cache. **The default universe is survivorship-biased** — treat every number from it as
-a pipeline demonstration.
+In the control panel: `data="crsp"` (build from the extract, with `start`, `end` and
+`post_delisting_return`) or `data="panel_file"` (the prebuilt panel, the default path).
+Every trial the panel produces carries `data_source="crsp_ciz202512"` and the
+`post_delisting_return` it was built with.
 
 ### `StageBSpec` reference
 
@@ -1107,70 +1147,48 @@ a pipeline demonstration.
 | `target_kind` | `"raw"` | `"residual"` = market-neutral target `fwd − β_t·mkt_fwd` (β from a *trailing* window — no lookahead, planted-truth tested); the syllabus's "raw vs residual" ablation is these two specs on the same prices |
 | `beta_window` | 250 | trailing days for the rolling market beta (residual only); windows > 120 cost extra warm-up rows beyond `mom_120d`'s |
 
-### The point-in-time path (what any shown result should use)
+### What the CRSP build does, and the choices it records
 
-```python
-from nec_moe import (load_sp500_universe, filter_point_in_time,
-                     universe_coverage_report, build_stage_b_panel, StageBSpec)
-
-u = load_sp500_universe("data_cache")                     # Wikipedia, cached
-candidates = sorted(u.members_union("2015-01-01", "2024-12-31"))   # ~600 tickers
-panel = build_stage_b_panel("2015-01-01", "2024-12-31", "data_cache",
-                            tickers=tuple(candidates), source="yfinance",
-                            spec=StageBSpec(seq_len=20, horizon=5))
-# expect skip-reports: departed names often have no data — that is the residual bias
-panel = filter_point_in_time(panel, u)                    # kill component 1
-
-coverage = universe_coverage_report(
-    u, ["2016-01-04", "2018-01-02", "2020-01-02", "2022-01-03", "2024-01-02"],
-    available=set(panel.entity_labels))
-print(coverage)     # PUBLISH this table next to any result from this panel
-```
-
-Notes: the first candidate download is slow (hundreds of symbols; polite 0.5 s pauses)
-— let it run once, it caches. Membership history is reliable from ~2011 only
-(`EARLIEST_RELIABLE`; earlier as-of dates warn). The posture this buys:
-*survivorship-mitigated with documented residual coverage* — say exactly that, never
-"survivorship-free".
-
-### Sources, the cache, and manual downloads
-
-- Cache anatomy: `data_cache/aapl.us.2015-01-01.2024-12-31.csv` —
-
-  ```
-  Date,Open,High,Low,Close,Volume
-  2015-01-02,24.32,24.75,23.87,24.10,212818400
-  ...
-  ```
-
-  A present file short-circuits *all* network access. `refresh=True` re-downloads.
-- **Stooq** (syllabus primary) currently serves a JavaScript anti-bot wall. The code
-  detects it and raises with the exact browser URL
-  (`https://stooq.com/q/d/l/?s=aapl.us&d1=20150101&d2=20241231&i=d`) and the exact
-  filename to save into the cache — after which everything runs offline. Deliberately
-  not circumvented.
-- **yfinance** (syllabus's sanctioned prototyping fallback): raw bars plus the adjusted
-  close in its own `*.raw.csv` cache file (audit D-2), `pip install yfinance` if missing.
-- VIX + factors for Stage C land in the same cache: `vix_history.csv`,
-  `ff_factors_daily.zip`, `ff_momentum_daily.zip`, `sp500_wiki.html`.
+- **Universe:** S&P 500 membership spells of `membership_indno=1000500` (bounds
+  inclusive; 502-508 members per day). Features are built for every ever-member, then
+  `filter_point_in_time` keeps a row only on its PERMNO's member dates and re-ranks the
+  snapshot features among the members. Dual-class companies stay two PERMNOs.
+- **Returns:** `log(1 + DlyRet)`; a missing return is missing, and it invalidates every
+  row whose features or target need it (up to 120 days, for `mom_120d`).
+- **Delistings:** `DlyRet` already includes the delisting return (checked on every
+  delisting row). The delisting row is the stock's final return, never a panel row. A
+  forward window that runs past it is completed with `post_delisting_return`: `"cash"`
+  (0, the default, not a decision) or `"market"`. A delisting without a delisting return
+  leaves its targets missing; nothing is imputed.
+- **Volume:** dollar volume `|DlyPrc| x DlyVol`; share volume put on today's share basis
+  with `DlyCumFacShr` ratios inside the 20-day window, so a split does not move the
+  z-score.
+- **Market:** `log(1 + DlyTotRet)` of `market_indno=1000500` (the like-for-like SPY
+  replacement; `1000200` for a wider universe) feeds the market features, the beta and
+  the residual target.
+- **Checks:** the build refuses an extract too short for the features' warm-up or the
+  horizon, and a member count outside `member_count_min..member_count_max` (500..510).
 
 ## II.5 Bringing your own data
 
 Three routes, by decreasing convenience:
 
-**Route 1 — you have daily OHLCV CSVs.** Name them into the cache
-(`{symbol}.us.{start}.{end}.csv`, header exactly `Date,Open,High,Low,Close,Volume`) and
-call `build_stage_b_panel(...)` with matching dates — zero network, full feature
-pipeline, all timing rules applied for you.
+**Route 1 — another CRSP window.** `dataclasses.replace(CRSPSpec(), start=..., end=...)`
+with `build_crsp_panel(spec, stage_b, extract=load_extract(CRSPSpec()))` for any
+sub-window of the default extract; for a window outside it, run `extract_crsp.py` with
+the new dates first.
 
-**Route 2 — you have price DataFrames.** DatetimeIndex, columns
-`open/high/low/close/volume`:
+**Route 2 — you have daily returns and volumes.** One daily frame per entity
+(`DAILY_COLUMNS`: `ret` = daily log return with NaN for missing, `volume`,
+`dollar_volume`, and optionally `share_factor`, `tradable`, `fill_ret`) plus the market's
+daily log return:
 
 ```python
-from nec_moe import build_panel, StageBSpec
-panel = build_panel({"tick1": df1, "tick2": df2, ...},   # per-ticker OHLCV
-                    market_px=spy_df,                    # the market symbol's OHLCV
-                    spec=StageBSpec(seq_len=20, horizon=5))
+from nec_moe import StageBSpec, assemble_panel, market_frame
+spec = StageBSpec(seq_len=20, horizon=5)
+panel = assemble_panel({"10001": daily1, "10002": daily2, ...},  # per-entity frames
+                       market_frame(mkt_log_ret, spec), spec,
+                       data_source="my_source")                 # recorded on every trial
 ```
 
 **Route 3 — you have your own features.** Construct a `Panel` directly. Complete
@@ -1724,9 +1742,10 @@ objective genuinely differs from the predictive weights (study `hard` first). Se
 density for comparability) — the whole harness comes free via
 `walk_forward_evaluate_baseline`.
 
-**A new feature**: add the column in `features.py::ticker_features` (trailing
-information only), append the name to `SEQUENCE_FEATURES`/`SNAPSHOT_FEATURES` (order =
-channel order), extend `test_no_lookahead`. The no-lookahead test is the gatekeeper —
+**A new feature**: add the column in `features.py::stock_features` (trailing
+information only, from the daily frame's returns and volumes), append the name to
+`SEQUENCE_FEATURES`/`SNAPSHOT_FEATURES` (order = channel order), extend
+`test_no_lookahead` and its CRSP-fixture twin in `test_crsp.py`. The no-lookahead test is the gatekeeper —
 a feature that fails it does not exist.
 
 **A new aux loss**: pure function in `losses.py`, config flag default-off, compose in
@@ -1746,7 +1765,9 @@ The package fails loudly and specifically; the message usually *is* the fix.
 | `PriorConfig.tvtp … guarded-off extension` | TVTP not built (identifiability caution) | see Part III.2 before building |
 | `auxiliary losses are supported on the memoryless path only` | aux + HMM | disable aux for the HMM arm |
 | `n_experts must be >= 2 (a mixture)` | K=1 requested | use `MLPBaseline` — that *is* the single-model |
-| `Stooq served its JavaScript anti-bot challenge …` | source wall | browser-download to the printed cache name, or `source="yfinance"` |
+| `no complete CRSP extract at …: run scripts/extract_crsp.py first` | the extract is missing or was interrupted | run (or rerun: it resumes) `scripts/extract_crsp.py` |
+| `members per date range … outside the band …` | the membership INDNO or the window is wrong | check `CRSPSpec.membership_indno` (1000500) and the band |
+| `trial config lacks the provenance keys …` | a registry row without `data_source` / `post_delisting_return` / `hidden_init` | pass `**trial_provenance(panel, cfg)` into its config |
 | `only N dates have >= min_names valid names` | thin panel after validity filtering | widen dates/universe; lower `min_names_per_date` knowingly |
 | `no date had a scoreable cross-section — constant per-date predictions …` | rank-IC on a classical emission | compare on NLL/regime recovery |
 | `no overlap between panel dates and context index` | alignment join failed | real panels need `date_labels`; synthetic contexts index by integer codes |
@@ -1766,7 +1787,9 @@ The package fails loudly and specifically; the message usually *is* the fix.
   `TrainConfig.seed`) → `fit` is reproducible given the seed; dropout makes train-mode
   forwards stochastic → tests and comparisons use `dropout=0` or `eval()`.
 - **The cache is a lab notebook**: `data_cache/` + `results/*.jsonl` + `figs/` +
-  committed code = a fully reconstructible experiment. Commit all four together.
+  committed code = a fully reconstructible experiment. Commit all four together. The
+  exception is anything derived from CRSP (the extract, the panel, registries of CRSP
+  runs): it lives in `Data/derived/`, is gitignored, and is never committed.
 
 ---
 
@@ -1793,7 +1816,7 @@ work is *experimental design and execution*:
 5. **Load-balancing / decorrelation ablation arms** (½ day). Both levers are wired and
    default-off; the grid should include soft±LBL and soft±decorr (the syllabus's "with
    vs without load balancing" row).
-6. **The real-data grid on the PIT panel** (compute time) — II.4's point-in-time path,
+6. **The real-data grid on the PIT panel** (compute time) — the CRSP panel of II.4,
    coverage table published alongside.
 
 ## III.2 If the supervisor picks **Variation 3** (HMM-gated NEC)
@@ -1829,13 +1852,13 @@ Ordered by value per effort; ✅ exists, ◻ to do:
 1. ✅ **Multi-seed protocol** — `run_sweep` (`sweep.py`, II.9): arms × seeds through the
    shared harness, registry-logged, mean ± std per arm, BH-corrected claim family
    across arms with median-combined replicate p-values.
-2. ✅ **Full point-in-time panel** — `scripts/build_pit_panel.py` (resumable:
-   cache-first, rerun to retry failures). Built 2015–2024: 640 candidates attempted,
-   590 loaded, **1,089,688 PIT rows** across 2,390 dates; measured coverage 83.4%
-   (2016) → 97.2% (2024), published at `results/pit_coverage_2015_2024.csv`; panel
-   checkpoint at `data_cache/pit_panel_2015_2024.pt` (~412 MB, gitignored,
-   re-buildable). The ~50 failures are the departed names (TWTR, YHOO, XLNX, WFM…) —
-   survivorship component 2, measured not silent.
+2. ✅ **Full point-in-time panel, on CRSP** — `scripts/extract_crsp.py` (resumable)
+   then `scripts/build_pit_panel.py` (brief 06). Built 2015–2024 from CRSP `ciz202512`:
+   736 ever-members, **1,264,598 PIT rows** across 2,516 dates, 502–508 members per day,
+   delisting returns included; coverage by year 98.3%–99.8%, in
+   `Data/derived/pit_coverage_crsp_2015-01-01_2024-12-31.csv` (licensed, gitignored,
+   re-buildable). The earlier free-data panel (`data_cache/pit_panel_2015_2024.pt`,
+   survivorship-biased) is obsolete and unused.
 3. ✅ **Residual-return target** — `StageBSpec(target_kind="residual", beta_window=250)`
    (`rolling_beta`, trailing OLS β; market-clone ⇒ zero target, β=2 name ⇒
    market-neutral target, no-lookahead β — all planted-truth tested). The "raw vs
@@ -1889,7 +1912,7 @@ typical thesis repositories:
 | Correctness assurance | **A** | 100+ tests: analytic gradients, reference filters, causality probes, planted-truth recoveries, defect regressions. Far above field norm. |
 | Methodology | **A** | Purged WF, fit-once-per-window, logged selection events, DSR/FDR, capacity-matched baselines, one grading path — plus the protocol layer: multi-seed sweeps with arm-level corrections, tune-once-freeze validation tails, gate calibration, and a pre-registration template. The tooling is complete; what remains is *using* it on the pre-registered runs. |
 | Reproducibility | **A−** | Deterministic seeds planted end-to-end, config round-trip in every registry row, cache-first data, append-only registry, figures as code, ruff+mypy clean, CI workflow committed. Missing: a pinned environment (lockfile) and an actual remote for the CI to run against. |
-| Data rigor | **C+** | Timing contract *tested*; PIT membership + measured coverage; but current panels are ≤~600 attempted names with no delisting returns, yfinance-grade prices. Honest about every limit — worth half a grade itself. |
+| Data rigor | **B+** | Timing contract *tested*; CRSP daily data with PIT S&P 500 membership and delisting returns, each construction rule checked against the release metadata and pinned by an invented-number fixture; licence-safe layout. Not yet: fundamentals (Compustat) and a universe wider than the S&P 500. |
 | Architecture | **A−** | Two plug axes proven by tests; the protocol layer composes tested pieces rather than duplicating split logic; extension checklists are short because the seams are real. Remaining debt: conftest path hack (package not installed editable), no device/GPU handling. |
 | Documentation | **A−** | Design doc with decision traceability; docstrings with shapes *and reasons*; this handbook. |
 
@@ -1902,7 +1925,7 @@ A desk pipeline has roughly six layers; where this code stands in each:
 
 | layer | desk requirement | this code | gap |
 |---|---|---|---|
-| **Data** | vendor PIT (CRSP/Compustat/Refinitiv), corporate actions, delisting returns, 3000+ names, ongoing ingestion + QA | free daily bars, ≤~600 names, PIT *membership* only, measured coverage | **the big one** — this layer is bought, not coded |
+| **Data** | vendor PIT (CRSP/Compustat/Refinitiv), corporate actions, delisting returns, 3000+ names, ongoing ingestion + QA | CRSP daily (CIZ), S&P 500 PIT membership, delisting returns, split-aware volume; one frozen release | medium — no fundamentals, ~500 names, no ongoing ingestion |
 | **Signal research** | leakage-proof backtests, multiplicity control, registered experiments | purged WF, DSR/FDR, registry, causality tests | **small** — genuinely desk-grade *thinking*; a desk reviewer would recognize the discipline |
 | **Portfolio construction** | optimizer + risk-model neutralization (Barra/Axioma), constraints, capacity | equal-weight quantile L/S | large — a research proxy, not a book |
 | **Transaction costs** | spread + impact (√participation), borrow, realistic fills | linear cost on traded notional | medium — fine for ranking models, not for sizing capital |
@@ -1913,7 +1936,8 @@ A desk pipeline has roughly six layers; where this code stands in each:
 and prototype-grade everything else — the correct shape for its purpose. A desk quant
 would trust the honesty of its evaluation numbers (rare) and would not trade it as-is
 (correct). Path to desk-usable, in order: (1) a vendor PIT data layer behind the
-existing `Panel` contract — designed so only `market_data`/`features` change; (2) a
+existing `Panel` contract — now in place for CRSP prices and membership (`crsp.py`),
+fundamentals still to come; (2) a
 real cost model + constrained optimizer replacing quantile L/S; (3) ops — scheduled
 refits, drift monitors (gate entropy/utilization are already the right drift signals),
 model versioning atop the registry; (4) scale-out, least urgent.

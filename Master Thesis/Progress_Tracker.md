@@ -16,8 +16,8 @@ detail stays in the source documents; this file points to them.
 
 | Component | What it is | Status | Where |
 |---|---|---|---|
-| Data | CRSP daily and monthly stock file (CIZ format, to Dec 2025); CRSP/Compustat Merged (July 2026 release) | Downloaded and verified. The pipeline switches to CRSP in brief 06 | Q3; `Data/` (gitignored, licensed) |
-| Universe | S&P 500 point-in-time | Currently Wikipedia reconstruction on free prices; brief 06 moves it to CRSP membership | `universe.py` |
+| Data | CRSP daily stock file (CIZ `ciz202512`, to Dec 2025) feeds the whole pipeline: a resumable extract and the point-in-time panel (1,264,598 rows, 2,516 dates, 2015-2024) in `Data/derived/`. Free data (yfinance, Stooq, Wikipedia) retired. CRSP/Compustat Merged downloaded, not used | Implemented (brief 06 A, B); integration run on CRSP passed (F) | Q3; `crsp.py`; `Data/` (gitignored, licensed) |
+| Universe | S&P 500 point-in-time from CRSP membership spells, INDNO 1000500 (not 1000502, which has no constituents), bounds inclusive, 502-508 members per day; dual-class companies kept as two PERMNOs. Delisting returns already in `DlyRet` (rule a); forward windows past a delisting completed by `post_delisting_return` (`"cash"` default, not a decision) | Implemented (brief 06 A) | `crsp.py`, `universe.py` |
 | Frequency and horizon | Code runs daily with a 5-day forward target | **Open** | Q21 |
 | Base | MLP, trained on the training block, then frozen | Decided, implemented | Q7; brief 02 |
 | Gate | Regime model fitted separately, then frozen; output is the filtered probability, never the smoothed one | Decided. Hamilton implemented; jump, Wasserstein and TVTP to come | Q19; briefs 03, 04 B |
@@ -25,13 +25,37 @@ detail stays in the source documents; this file points to them.
 | Number of regimes K | | **Open** | Q18 |
 | Error function | Only the mixture NLL is registered, behind a seam | **Open** | Q20 |
 | Depth grid | Mechanism by depth, depths set by the compute budget | Decided | Q11 |
-| Evaluation | Walk-forward with purge; rank IC with Hansen-Hodrick t-stats for overlapping targets; NLL improvement over the base | Implemented and audited. Volatility-only NLL gain added in brief 06 | audit E-1, E-2 |
+| Evaluation | Walk-forward with purge; rank IC with Hansen-Hodrick t-stats for overlapping targets; NLL reported three ways: `NLL_single`, `NLL_base`, `NLL_full`, giving the variance gain, the correction improvement and their total. Every trial row carries `data_source`, `post_delisting_return` and `hidden_init` | Implemented and audited (brief 06 C; A.6) | audit E-1, E-2; `evaluation.py`, `registry.py` |
 | Gate through the purge gap | Whether the filter sees the gap's market returns | **Open** | Q22 |
 | Sample weighting | Time decay; crash-preserving weights | **Parked**, not in code | Q16 (d), (e) |
 
 ---
 
 ## 2. Log (newest first)
+
+### 2026-09-26 (brief 06 implemented)
+- **Commits** (not pushed): step 0, the audit fixes (9c10945) and these documents (87216a2); A, the
+  CRSP data layer (2552a32); B, free data retired (494c21e); C, the NLL split (f44f573); D, the
+  `hidden_init` switch (3cef208); E, G-5 accepted (6dd3276); F, the CRSP integration run (d5c78d6);
+  G, documentation and audit section 11. 309 tests pass, 1 skipped, 3 xfailed.
+- **Decided (Tom).** The S&P 500 membership INDNO is **1000500**, not 1000502: 1000502 has no
+  constituents in `StkIndMembership`; 1000500 has 2,084 spells over 1,956 PERMNOs and 502-508
+  members per day in 2015-2024, bounds inclusive (70 count changes versus 276 for exclusive
+  bounds). Erratum added to brief 06 A.3.
+- **Decided (Tom).** Delisting rule (a): CIZ `DlyRet` already includes the delisting return
+  (`MetaSIZtoCIZ`; on the real data `DlyRet` equals `DelRet` on every delisting row, 5,376 of 5,376
+  market-wide in 2015-2024). Nothing is compounded in.
+- **Decided (Tom).** A forward window that runs past a stock's final CRSP return is completed with a
+  post-delisting return, `post_delisting_return` = `"cash"` (0) or `"market"`; default `"cash"`,
+  not a decision, recorded on every trial. It touched 407 panel rows. The 2 member delistings
+  without a delisting return (GDR/FING) keep missing targets; nothing is imputed.
+- **Found.** Same-seed expert starts are bit-identical across gate arms (private generator; B-1
+  does not reach them). Dropout masks are drawn independently per expert, so the `"identical"`
+  control needs dropout 0. The Hamilton gate's input series is French daily Mkt-RF (brief 03 §2),
+  so the French factors are not "diagnostics only" as brief 06 B says; the docstrings now say so.
+- **Integration run on CRSP** (`Smoke_Run_2026-09-26_CRSP.md`): every fold's gate converged (24 of 24
+  starts), stationary probabilities 0.32-0.68, expected durations 32-72 days; no stop condition.
+  No out-of-sample number was looked at or reported.
 
 ### 2026-09-26
 - **Data.** CRSP/Compustat Merged downloaded: `cfz202607_ascii.zip` (95 files, 13.2 GB unzipped) and

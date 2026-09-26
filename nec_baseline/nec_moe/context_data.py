@@ -7,8 +7,11 @@ against, which is what keeps the thesis's secondary research question testable).
 
 These are the only free downloads left in the pipeline. The price, return and
 universe data now come from CRSP (:mod:`nec_moe.crsp`, brief 06); VIX and the
-French factors stay because CRSP has no equivalent of either, and because a
-diagnostic series never reaches the model.
+French factors stay because CRSP has no equivalent of either. VIX never
+reaches the model. One exception to "diagnostics only": the Hamilton gate's
+registered date-level series ``market_excess_return`` (brief 03 §2) is the
+French daily Mkt-RF from :func:`load_french_factors`, so that series is the
+gate's input. It is not a target and not an expert feature.
 
 Sources, both official and free:
 

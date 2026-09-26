@@ -1,6 +1,6 @@
 # Work queue
 
-Last updated 2026-09-21. Everything still to be coded, in priority order. Each item names the brief
+Last updated 2026-09-26 (brief 06: CRSP replaces the free data; items 3 and 7 done). Everything still to be coded, in priority order. Each item names the brief
 that specifies it. Start a session by reading this file, then the brief for the item being worked.
 
 **Standing rules for every item.** Every numeric quantity is a config field with a documented
@@ -78,7 +78,13 @@ for the record of what was changed and why.
 findings worth carrying forward. The critical path is clear: the remaining gates (item 6) now have
 the `fit` / `PrecomputedRegimePrior` interface and the canonical ordering they each need.
 
-## 3. End-to-end run on free data
+## 3. End-to-end run on free data [DONE; superseded 2026-09-26]
+
+Run on free data 2026-09-25 (`Smoke_Run_2026-09-25.md`), then superseded by the CRSP integration
+run of brief 06 section F (`Smoke_Run_2026-09-26_CRSP.md`: same settings, only the data source
+changed; data, gate, experts trained and wall clock only, no out-of-sample number). The original
+item is kept below for the record.
+
 
 Not a brief; a smoke run. Build a Stage B panel from the free source, fit the base, fit the Hamilton
 gate, train the experts in residual mode, run the walk-forward evaluation. Small universe, few
@@ -130,12 +136,16 @@ In this order. Each becomes a `PrecomputedRegimePrior` on the section 1 interfac
 Note that all three need the canonical regime ordering from brief 03 section 4, since all are fitted
 per fold and all are invariant to relabelling.
 
-## 7. CRSP seam
+## 7. CRSP seam [DONE 2026-09-26, by brief 06 section A]
 
-**Brief 01 section 7.** Define the loader interface against the existing cache CSV contract so
-switching sources is a single file change. Do not write CRSP-specific code; access is not in place.
-Add a `source` field to every `TrialRegistry` entry so no result can later be mistaken for a CRSP
-result.
+CRSP access arrived, so brief 06 replaced the seam with the CRSP layer itself: `nec_moe/crsp.py`
+(release `ciz202512`, S&P 500 membership INDNO 1000500, market INDNO 1000500, delisting returns,
+the post-delisting fill), `scripts/extract_crsp.py` and `scripts/build_pit_panel.py`, everything
+derived kept in `Data/derived/`; the free loaders are gone (section B). The provenance requirement
+is met and enforced: every `TrialRegistry` row carries `data_source` (`"crsp_ciz202512"` or
+`"synthetic"`), `post_delisting_return` and `hidden_init`, and the registry refuses a row without
+them. The original item, for the record: define a loader interface against the cache CSV contract,
+and add a `source` field to every registry entry.
 
 ## 8. Pre-registration
 

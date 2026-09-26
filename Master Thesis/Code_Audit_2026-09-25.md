@@ -746,3 +746,71 @@ section 9 plus ten **fix-reversal** mutations, each of which undoes one fix:
 - **Other findings.** Every other open finding is as before, including the Majors B-1, X-1, E-3,
   O-1, O-3, S-2, S-3, G-2 and G-3, and D-4, whose `min_names_per_date` is still counted before the
   filter.
+
+---
+
+## 11. Brief 06 (2026-09-26): CRSP replaces the free data, three small decisions
+
+Implemented in one commit per section, not pushed: step 0 (9c10945 fixes, 87216a2 documents), A
+(2552a32), B (494c21e), C (f44f573), D (3cef208), E (6dd3276), F (d5c78d6), G (this section).
+
+**Suite:** 309 passed, 1 skipped (a network test), 3 xfailed (B-1, G-2, G-3). ruff and mypy are clean.
+The three tests that read the licensed CRSP files (`crsp_data`) run here and skip without `Data/`.
+
+**Decisions recorded** (Tom, 2026-09-26):
+
+1. **Membership INDNO 1000500.** The brief's guess, `1000502` ("S&P 500 Composite", family
+   `1100502`), has 0 rows in `StkIndMembership`: it is S&P's index level series. `1000500` ("CRSP
+   Index of the S&P 500 Universe", family `1100500`) has 2,084 spells over 1,956 PERMNOs; `1000501`
+   has identical spells. Members per date lie between 502 and 508 over all 2,516 trading days of
+   2015-2024; the excess over 500 is companies with two share classes (7 in the window, kept as two
+   PERMNOs). Bounds are inclusive: the per-date count changes 70 times under inclusive bounds and
+   276 times if either bound is exclusive, and 202 of 239 spell starts abut an end on the previous
+   trading day. Erratum added to brief 06 A.3; evidence in the `CRSPSpec` docstring.
+2. **Delisting rule (a).** CIZ `DlyRet` already includes the delisting return: `MetaSIZtoCIZ` maps
+   legacy `DLRET` to both `DelRet` and `DlyRet`, and on the real data all 5,518 delistings dated
+   2015-2024 have a stock row on `DelDlyDt` (flagged `DlyDelFlg = Y`) whose `DlyRet` equals
+   `DelRet` in all 5,376 cases with a value (largest difference 1e-16); the other 142 are missing in
+   both under the same codes. Nothing is compounded in. The delisting row is kept as the stock's
+   final return and is never a panel row.
+3. **`post_delisting_return` switch.** A forward window that runs past a stock's final CRSP return
+   is completed with a post-delisting return, `"cash"` (0) or `"market"` (the `market_indno`
+   return), default `"cash"`, which is not a decision. Without it the row would be dropped because
+   of a future event (look-ahead selection) and the delisting return would reach only one date. The
+   residual target is computed on the completed window. It touched 407 rows of the 2015-2024 panel.
+   The 2 member delistings without a delisting return (DelActionType/DelReasonType GDR/FING) keep
+   missing targets; nothing is imputed. The setting is recorded on every registry row.
+
+**Closed by this brief:**
+
+| Item | What changed | Pinned by |
+|---|---|---|
+| **E-1 follow-up** | `NLL_single` (the base as one Gaussian, the pre-fix definition at 9a29368), `NLL_base` and `NLL_full`, reported as `nll_variance_gain`, `nll_improvement` and `nll_total_gain` in the harness, sweep rows, quick mode and the smoke script. The variance gain is attributed to the experts' noise scales under the gate; neither gain is ranked | `test_total_gain_is_variance_gain_plus_improvement`, `test_variance_gain_is_zero_when_every_sigma_is_equal`, `test_total_gain_is_the_variance_gain_when_every_correction_is_zero`, `test_nll_single_is_the_pre_fix_base_nll`, `test_sweep_rows_carry_all_three_nll_quantities` |
+| **X-1** (switch only) | `ExpertConfig.hidden_init`: `"diversified"` (default, bit-identical to before) or `"identical"`. Which one the thesis uses is **not decided**. Recorded on every registry row. Checked: for one seed the experts' start is bit-identical across gate arms (uniform, soft, hmm, markov); the draws use a private generator, so B-1's global reseed does not reach them. Reported: dropout masks are drawn independently per expert, so identical experts diverge under a uniform gate unless dropout is 0 | `tests/test_expert_init.py` (9 tests) |
+| **G-5** | Accepted: the expanding volatility quantile and the 1-nat gap clustering are the specification; docstrings say so. No code change | table row above |
+| §10 "real panel must be rebuilt" | The CRSP panel is built from scratch with the D-1 re-rank; the free-data panel is obsolete and unused | `test_crsp.py` |
+| §10 "smoke run is stale" | Superseded by the CRSP integration run (`Smoke_Run_2026-09-26_CRSP.md`): gate converged on every fold, no stop condition; no out-of-sample number reported | the run |
+| WORK_QUEUE 7 provenance | Every registry row carries `data_source`, `post_delisting_return` and `hidden_init`; `TrialRegistry.log` refuses a row without them | `test_registry_refuses_a_row_without_provenance`, `test_data_source_and_fill_reach_every_registry_row` |
+
+**Changed along the way.** The free loaders went with section B, and so did the tests of their
+contract, including the two D-2 tests (`test_features_at_t_ignore_dividends_paid_after_t`,
+`test_yfinance_cache_holds_raw_and_adjusted_close`); the break-it rows F2 and F3 no longer apply.
+D-2's property holds on CRSP by construction (dollar volume is `|DlyPrc| x DlyVol`, no adjusted
+price exists) and is pinned by `test_dollar_volume_is_raw_price_times_raw_volume`. The feature layer
+now works from daily returns: the drawdown compounds returns inside its window, and share volume
+uses split factors inside the window only (`test_split_leaves_the_volume_zscore_unchanged`).
+
+**Observed, not changed:**
+
+- The Hamilton gate's registered series `market_excess_return` (brief 03 §2) is French daily
+  Mkt-RF from `context_data.py`, so the French factors are not "diagnostics only, never a training
+  signal" as brief 06 B puts it: that series is the gate's input. The docstrings now say so. The
+  integration run kept the series, since F allows only the data source to change.
+- Under rule A.4.1 a single missing return invalidates the stock's rows for up to 120 trading days
+  (`mom_120d` needs every return in its window). On the panel this costs little: 99% or more of
+  each year's members have rows.
+
+**Not closed** (scope fence): B-1 and every other open finding stay open, including the Majors
+E-3, O-1, O-3, S-2, S-3, G-2, G-3 and M-5, and D-4 (`min_names_per_date` still counted before the
+point-in-time filter). X-1 has its switch; the choice between the two starts is still Tom's. B-2 and Q16 were not touched; G-1 is now Q22 and the filter still skips the
+purge gap; Q21 (frequency and horizon) and Q20 (the objective) are unanswered; Compustat is not used.

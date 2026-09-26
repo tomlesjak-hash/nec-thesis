@@ -123,34 +123,55 @@ Works for both prior families: HMM folds are scored by a strictly-causal filteri
 warmed through the (past) training window. Still missing from the full Module 5 protocol:
 deflated Sharpe (needs the trial registry) and multiple-testing corrections.
 
-## Stage B: real daily data (Stooq / yfinance)
+## Stage B: CRSP daily data (licensed)
 
 ```python
-from nec_moe import build_stage_b_panel, StageBSpec, data_config_from_panel
+from nec_moe import CRSPSpec, StageBSpec, build_crsp_panel, data_config_from_panel
 
-panel = build_stage_b_panel(
-    "2015-01-01", "2024-12-31", "data_cache",
-    source="yfinance",                    # or "stooq" — see caveat below
-    spec=StageBSpec(seq_len=20, horizon=5),
-)
+spec = CRSPSpec()   # release ciz202512, S&P 500 (INDNO 1000500), 2015-01-01..2024-12-31
+build = build_crsp_panel(spec, StageBSpec(seq_len=20, horizon=5))  # from Data/derived/
+panel = build.panel      # entity labels are PERMNOs; panel.data_source == "crsp_ciz202512"
+print(build.coverage)    # per year: members with and without usable rows
 cfg = NECConfig(data=data_config_from_panel(panel))
 # panel plugs into Trainer / walk_forward_evaluate unchanged
 ```
 
-- The **cache CSV is the interface** (`Date,Open,High,Low,Close,Volume`, one file per
-  symbol under `data_cache/`): downloads are cache-first, features/panels never touch
-  the network, and all Stage-B tests run offline against fixture CSVs.
-- **Stooq caveat:** its CSV endpoint sits behind a JavaScript anti-bot challenge (as of
-  mid-2026) which this code deliberately does *not* circumvent — either download the CSVs
-  in a browser into the cache (the error message gives URL + filename), or use
-  `source="yfinance"` (the syllabus's prototyping fallback; `pip install yfinance`).
+Two scripts, run from `nec_baseline/` (they need the `crsp` extra, i.e. pyarrow):
+
+1. `python3.14 scripts/extract_crsp.py` streams the CRSP CIZ files once (from the
+   extracted `Data/crspdata/ciz202512_ascii/` copy, else from `Data/ciz202512_ascii.zip`,
+   never unzipped whole) and keeps the rows of every PERMNO that was an S&P 500 member in
+   the window, with lookback and lead. Resumable: the byte offset of every block is on
+   record.
+2. `python3.14 scripts/build_pit_panel.py` builds the point-in-time panel from that
+   extract and writes the panel, its coverage table and an aggregate build report.
+
+`run_experiment.py` reads it with `data="crsp"` (build from the extract) or
+`data="panel_file"` (the prebuilt panel).
+
+- **Licence.** CRSP is licensed to the university; redistribution is prohibited.
+  `Quant Model/Data/` is gitignored, and everything derived from CRSP (extracts, parquet
+  files, built panels, coverage tables, registries of CRSP runs) lives in `Data/derived/`
+  and nowhere else: never in `data_cache/`, `results/`, `figs/` or `Master Thesis/`.
+  Tests use CIZ-format fixtures with the real headers and invented numbers; tests that
+  read the real files are marked `crsp_data` and skip without `Data/`. Committed reports
+  quote aggregate statistics only (counts, ranges, means, rates), never rows or
+  per-security values.
+- **Construction** (`nec_moe/crsp.py`, each rule checked against the release metadata and
+  tested): daily log return `log(1 + DlyRet)`, a missing return stays missing; `DlyRet`
+  already includes the delisting return, and a forward window that runs past a stock's
+  final return is completed with `CRSPSpec.post_delisting_return` (`"cash"` = 0 or
+  `"market"`; the default is not a decision) so no row is dropped because of a future
+  delisting; dollar volume `|DlyPrc| x DlyVol`; drawdown compounded inside its own window;
+  share volume made split-invariant with `DlyCumFacShr` ratios inside the window; the
+  market series is `log(1 + DlyTotRet)` of `market_indno`.
 - **Anti-leakage:** every feature at date t is computed from data ≤ t (verified by
-  `test_no_lookahead`); the forward return target is the only forward-looking column;
-  snapshot features are cross-sectionally rank-normalized per date. Walk-forward purge
-  should equal the target horizon (`purge_dates=spec.horizon`).
-- **SURVIVORSHIP BIAS:** `DEFAULT_UNIVERSE` is a static list of *today's* large caps —
-  pipeline-verification grade, not thesis-claim grade. Point-in-time universe +
-  delistings (Module 12) remain TODO before any performance claim.
+  `test_no_lookahead` and its CRSP-fixture twin); the forward return target is the only
+  forward-looking column; snapshot features are cross-sectionally rank-normalized per
+  date. Walk-forward purge should equal the target horizon (`purge_dates=spec.horizon`).
+- **Provenance:** every `TrialRegistry` row carries `data_source`,
+  `post_delisting_return` and the experts' `hidden_init` (`trial_provenance`); the
+  registry refuses a row without them.
 
 ## Stage C: context data + gate–regime alignment (the interpretability question)
 
@@ -163,9 +184,11 @@ print(report.to_frame())  # per expert: corr with VIX / factors / realized vol,
                           # plus high- vs low-VIX tercile utilization
 ```
 
-VIX (CBOE official CSV) and Kenneth French daily factors are **diagnostics only** —
-they never enter training (the gate stays unsupervised, which is what keeps "do learned
-experts correspond to regimes?" a *testable* question). First real run (30-name panel,
+VIX (CBOE official CSV) is **diagnostics only**: it never enters training (the gate stays
+unsupervised, which is what keeps "do learned experts correspond to regimes?" a
+*testable* question). The Kenneth French factors are diagnostics too, with one exception:
+the Hamilton gate's registered series `market_excess_return` (brief 03 §2) is French
+daily Mkt-RF, so that series is the gate's input (never a target or an expert feature). First real run (30-name panel,
 2015–2024, unsupervised soft gate): the high-σ expert's utilization correlated **+0.81
 with VIX** / +0.85 with realized market vol and ≈0 with directional factors — a
 volatility-regime split discovered from the mixture likelihood alone. Single seed,
@@ -194,27 +217,25 @@ the baselines lose above for structural reasons, not because they're broken.
 LightGBM (syllabus candidate #2) is deliberately not wired in: heavy optional
 dependency, and the repo carries a separate LGBM pipeline.
 
-## Point-in-time universe (partial Module 12 — survivorship mitigation)
+## Point-in-time universe (S&P 500 membership from CRSP)
 
 ```python
-from nec_moe import load_sp500_universe, filter_point_in_time, universe_coverage_report
+from nec_moe import CRSPSpec, read_membership, membership_universe, filter_point_in_time
 
-u = load_sp500_universe("data_cache")            # Wikipedia constituents + change history
-u.members_asof("2018-06-01")                      # membership by reverse-chronological undo
-candidates = u.members_union("2015-01-01", "2024-12-31")  # tickers to attempt downloading
-panel = filter_point_in_time(panel, u)            # drop (name, date) rows outside the index
-print(universe_coverage_report(u, ["2015-01-02", "2020-01-02"], set(prices)))
+u = membership_universe(read_membership(CRSPSpec()))  # StkIndMembership spells, INDNO 1000500
+u.members_asof("2018-06-01")                          # PERMNOs whose spell covers the date
+panel = filter_point_in_time(panel, u)                # drop (PERMNO, date) rows outside it
 ```
 
-This kills survivorship **component 1** (backward-looking selection: a name appears on a
-date only if it was in the index then) and makes **component 2 measurable** (departed
-names without free price data → the `coverage` column is the honest number to publish
-next to any backtest; the live test shows the 30-name default universe covers <12% of the
-true index). Not fixed and not claimable: delisting returns (needs CRSP). History is
-reliable from ~2011 (`EARLIEST_RELIABLE`; measured against real index turnover — the
-2000s are mostly missing from the source and `members_asof` warns). The defensible
-posture: *survivorship-mitigated with documented residual coverage*, never
-"survivorship-free".
+`build_crsp_panel` does this for you: it builds features over every PERMNO that was a
+member at some point in the window (history before joining may feed features), keeps a
+row only on dates its PERMNO was a member (`MbrStartDt`/`MbrEndDt`, both inclusive), and
+re-ranks the snapshot features among the members (audit D-1). CRSP carries the departed
+names and their delisting returns, so both survivorship components are covered by the
+data; `build.coverage` still reports, per year, members without usable rows. The
+membership INDNO is `1000500` ("CRSP Index of the S&P 500 Universe"): `1000502` has no
+constituents in `StkIndMembership` (evidence in the `CRSPSpec` docstring). Companies with
+two share classes in the index are kept as two PERMNOs.
 
 ## Selection-aware inference (trial registry + deflated Sharpe + FDR)
 
@@ -222,14 +243,15 @@ Every sweep configuration is a logged trial; picking a winner is a recorded even
 
 ```python
 from nec_moe import (TrialRegistry, ic_pvalue, benjamini_hochberg,
-                     deflated_sharpe_ratio)
+                     deflated_sharpe_ratio, trial_provenance)
 import statistics
 
 reg = TrialRegistry("trials.jsonl")            # append-only JSONL, reopenable
 for cfg_name, result in sweep_results.items(): # one row per configuration/seed
     reg.log("routing_sweep", {"mean_ic": result.pooled_ic.mean_ic,
                               "p": ic_pvalue(result.pooled_ic),
-                              "sharpe": sharpe}, config={"prior": cfg_name})
+                              "sharpe": sharpe},
+            config={"prior": cfg_name, **trial_provenance(panel, cfg)})  # provenance required
 
 # the claim family, corrected (FDR — the factor-zoo discipline):
 pvals = [r.metrics["p"] for r in reg.trials("routing_sweep")]

@@ -84,6 +84,32 @@ __all__ = [
 CHECKPOINT_FORMAT = 1
 
 
+FilterHistory = list[Tensor]
+"""The recursion's state: the latest filtered posteriors, oldest first.
+
+The HMM prior at date ``t`` may use only targets realised by ``t``. With an
+``h``-period forward target that is the posterior from ``h`` dates back, so
+the state carried between chunks and passed to :meth:`Trainer.evaluate_sequence`
+is the last ``h`` posteriors, not only the last one (audit finding M-1). A
+bare ``(B, K)`` tensor or a stacked ``(L, B, K)`` tensor is accepted and read
+as a history.
+"""
+
+
+def _as_history(state: Tensor | Sequence[Tensor] | None) -> FilterHistory:
+    if state is None:
+        return []
+    if isinstance(state, Tensor):
+        if state.ndim == 2:
+            return [state]
+        if state.ndim == 3:
+            return list(state.unbind(0))
+        raise ValueError(
+            f"filter state must be (B, K) or (L, B, K), got {tuple(state.shape)}"
+        )
+    return list(state)
+
+
 class DeadParameterWarning(UserWarning):
     """Some parameters receive no gradient — see :class:`GradientAudit`."""
 
@@ -194,7 +220,7 @@ class Trainer:
         # fit_sequence()'s cursor: which chunk is next + the carried
         # (detached) filter state, plus the chunking it was built under
         self._seq_ci: int = 0
-        self._seq_state: Tensor | None = None
+        self._seq_state: FilterHistory | None = None
         self._seq_meta: dict[str, int] | None = None
 
     # ------------------------------------------------------------ internals
@@ -260,6 +286,25 @@ class Trainer:
             self.model.prior.eval()
         if self.model.base is not None:
             self.model.base.eval()
+
+    def _lagged_context(self, history: FilterHistory) -> PriorContext:
+        """Prior context for the next date: the posterior ``h`` dates back.
+
+        ``h`` is the target's forward horizon (``DataConfig.horizon_periods``).
+        The posterior from ``h`` dates back is the latest one updated only with
+        targets realised by the date being predicted; it is carried forward
+        ``h`` predict steps. Fewer than ``h`` posteriors available (a sequence
+        start) means no legal state yet: the prior's initial distribution.
+        With gaps in the sequence (the purge between a training block and its
+        test block) ``h`` positions back is at least ``h`` dates back, so the
+        rule errs toward older information, never newer.
+        """
+        h = self.cfg.data.horizon_periods
+        if len(history) < h:
+            return PriorContext(step=self.step_count)
+        return PriorContext(
+            prev_filtered=history[-h], predict_steps=h, step=self.step_count
+        )
 
     def _apply_sigma_schedule(self) -> None:
         frozen = self.step_count < self.cfg.train.sigma_freeze_steps
@@ -568,35 +613,39 @@ class Trainer:
 
     # ---------------------------------------------- stateful (time-threaded)
     def train_step_sequence(
-        self, chunk: Sequence[Batch], init_state: Tensor | None = None
-    ) -> tuple[dict[str, float], Tensor]:
+        self,
+        chunk: Sequence[Batch],
+        init_state: Tensor | Sequence[Tensor] | None = None,
+    ) -> tuple[dict[str, float], FilterHistory]:
         """One optimizer step on a chronological chunk of per-date batches.
 
-        Threads the **attached** filtered posterior across timesteps within the
-        chunk (backprop through the forward recursion) and returns the final
-        state for the caller to detach and carry into the next chunk
-        (truncated BPTT over the regime posterior).
+        Threads the **attached** filtered posteriors across timesteps within
+        the chunk (backprop through the forward recursion); the prior at each
+        date reads the posterior ``h`` dates back (:meth:`_lagged_context`).
+        Returns the last ``h`` posteriors, detached, for the caller to carry
+        into the next chunk (truncated BPTT over the regime posterior).
         """
         self._train_mode()
         self._apply_sigma_schedule()
-        state = init_state
+        history = _as_history(init_state)
         per_sample: list[Tensor] = []
         penalties: list[Tensor] = []
         last: tuple[NECOutput, MixtureNLLOutput] | None = None
         for batch in chunk:
-            ctx = PriorContext(prev_filtered=state, step=self.step_count)
-            out, nll_out = self._forward_nll(batch, ctx)
+            out, nll_out = self._forward_nll(batch, self._lagged_context(history))
             per_sample.append(nll_out.per_sample_nll)
             penalties.append(self._correction_penalty(out))
-            state = nll_out.log_filtered  # attached: the recursion's state
+            history.append(nll_out.log_filtered)  # attached: the recursion's state
             last = (out, nll_out)
-        assert last is not None and state is not None
+        assert last is not None
         # mean over the chunk's dates, matching the per-sample NLL's scale so
         # alpha means the same thing on both execution paths
         loss = torch.cat(per_sample).mean() + torch.stack(penalties).mean()
         self._optimize(loss)
         self.lb_buffer.update(last[1].responsibilities)
-        return self._metrics(loss, last[1], last[0]), state.detach()
+        h = self.cfg.data.horizon_periods
+        carried = [s.detach() for s in history[-h:]]
+        return self._metrics(loss, last[1], last[0]), carried
 
     def fit_sequence(
         self,
@@ -715,7 +764,9 @@ class Trainer:
             trainer._fit_pos = payload["fit_state"]["pos"]
         if payload["seq_state"] is not None:
             trainer._seq_ci = payload["seq_state"]["ci"]
-            trainer._seq_state = payload["seq_state"]["carried"]
+            carried = payload["seq_state"]["carried"]
+            # checkpoints written before audit M-1 carried one bare tensor
+            trainer._seq_state = None if carried is None else _as_history(carried)
             trainer._seq_meta = payload["seq_state"]["meta"]
         trainer._apply_sigma_schedule()
         # last, so the model rebuild's own init draws don't leak into the
@@ -733,24 +784,30 @@ class Trainer:
 
     @torch.no_grad()
     def evaluate_sequence(
-        self, sequence: Sequence[Batch], init_state: Tensor | None = None
+        self,
+        sequence: Sequence[Batch],
+        init_state: Tensor | Sequence[Tensor] | None = None,
     ) -> SequenceEval:
         """No-grad filtering pass over a chronological sequence.
 
-        Strictly causal: the prior (and ``y_hat``) at step t are computed
-        before the loss sees ``y_t``; only the *update* uses ``y_t``.
+        Strictly causal: the prior (and ``y_hat``) at date ``t`` are computed
+        from the posterior ``h`` dates back (:meth:`_lagged_context`), whose
+        targets are all realised by ``t``; the date's own target enters only
+        its *update*. ``init_state`` is the history to continue from, e.g. the
+        training block's ``log_filtered`` stack.
         """
         self.model.eval()
-        state = init_state
+        history = _as_history(init_state)
         nlls, filt, priors, preds = [], [], [], []
         for batch in sequence:
-            ctx = PriorContext(prev_filtered=state)
-            out, nll_out = self._forward_nll(batch, ctx, train_objective=False)
+            out, nll_out = self._forward_nll(
+                batch, self._lagged_context(history), train_objective=False
+            )
             nlls.append(nll_out.per_sample_nll)
             filt.append(nll_out.log_filtered)
             priors.append(out.prior.log_prior)
             preds.append(out.y_hat)
-            state = nll_out.log_filtered
+            history.append(nll_out.log_filtered)
         return SequenceEval(
             nll=float(torch.cat(nlls).mean()),
             log_filtered=torch.stack(filt),

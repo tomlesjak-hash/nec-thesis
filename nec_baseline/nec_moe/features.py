@@ -140,6 +140,16 @@ def rolling_beta(r: pd.Series, mkt_r: pd.Series, window: int) -> pd.Series:
     return r.rolling(window).cov(mkt_r) / mkt_r.rolling(window).var()
 
 
+def _return_price(px: pd.DataFrame) -> pd.Series:
+    """The close that returns are computed from: adjusted if the source has one.
+
+    A dividend-adjusted close gives total returns, and a return only ever
+    involves adjustments inside its own window, so it stays causal. Levels
+    (dollar volume) must use the raw close instead (audit finding D-2).
+    """
+    return px["adj_close"] if "adj_close" in px.columns else px["close"]
+
+
 def market_features(
     market_px: pd.DataFrame, spec: StageBSpec | None = None
 ) -> pd.DataFrame:
@@ -151,7 +161,7 @@ def market_features(
     used only inside the residual target. It is forward-looking by definition,
     exactly like the target it feeds; it is never a feature.
     """
-    logc = np.log(market_px["close"])
+    logc = np.log(_return_price(market_px))
     r1 = logc.diff()
     out = pd.DataFrame(
         {
@@ -172,8 +182,15 @@ def ticker_features(
 
     Indexed by the ticker's own trading dates (market columns joined on date;
     dates the market lacks end up NaN and are dropped by panel validity).
+
+    Returns, drawdown and the target come from the return price (the adjusted
+    close when the source has one); dollar volume comes from the raw close
+    times volume, the dollar amount actually traded that day. A
+    dividend-back-adjusted close in that product would carry dividends paid
+    after ``t`` (audit finding D-2).
     """
-    c, v = px["close"], px["volume"]
+    c, v = _return_price(px), px["volume"]
+    raw_c = px["close"]
     logc = np.log(c)
     r1 = logc.diff()
     f = pd.DataFrame(index=px.index)
@@ -187,7 +204,7 @@ def ticker_features(
     f["vol_60d"] = r1.rolling(60).std()
     f["downside_vol_20d"] = r1.clip(upper=0.0).rolling(20).std()
     f["drawdown_60d"] = c / c.rolling(60).max() - 1.0
-    f["dollar_vol_20d"] = np.log((c * v).rolling(20).mean())
+    f["dollar_vol_20d"] = np.log((raw_c * v).rolling(20).mean())
     vol_roll = v.rolling(20)
     f["volume_z_20d"] = (v - vol_roll.mean()) / vol_roll.std()
 
@@ -290,6 +307,7 @@ def build_panel(
         sequence_features=SEQUENCE_FEATURES,
         snapshot_features=SNAPSHOT_FEATURES,
         target=spec.target,
+        rank_normalized=spec.cs_rank,
     )
     return Panel(
         x_seq=x_seq[order],
@@ -306,8 +324,11 @@ def build_panel(
 def _cross_sectional_rank(x_snap: torch.Tensor, date: torch.Tensor) -> torch.Tensor:
     """Per-date percentile rank of each snapshot column, centered to [-0.5, 0.5].
 
-    Uses only the date's own cross-section — point-in-time safe by
-    construction, and the natural normalization for rank-IC prediction.
+    Uses only the rows it is given for each date. That is point-in-time safe
+    only if those rows are the date's actual universe: ranks computed over a
+    candidate list that includes names outside the index that day depend on
+    those names (audit finding D-1). ``filter_point_in_time`` therefore
+    re-ranks after filtering a rank-normalized panel.
     """
     out = torch.empty_like(x_snap)
     for d in torch.unique(date):

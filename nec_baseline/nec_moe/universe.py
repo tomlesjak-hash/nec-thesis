@@ -39,6 +39,7 @@ labeled.
 
 from __future__ import annotations
 
+import dataclasses
 import io
 import urllib.request
 import warnings
@@ -233,6 +234,14 @@ def filter_point_in_time(panel: Panel, universe: PointInTimeUniverse) -> Panel:
     Kills survivorship component 1 (backward-looking selection) on an already-
     built panel; requires the panel's ``date_labels``/``entity_labels`` (real
     panels carry them). Row order (date-major) is preserved.
+
+    **Re-ranks a rank-normalized panel** (``schema.rank_normalized``). Its
+    snapshot ranks were computed over every candidate ticker, including names
+    outside the index that day and names that join it later, so after the
+    filter they would still depend on those names (audit finding D-1). The
+    survivors are re-ranked per date among themselves. Ranks are distinct and
+    re-ranking preserves their order, so the result equals ranking the raw
+    features over the members alone, exactly.
     """
     if panel.date_labels is None or panel.entity_labels is None:
         raise ValueError(
@@ -256,7 +265,14 @@ def filter_point_in_time(panel: Panel, universe: PointInTimeUniverse) -> Panel:
             f"[universe] point-in-time filter dropped {dropped}/{len(panel)} "
             "rows (names not in the index on those dates)"
         )
-    return panel._take(keep)
+    filtered = panel._take(keep)
+    if panel.schema.rank_normalized:
+        from .features import _cross_sectional_rank  # late: features imports market data
+
+        filtered = dataclasses.replace(
+            filtered, x_snap=_cross_sectional_rank(filtered.x_snap, filtered.date)
+        )
+    return filtered
 
 
 def universe_coverage_report(

@@ -15,6 +15,8 @@ its own tensor; concatenating ``h_T`` onto it (Decision A's
 
 from __future__ import annotations
 
+import contextlib
+from collections.abc import Iterator
 from dataclasses import dataclass
 
 import torch
@@ -124,6 +126,9 @@ class NECModel(nn.Module):
         if cfg.base.enabled:
             self.base = BaseModel(cfg.data.d_snap, cfg.base).freeze()
         self.register_buffer("base_fitted", torch.zeros((), dtype=torch.bool))
+        # Evaluation switch, not state: set only inside corrections_disabled()
+        # and never saved (audit finding E-1).
+        self._corrections_off = False
 
     # ------------------------------------------------------------ the base
     def attach_base(self, base: BaseModel) -> NECModel:
@@ -151,6 +156,32 @@ class NECModel(nn.Module):
         self.base.freeze()
         self.base_fitted.fill_(True)
         return self
+
+    @contextlib.contextmanager
+    def corrections_disabled(self) -> Iterator[NECModel]:
+        """Evaluate the SAME model with every correction forced to exactly zero.
+
+        This is how the base is scored (audit finding E-1). With ``r_k = 0``
+        every expert's mean is ``f0``, so the mixture density becomes
+        ``sum_k pi_k N(y; f0, s_k^2)``: the base's predictions under the
+        model's own noise model, prior and (for stateful priors) recursion.
+        The NLL improvement ``base - mixture`` then measures what the
+        corrections add and nothing else. It is exactly zero when every
+        correction is zero, whatever the experts' noise scales. Scoring the
+        base as one Gaussian at an averaged sigma instead would credit the
+        experts' variance structure to the corrections.
+        """
+        if not self.cfg.experts.correction_mode:
+            raise ValueError(
+                "corrections_disabled() needs experts.correction_mode=True: "
+                "outside correction mode there is no base to fall back to"
+            )
+        previous = self._corrections_off
+        self._corrections_off = True
+        try:
+            yield self
+        finally:
+            self._corrections_off = previous
 
     def expert_input(self, x_snap: Tensor, h_t: Tensor) -> Tensor:
         """Build the expert input per Decision A's ``input_mode``.
@@ -194,7 +225,7 @@ class NECModel(nn.Module):
                     "and attaches one per fold; a manual caller must call "
                     "attach_base() with the result of fit_base()"
                 )
-            corrections = mu
+            corrections = torch.zeros_like(mu) if self._corrections_off else mu
             base_pred = self.base(x_snap)
             mu = base_pred.unsqueeze(-1) + corrections
             # The residual identity is y_hat = sum_k pi_k (f0 + r_k)

@@ -89,6 +89,8 @@ def tune(
     metric: str = "mean_ic",
     mode: str = "max",
     verbose: bool = True,
+    hac_lags: int | None = None,
+    hac_kernel: str = "uniform",
 ) -> TuneResult:
     """Score ``candidates`` × ``seeds`` on the training window's validation tail.
 
@@ -118,6 +120,8 @@ def tune(
         test_dates_per_fold=val_dates,
         purge_dates=purge_dates,
         verbose=verbose,
+        hac_lags=hac_lags,
+        hac_kernel=hac_kernel,
     )
 
     missing = [a.arm for a in report.arms if metric not in a.mean]

@@ -32,6 +32,7 @@ from .config import (
     PriorConfig,
     TrainConfig,
     pyramid_dims,
+    target_horizon,
 )
 from .context_data import build_context, load_french_factors, load_vix
 from .data import (
@@ -44,6 +45,7 @@ from .data import (
     SyntheticSpec,
 )
 from .evaluation import (
+    HAC_KERNELS,
     FoldResult,
     IcSummary,
     PortfolioSummary,
@@ -51,9 +53,11 @@ from .evaluation import (
     WalkForwardResult,
     base_and_correction,
     ic_summary,
+    long_run_variance,
     long_short_by_date,
     portfolio_summary,
     rank_ic_by_date,
+    resolve_hac_lags,
     walk_forward_evaluate,
     walk_forward_evaluate_baseline,
     walk_forward_folds,
@@ -99,6 +103,7 @@ from .multiple_testing import (
     benjamini_hochberg,
     bonferroni,
     deflated_sharpe_ratio,
+    effective_sample_size,
     expected_max_sharpe,
     ic_pvalue,
     probabilistic_sharpe_ratio,
@@ -160,6 +165,7 @@ __all__ = [
     "TrainConfig",
     "NECConfig",
     "pyramid_dims",
+    "target_horizon",
     "FeatureSchema",
     "Batch",
     "SyntheticSpec",
@@ -213,6 +219,9 @@ __all__ = [
     "rank_ic_by_date",
     "IcSummary",
     "ic_summary",
+    "HAC_KERNELS",
+    "long_run_variance",
+    "resolve_hac_lags",
     "long_short_by_date",
     "PortfolioSummary",
     "portfolio_summary",
@@ -280,6 +289,7 @@ __all__ = [
     "expected_max_sharpe",
     "DeflatedSharpe",
     "deflated_sharpe_ratio",
+    "effective_sample_size",
     "ic_pvalue",
     "bonferroni",
     "benjamini_hochberg",

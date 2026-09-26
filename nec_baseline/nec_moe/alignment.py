@@ -46,16 +46,19 @@ def gate_utilization_by_date(trainer: Trainer, panel: Panel) -> tuple[Tensor, Te
     """Per-date mean gate share of each expert: ``(date_codes (D,), util (D, K))``.
 
     Memoryless priors: the mean predictive mixture weight ``pi(x)`` over the
-    date's cross-section. Stateful (HMM) prior: the mean **filtered** posterior
-    — the standard filtered-regime-probability series of Hamilton econometrics
-    (strictly causal; produced by the same evaluation pass as the NLL).
+    date's cross-section. Stateful (HMM) prior: the mean **prior** from the
+    causal filtering pass, i.e. the regime probability the model actually
+    uses at ``t``. Not the posterior: the posterior at ``t`` has been updated
+    with the target dated ``t``, a forward return realised only after ``t``,
+    so comparing it with VIX at ``t`` would let the future into the
+    diagnostic (audit findings M-1, Q-1).
     """
     model = trainer.model
     model.eval()
     dates = torch.unique(panel.date, sorted=True)
     if model.prior.stateful:
         ev = trainer.evaluate_sequence(panel.time_sequence())
-        util = ev.log_filtered.exp().mean(dim=1)  # (L, K), L == len(dates)
+        util = ev.log_prior.exp().mean(dim=1)  # (L, K), L == len(dates)
         return dates, util
     out = model(panel.x_seq, panel.x_snap, PriorContext(date=panel.date))
     pi = out.prior.log_prior.exp()  # (N, K)

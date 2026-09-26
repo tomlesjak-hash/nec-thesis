@@ -306,3 +306,90 @@ def _learned_transition_diag(process: str, seed: int) -> float:
     train, _ = panel.split_by_date(0.75)
     model, _ = _train_hmm(train, steps=150, seed=1)
     return float(model.prior.transition_matrix.detach().diagonal().mean())
+
+
+# --------------------------------------------------------------------------- #
+# Audit M-1: with an h-period target the prior uses only realised targets
+# --------------------------------------------------------------------------- #
+
+
+def _hmm_cfg(horizon_target: str):
+    import dataclasses
+
+    cfg = small_config(prior_kind="hmm")
+    return dataclasses.replace(cfg, data=dataclasses.replace(cfg.data, target=horizon_target))
+
+
+def test_prior_is_the_posterior_h_dates_back_carried_h_steps():
+    """pi_t = r_{t-h} A^h, checked by hand against the posteriors the pass
+    itself produced; before h posteriors exist the prior is pi_0."""
+    h = 3
+    torch.manual_seed(0)
+    trainer = Trainer(NECModel(_hmm_cfg(f"fwd_ret_{h}d")))
+    assert trainer.cfg.data.horizon_periods == h
+    seq = SyntheticRegimePanel(SyntheticSpec(regime_process="markov", seed=5)).generate(
+        n_dates=9, n_entities=3
+    ).time_sequence()
+    ev = trainer.evaluate_sequence(seq)
+    prior = trainer.model.prior
+    a = prior.transition_matrix.detach().double()
+    pi0 = torch.softmax(prior.pi0_logits.detach().double(), dim=0)
+    for t in range(len(seq)):
+        got = ev.log_prior[t].exp().double()
+        if t < h:
+            expected = pi0.expand_as(got)
+        else:
+            expected = ev.log_filtered[t - h].exp().double() @ torch.linalg.matrix_power(a, h)
+        assert torch.allclose(got, expected, atol=1e-6), t
+
+
+def test_training_and_evaluation_use_the_same_lagged_recursion():
+    """The loss a training step computes on a chunk equals the evaluation
+    pass's NLL on that chunk before the step: the two paths thread the same
+    h-lagged state (dropout is off in the test config)."""
+    torch.manual_seed(0)
+    trainer = Trainer(NECModel(_hmm_cfg("fwd_ret_4d")))
+    seq = SyntheticRegimePanel(SyntheticSpec(regime_process="markov", seed=6)).generate(
+        n_dates=12, n_entities=3
+    ).time_sequence()
+    before = trainer.evaluate_sequence(seq)
+    metrics, carried = trainer.train_step_sequence(seq)
+    assert metrics["loss"] == pytest.approx(before.nll, abs=1e-6)
+    assert len(carried) == 4 and not any(s.requires_grad for s in carried)
+
+
+def test_hmm_alignment_series_is_the_prior_not_the_posterior():
+    """The utilization series compared with VIX at t must be what the model
+    uses at t: the prior. Perturbing a date's own target moves the posterior
+    at that date, and must not move the reported utilization there."""
+    from nec_moe import gate_utilization_by_date
+
+    torch.manual_seed(0)
+    trainer = Trainer(NECModel(_hmm_cfg("fwd_ret_2d")))
+    panel = SyntheticRegimePanel(SyntheticSpec(regime_process="markov", seed=7)).generate(
+        n_dates=8, n_entities=3
+    )
+    dates, util = gate_utilization_by_date(trainer, panel)
+    ev = trainer.evaluate_sequence(panel.time_sequence())
+    assert torch.allclose(util, ev.log_prior.exp().mean(dim=1))
+    last = panel.date == dates[-1]
+    moved = panel._take(torch.arange(len(panel)))
+    moved.y = moved.y.clone()
+    moved.y[last] += 5.0
+    _, util_moved = gate_utilization_by_date(trainer, moved)
+    assert torch.equal(util[-1], util_moved[-1])
+
+
+def test_horizon_config_is_read_from_the_target_and_validated():
+    import dataclasses
+
+    base = small_config()
+    assert base.data.horizon_periods == 1  # "fwd_return" declares none
+    five = dataclasses.replace(base.data, target="fwd_ret_5d")
+    assert five.horizon_periods == 5
+    explicit = dataclasses.replace(base.data, horizon=3)
+    assert explicit.horizon_periods == 3
+    with pytest.raises(ValueError, match="contradicts the target"):
+        dataclasses.replace(base, data=dataclasses.replace(five, horizon=3)).validate()
+    with pytest.raises(ValueError, match="data.horizon must be >= 1"):
+        dataclasses.replace(base, data=dataclasses.replace(base.data, horizon=0)).validate()

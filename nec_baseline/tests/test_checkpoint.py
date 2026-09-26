@@ -124,6 +124,38 @@ def test_fit_sequence_resume_matches_uninterrupted(tmp_path: Path):
         resumed.fit_sequence(seq, steps=1, chunk_len=10)
 
 
+def test_fit_sequence_resume_is_exact_with_a_multi_day_target(tmp_path: Path):
+    """With an h-period target the carried state is the last h posteriors
+    (audit M-1); a checkpoint must carry all of them for the resume to stay
+    bit-exact."""
+    import dataclasses
+
+    def make() -> Trainer:
+        torch.manual_seed(0)
+        cfg = small_config(
+            prior_kind="hmm", sigma_init=2.0, lr=3e-3,
+            sigma_freeze_steps=10, checkpoint_every=10,
+        )
+        cfg = dataclasses.replace(cfg, data=dataclasses.replace(cfg.data, target="fwd_ret_3d"))
+        return Trainer(NECModel(cfg))
+
+    seq = _panel(
+        regime_process="markov", transition_stay=0.97,
+        vol_levels=(1.0, 1.3), beta_scale=1.2, noise_std=0.8, seed=11,
+    ).time_sequence()
+    ref = make()
+    ref.fit_sequence(seq, steps=40, chunk_len=25)
+    ck = tmp_path / "hmm3.pt"
+    interrupted = make()
+    interrupted.fit_sequence(seq, steps=23, chunk_len=25, checkpoint_path=ck)
+    resumed = Trainer.load(ck)
+    assert resumed._seq_state is not None and len(resumed._seq_state) == 3
+    resumed.fit_sequence(seq, steps=17, chunk_len=25)
+    assert resumed.history == ref.history
+    for k, v in ref.model.state_dict().items():
+        assert torch.equal(resumed.model.state_dict()[k], v), k
+
+
 # --------------------------------------------------------------------------- #
 # Harness level: walk-forward fold resume
 # --------------------------------------------------------------------------- #

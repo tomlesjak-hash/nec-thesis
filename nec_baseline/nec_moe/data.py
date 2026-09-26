@@ -30,6 +30,7 @@ from typing import Literal
 import torch
 from torch import Tensor
 
+from .config import target_horizon
 from .utils import assert_shape
 
 __all__ = [
@@ -45,11 +46,19 @@ __all__ = [
 
 @dataclass(frozen=True)
 class FeatureSchema:
-    """Named feature columns; order == channel order of the tensors."""
+    """Named feature columns; order == channel order of the tensors.
+
+    ``rank_normalized`` records that the snapshot features are per-date
+    cross-sectional ranks. Anything that removes rows from such a panel must
+    re-rank what remains, or the survivors' ranks keep describing a
+    cross-section that no longer exists (audit finding D-1; see
+    :func:`nec_moe.universe.filter_point_in_time`).
+    """
 
     sequence_features: tuple[str, ...]
     snapshot_features: tuple[str, ...]
     target: str
+    rank_normalized: bool = False
 
 
 @dataclass
@@ -145,6 +154,16 @@ class Panel:
 
     def __len__(self) -> int:
         return self.x_seq.shape[0]
+
+    @property
+    def horizon(self) -> int:
+        """The target's forward horizon in periods, from its name, else 1.
+
+        ``fwd_ret_5d`` gives 5. Consecutive targets overlap by ``horizon - 1``
+        periods, which the IC statistics must account for (audit E-2).
+        """
+        parsed = target_horizon(self.schema.target)
+        return parsed if parsed is not None else 1
 
     # -------------------------------------------------------- row selection
     def _row_kwargs(self, idx: Tensor) -> dict:

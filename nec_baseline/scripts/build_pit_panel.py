@@ -6,8 +6,12 @@ The full pipeline of handbook II.4's point-in-time path, as a resumable script:
 2. take the union of members over the window — the candidate list to *attempt*;
 3. download every candidate's daily bars (yfinance → the shared cache; a
    present cache file short-circuits the network, so **rerunning this script
-   resumes** where it left off and only retries past failures);
-4. build the feature panel, filter it point-in-time, and write:
+   resumes** where it left off and only retries past failures). The cache
+   holds the raw and the adjusted close (``*.raw.csv``, audit finding D-2);
+   legacy auto-adjusted files are not reused, so the first run after that fix
+   downloads every candidate again;
+4. build the feature panel, filter it point-in-time (the filter re-ranks the
+   snapshot features among each date's members, audit finding D-1), and write:
    - ``results/pit_coverage_<window>.csv`` — the per-year coverage table to
      publish next to any result from this panel (the honest residual-bias
      number);

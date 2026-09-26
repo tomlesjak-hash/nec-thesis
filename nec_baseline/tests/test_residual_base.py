@@ -45,6 +45,7 @@ from nec_moe import (
     pyramid_dims,
     run_sweep,
     walk_forward_evaluate,
+    walk_forward_folds,
 )
 from nec_moe.diagnostics import expert_output_correlation, pairwise_expert_distance
 from nec_moe.train import DeadParameterWarning
@@ -251,6 +252,42 @@ def dataclass_replace(cfg: BaseConfig, field: str, value) -> BaseConfig:
     import dataclasses
 
     return dataclasses.replace(cfg, **{field: value})
+
+
+def test_base_is_fitted_on_each_folds_training_block_only(monkeypatch):
+    """Audit B-5 / critical property P7. Within the walk-forward harness, the
+    base must be fitted once per fold on exactly that fold's (purged) training
+    dates: never on a purge-gap date, whose label overlaps the test block, and
+    never on a test date. The spy records what fit_base actually receives,
+    because the cache key alone (the window's end dates) would not notice a
+    base fitted on a different panel under the same key.
+    """
+    import nec_moe.base as base_module
+
+    seen: list[torch.Tensor] = []
+    real_fit_base = base_module.fit_base
+
+    def spy(panel, cfg, *, seed):
+        seen.append(torch.unique(panel.date, sorted=True))
+        return real_fit_base(panel, cfg, seed=seed)
+
+    monkeypatch.setattr(base_module, "fit_base", spy)
+    panel = _panel(160, 6)
+    cfg = _residual_cfg(prior_kind="uniform")
+    kw = dict(n_folds=3, test_dates_per_fold=10, purge_dates=5)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeadParameterWarning)
+        walk_forward_evaluate(
+            panel, lambda: Trainer(NECModel(cfg)), steps=3,
+            base_cache=BaseCache(), seed=0, **kw,
+        )
+
+    folds = walk_forward_folds(panel.date, **kw)
+    assert len(seen) == len(folds)  # once per fold
+    for dates, fold in zip(seen, folds, strict=True):
+        assert torch.equal(dates, torch.sort(fold.train_dates).values)
+        assert int(dates.max()) < int(fold.purged_dates.min())
+        assert int(dates.max()) < int(fold.test_dates.min())
 
 
 def test_base_validation_split_is_a_tail_of_training_only():
@@ -661,6 +698,86 @@ def test_base_and_improvement_reach_the_registry(tmp_path: Path):
     cfg_row = reg.trials("resid")[0].config["nec_config"]
     assert cfg_row["base"]["enabled"] is True
     assert cfg_row["experts"]["correction_mode"] is True
+
+
+# --------------------------------------------------------------------------- #
+# Audit E-1: the base is scored by the same model with corrections at zero
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("prior_kind", ["uniform", "hmm"])
+def test_nll_improvement_is_exactly_zero_before_any_training(prior_kind: str):
+    """With zero-initialised heads and no training every correction is zero,
+    so the mixture IS the base and the reported NLL improvement must be exactly
+    zero, on the memoryless and on the stateful (warmed-up filter) path alike.
+    The old base NLL (one Gaussian at an averaged sigma) failed this whenever
+    the experts' noise scales differed."""
+    panel = _panel(160, 8)
+    cfg = _residual_cfg(prior_kind=prior_kind, sigma_init=0.7)
+
+    def make() -> Trainer:
+        torch.manual_seed(0)
+        trainer = Trainer(NECModel(cfg))
+        with torch.no_grad():  # experts disagree on noise; corrections stay 0
+            trainer.model.experts.log_sigma.copy_(torch.tensor([0.5, 2.0]).log())
+        return trainer
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeadParameterWarning)
+        result = walk_forward_evaluate(
+            panel, make, n_folds=2, test_dates_per_fold=10, purge_dates=5,
+            steps=0, base_cache=BaseCache(), seed=0,
+        )
+    for fold in result.folds:
+        assert dict(fold.correction)["correction_max_abs"] == 0.0
+        assert fold.nll_improvement == 0.0, fold
+
+
+def test_base_nll_is_the_mixture_density_at_the_base():
+    """With nonzero corrections the base NLL must be the mixture's own density
+    evaluated at f0: -mean_i logsumexp_k(log pi_k + log N(y_i; f0_i, s_k^2)),
+    checked here against that formula written out by hand."""
+    from nec_moe import base_and_correction
+
+    panel = _panel(80, 6)
+    trainer = _fitted(_residual_cfg(zero_init_head=False, sigma_init=0.8), panel)
+    with torch.no_grad():
+        trainer.model.experts.log_sigma.copy_(torch.tensor([0.6, 1.3]).log())
+    _, base_nll, corr = base_and_correction(trainer, panel)
+    assert dict(corr)["correction_max_abs"] > 0.0  # the corrections are live
+
+    trainer.model.eval()
+    with torch.no_grad():
+        out = trainer.model(panel.x_seq, panel.x_snap)
+        f0 = trainer.model.base(panel.x_snap)
+        log_lik = expert_log_likelihood(
+            f0.unsqueeze(-1).expand_as(out.mu), out.log_sigma, panel.y
+        )
+        by_hand = -torch.logsumexp(out.prior.log_prior + log_lik, dim=-1).mean()
+    assert base_nll == pytest.approx(float(by_hand), abs=1e-6)
+
+
+def test_corrections_disabled_is_a_scoped_switch():
+    """The switch zeroes the corrections inside the block only, restores itself
+    even when the block raises, and is refused where there is no base."""
+    panel = _panel(40, 4)
+    trainer = _fitted(_residual_cfg(zero_init_head=False), panel)
+    model = trainer.model.eval()
+    with torch.no_grad():
+        with model.corrections_disabled():
+            off = model(panel.x_seq, panel.x_snap)
+        on = model(panel.x_seq, panel.x_snap)
+    assert float(off.corrections.abs().max()) == 0.0
+    assert torch.equal(off.y_hat, off.base_pred)
+    assert float(on.corrections.abs().max()) > 0.0  # restored after the block
+
+    with pytest.raises(RuntimeError, match="boom"), model.corrections_disabled():
+        raise RuntimeError("boom")
+    assert model._corrections_off is False
+
+    with pytest.raises(ValueError, match="correction_mode"):
+        with NECModel(small_config()).corrections_disabled():
+            pass
 
 
 # --------------------------------------------------------------------------- #

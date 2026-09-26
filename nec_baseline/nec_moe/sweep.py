@@ -180,6 +180,8 @@ def _metrics_from_result(res: WalkForwardResult) -> dict[str, float]:
         "t_stat": res.pooled_ic.t_stat,
         "p": ic_pvalue(res.pooled_ic),
         "nll": res.mean_fold_nll,
+        # which standard error t_stat and p rest on (audit E-2)
+        "ic_hac_lags": float(res.pooled_ic.hac_lags),
     }
     if res.pooled_portfolio is not None:
         m["net_ir"] = res.pooled_portfolio.ir_net
@@ -257,6 +259,8 @@ def run_sweep(
     verbose: bool = True,
     resume_dir: str | Path | None = None,
     base_cache: BaseCache | None = None,
+    hac_lags: int | None = None,
+    hac_kernel: str = "uniform",
 ) -> SweepReport:
     """Run every arm over every seed through the shared harness; log; summarize.
 
@@ -273,6 +277,11 @@ def run_sweep(
     own mid-fit checkpoints. Baseline arms are seconds-fast and simply rerun.
     Resume with the same settings — the registry row is matched on
     (arm, seed) only.
+
+    ``hac_lags`` and ``hac_kernel`` set the autocorrelation-consistent standard
+    error of every IC t-statistic and hence of every ``p`` the corrected
+    claims use; ``hac_lags=None`` means ``horizon - 1`` from the panel's
+    target (audit E-2).
     """
     if not arms or not seeds:
         raise ValueError("need at least one arm and one seed")
@@ -326,6 +335,8 @@ def run_sweep(
                     base_cache=base_cache,
                     seed=seed,
                     registry=registry,
+                    hac_lags=hac_lags,
+                    hac_kernel=hac_kernel,
                 )
             else:
                 assert build_baseline is not None
@@ -338,6 +349,8 @@ def run_sweep(
                     min_train_dates=min_train_dates,
                     backtest_quantiles=backtest_quantiles,
                     cost_rate=cost_rate,
+                    hac_lags=hac_lags,
+                    hac_kernel=hac_kernel,
                 )
             metrics = _metrics_from_result(res)
             registry.log(tag, metrics, config=arm.config_record, seed=seed)

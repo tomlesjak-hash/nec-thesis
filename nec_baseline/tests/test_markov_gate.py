@@ -383,6 +383,80 @@ def test_canonical_ordering_is_stable_across_seeds():
     assert a.variances[0] < a.variances[1] and b.variances[0] < b.variances[1]
 
 
+def _turbulent_first_start(model, series, cfg):
+    """One informed centre with the two regimes' moments swapped, so the
+    optimizer starts, and stays, with the HIGH-variance regime labelled 0.
+
+    The informed schemes always label the calmest group 0, which makes the
+    canonical sort a no-op in every other test here (audit finding G-6, where
+    removing the sort passed the whole suite). This start is what gives the
+    sort real work to do.
+    """
+    centre = markov_gate_module.informed_centre(model, series, 0.5, 20, 0.95, cfg)
+    names = list(model.param_names)
+    swapped = centre.copy()
+    for a, b in (("const[0]", "const[1]"), ("sigma2[0]", "sigma2[1]")):
+        i, j = names.index(a), names.index(b)
+        swapped[i], swapped[j] = centre[j], centre[i]
+    markov_gate_module.validate_start(names, swapped, cfg.k_regimes)
+    return [swapped]
+
+
+def test_canonical_reordering_relabels_turbulent_first_raw_output(monkeypatch):
+    """Audit G-6 / critical property P13. When statsmodels hands back the
+    turbulent regime as raw label 0, the gate must still store the calm regime
+    first, and must permute EVERYTHING it stores the same way: the moments,
+    the transition matrix, the durations and the filtered-probability table.
+
+    Asymmetric truth (a very sticky calm regime, a short turbulent one) is what
+    makes a missed or partial permutation visible.
+    """
+    from statsmodels.tsa.regime_switching.markov_regression import MarkovRegression
+
+    stay, sigma = (0.99, 0.80), (0.4, 2.0)
+    series, truth = _simulate_markov(3000, stay, sigma, seed=11)
+    panel = _panel_from_series(series)
+    monkeypatch.setitem(
+        markov_gate_module.START_SCHEME_REGISTRY, "turbulent_first", _turbulent_first_start
+    )
+    cfg = _markov_cfg(start_scheme="turbulent_first")
+    prior = MarkovSwitchingRegimePrior(2, cfg.markov_gate)
+    prior.fit(panel)
+    fit = prior.fit_result
+
+    # the optimizer kept the swapped labels: without this the test proves nothing
+    assert fit.permutation == (1, 0), fit.permutation
+    # moments, transition and durations all come out calm-first
+    assert fit.variances[0] < fit.variances[1]
+    assert fit.variances[0] == pytest.approx(sigma[0] ** 2, rel=0.35)
+    assert fit.transition[0, 0] == pytest.approx(stay[0], abs=0.04)
+    assert fit.transition[1, 1] == pytest.approx(stay[1], abs=0.08)
+    assert np.allclose(fit.transition.sum(axis=1), 1.0, atol=1e-6)
+    assert fit.expected_durations[0] > fit.expected_durations[1]
+    g = fit.metrics()
+    assert g["gate_variance_0"] < g["gate_variance_1"]
+    assert g["gate_transition_0_0"] == fit.transition[0, 0]
+
+    # the stored table is the raw filter with its columns permuted the same way
+    dates = torch.unique(panel.date, sorted=True)
+    served = prior(torch.zeros(len(dates), 2), PriorContext(date=dates)).log_prior.exp()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        raw = MarkovRegression(
+            date_level_series(panel, cfg.markov_gate)[1], k_regimes=2,
+            trend=cfg.markov_gate.trend,
+            switching_trend=cfg.markov_gate.switching_trend,
+            switching_variance=cfg.markov_gate.switching_variance,
+        ).filter(fit.params)
+    raw_probs = np.asarray(raw.filtered_marginal_probabilities, dtype=float)
+    expected = torch.from_numpy(raw_probs[:, list(fit.permutation)]).to(torch.float32)
+    assert torch.allclose(served, expected, atol=1e-5)
+    # ... and column 0 really is the calm regime on the true path
+    calm = torch.from_numpy(truth == 0)
+    assert float(served[calm, 0].mean()) > 0.8
+    assert float(served[~calm, 0].mean()) < 0.5
+
+
 def test_ordering_rule_is_config_and_degenerate_sorts_are_refused():
     """The ordering is a declared rule, not an assumption — and a sort key
     that cannot vary across regimes is refused rather than producing an

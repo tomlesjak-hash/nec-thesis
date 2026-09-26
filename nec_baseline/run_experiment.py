@@ -217,6 +217,8 @@ class Experiment:
     include_ridge: bool = True      # baseline rows in the comparison table
     include_mlp: bool = True
     backtest_quantiles: int | None = 5   # None disables the long-short backtest
+    ic_hac_lags: int | None = None  # HAC lags for IC t-stats; None = horizon - 1
+    ic_hac_kernel: str = "uniform"  # "uniform" (Hansen-Hodrick) | "bartlett" (Newey-West)
     cost_rate: float = 0.001        # cost per unit traded notional (10 bps)
 
     # ---------------- extras ----------------
@@ -451,7 +453,7 @@ def _quick(exp: Experiment, panel: Panel, purge: int, out: Path,
                              chunk_len=exp.chunk_len, checkpoint_path=ckpt)
         warm = trainer.evaluate_sequence(train.time_sequence())
         ev = trainer.evaluate_sequence(test.time_sequence(),
-                                       init_state=warm.log_filtered[-1])
+                                       init_state=warm.log_filtered)
         nll, pred = ev.nll, torch.cat(list(ev.y_hat))
     else:
         trainer.fit(train, steps=remaining, checkpoint_path=ckpt)
@@ -504,7 +506,7 @@ def _quick(exp: Experiment, panel: Panel, purge: int, out: Path,
     # §5: the base's own out-of-sample score beside every result, the
     # improvement over it, and the correction magnitude actually applied
     if trainer.model.base is not None:
-        b_pred, b_nll, corr = base_and_correction(trainer, test)
+        b_pred, b_nll, corr = base_and_correction(trainer, test, train=train)
         if b_pred is not None and b_nll is not None:
             trial["base_nll"] = b_nll
             trial["nll_improvement"] = b_nll - nll
@@ -568,7 +570,8 @@ def _evaluate(exp: Experiment, panel: Panel, purge: int, out: Path,
                        test_dates_per_fold=exp.test_dates_per_fold, purge_dates=purge,
                        backtest_quantiles=exp.backtest_quantiles,
                        cost_rate=exp.cost_rate, resume_dir=resume_dir,
-                       base_cache=cache)
+                       base_cache=cache, hac_lags=exp.ic_hac_lags,
+                       hac_kernel=exp.ic_hac_kernel)
     frame = report.to_frame().round(4)
     print("\n[evaluate] mean ± seed-std per arm:\n", frame.to_string())
     frame.to_csv(out / "report.csv")

@@ -255,6 +255,100 @@ def test_data_config_from_panel_builds_model(cache_dir: Path):
     assert out.y_hat.shape == (32,)
 
 
+def test_build_panel_records_whether_it_rank_normalized(cache_dir: Path):
+    """The flag filter_point_in_time relies on to re-rank (audit D-1)."""
+    prices, market = load_universe(
+        ("aaa", "bbb", "ccc", "ddd", "eee", "fff"), START, END, cache_dir
+    )
+    assert build_panel(prices, market, StageBSpec(cs_rank=True)).schema.rank_normalized
+    assert not build_panel(prices, market, StageBSpec(cs_rank=False)).schema.rank_normalized
+
+
+# --------------------------------------------------------------------------- #
+# Audit D-2: dividend back-adjustment must not reach a level feature
+# --------------------------------------------------------------------------- #
+
+
+def _px_with_adjusted_close(seed: int, n: int = 320) -> pd.DataFrame:
+    g = np.random.default_rng(seed)
+    idx = pd.bdate_range("2020-01-01", periods=n)
+    close = 100.0 * np.exp(np.cumsum(g.normal(0.0004, 0.02, n)))
+    volume = 1e6 * np.exp(g.normal(0.0, 0.4, n))
+    return pd.DataFrame(
+        {"open": close, "high": close * 1.01, "low": close * 0.99,
+         "close": close, "adj_close": close, "volume": volume},
+        index=idx,
+    )
+
+
+def test_features_at_t_ignore_dividends_paid_after_t():
+    """A dividend going ex at date 250 back-adjusts every earlier adjusted
+    close. Every feature at a date before it, dollar volume included, must be
+    unchanged: returns and drawdown are ratios inside their window, and dollar
+    volume uses the raw close. The old contract (one dividend-adjusted close,
+    used for dollar volume too) fails the same probe, which is the bug."""
+    spec = StageBSpec()
+    px = _px_with_adjusted_close(1)
+    mkt = market_features(_px_with_adjusted_close(2))
+    ex = 250
+    paid = px.copy()
+    paid.iloc[:ex, paid.columns.get_loc("adj_close")] *= 0.96  # back-adjustment
+    before, after = ticker_features(px, mkt, spec), ticker_features(paid, mkt, spec)
+    cols = [c for c in before.columns if c != spec.target]
+    window = px.index[140 : ex - spec.horizon]  # targets end before the ex-date too
+    assert np.allclose(
+        before.loc[window, cols].to_numpy(), after.loc[window, cols].to_numpy(),
+        equal_nan=True,
+    )
+    assert np.allclose(
+        before.loc[window, spec.target], after.loc[window, spec.target]
+    )
+    # dollar volume is the raw close times volume
+    d = px.index[200]
+    raw = (px["close"] * px["volume"]).iloc[181:201].mean()
+    assert after.loc[d, "dollar_vol_20d"] == pytest.approx(math.log(raw))
+
+    # the legacy contract: the adjusted close stood in for the close
+    legacy = paid.drop(columns="close").rename(columns={"adj_close": "close"})
+    old = ticker_features(legacy, mkt, spec)
+    assert old.loc[d, "dollar_vol_20d"] != pytest.approx(before.loc[d, "dollar_vol_20d"])
+
+
+def test_yfinance_cache_holds_raw_and_adjusted_close(tmp_path: Path, monkeypatch):
+    """The yfinance fetcher asks for unadjusted bars, writes both closes to its
+    own cache file, and never reads a legacy auto-adjusted file (audit D-2)."""
+    import sys
+    import types
+
+    import nec_moe.market_data as md
+
+    calls: list[bool] = []
+
+    def download(symbol, start, end, progress, auto_adjust):
+        calls.append(auto_adjust)
+        idx = pd.bdate_range(start, periods=4)
+        return pd.DataFrame(
+            {"Open": [10.0, 11, 12, 13], "High": [10.5, 11.5, 12.5, 13.5],
+             "Low": [9.5, 10.5, 11.5, 12.5], "Close": [10.0, 11, 12, 13],
+             "Adj Close": [9.0, 10, 11, 12], "Volume": [1e6, 2e6, 3e6, 4e6]},
+            index=idx,
+        )
+
+    monkeypatch.setitem(sys.modules, "yfinance", types.SimpleNamespace(download=download))
+    monkeypatch.setattr(md.time, "sleep", lambda s: None)
+    # a legacy auto-adjusted file for the same symbol and range is ignored
+    (tmp_path / f"zzz.us.{START}.{END}.csv").write_text(
+        "Date,Open,High,Low,Close,Volume\n2020-01-01,1,1,1,1,1\n2020-01-02,1,1,1,1,1\n"
+    )
+    px = load_ohlcv("zzz", START, END, tmp_path, source="yfinance")
+    assert calls == [False]  # auto_adjust=False
+    assert (tmp_path / f"zzz.us.{START}.{END}.raw.csv").exists()
+    assert list(px["close"]) == [10.0, 11, 12, 13]
+    assert list(px["adj_close"]) == [9.0, 10, 11, 12]
+    load_ohlcv("zzz", START, END, tmp_path, source="yfinance")
+    assert calls == [False]  # the new file is cache-first; no second download
+
+
 # --------------------------------------------------------------------------- #
 # Live network check — opt-in only (NEC_NETWORK_TESTS=1)
 # --------------------------------------------------------------------------- #

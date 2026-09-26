@@ -98,14 +98,20 @@ class PriorOutput:
 class PriorContext:
     """Optional context threaded by the trainer.
 
-    - ``prev_filtered``: ``(B, K)`` **log-domain** filtered posterior
-      ``log r_{t-1}`` — the HMM recursion's state. ``None`` at a sequence start.
+    - ``prev_filtered``: ``(B, K)`` **log-domain** filtered posterior — the
+      HMM recursion's state. ``None`` at a sequence start. With an ``h``-period
+      forward target it is the posterior from ``h`` dates back, ``log r_{t-h}``
+      (the latest one whose targets are all realised by ``t``), and
+      ``predict_steps = h`` carries it forward to ``t``.
+    - ``predict_steps``: how many predict steps separate ``prev_filtered``
+      from the date being predicted; ``1`` for a one-period target.
     - ``step``: global training step, for temperature/annealing schedules.
     - ``date``: ``(B,)`` int64 date codes — the lookup key for a
       :class:`PrecomputedRegimePrior`. Ignored by every other prior.
     """
 
     prev_filtered: Tensor | None = None
+    predict_steps: int = 1
     step: int | None = None
     date: Tensor | None = None
 
@@ -472,6 +478,13 @@ class HMMRegimePrior(RegimePrior):
       ``learn_pi0``; else fixed uniform), used when ``ctx.prev_filtered`` is
       ``None`` (a sequence start).
     - Predict step: ``log pi_t[b, k] = logsumexp_j(log r_{t-1}[b, j] + log A[j, k])``.
+    - **Multi-period targets** (audit finding M-1). The posterior ``r_s`` is
+      updated with the target dated ``s``, a forward return over ``(s, s+h]``
+      that is realised only at ``s+h``. The prior at ``t`` may therefore
+      condition on posteriors up to ``r_{t-h}`` only, carried forward ``h``
+      steps: ``pi_t = r_{t-h} A^h``. The trainer supplies ``r_{t-h}`` and
+      ``ctx.predict_steps = h``; for ``h = 1`` this is the one-step
+      recursion above, unchanged.
 
     ``gate_logits`` is used only for batch-size/shape inference: with a static
     transition matrix the encoder/gate path is dormant in this variant (their
@@ -515,10 +528,16 @@ class HMMRegimePrior(RegimePrior):
         else:
             prev = ctx.prev_filtered
             assert_shape(prev, (b, self.n_experts), "prev_filtered")
-            # (B, K_from, 1) + (1, K_from, K_to) -> logsumexp over K_from
-            log_prior = torch.logsumexp(
-                prev.unsqueeze(2) + log_a.unsqueeze(0), dim=1
-            )
+            if ctx.predict_steps < 1:
+                raise ValueError(
+                    f"predict_steps must be >= 1, got {ctx.predict_steps}"
+                )
+            log_prior = prev
+            for _ in range(ctx.predict_steps):
+                # (B, K_from, 1) + (1, K_from, K_to) -> logsumexp over K_from
+                log_prior = torch.logsumexp(
+                    log_prior.unsqueeze(2) + log_a.unsqueeze(0), dim=1
+                )
         return PriorOutput(log_prior=log_prior, info={"log_transition": log_a})
 
 

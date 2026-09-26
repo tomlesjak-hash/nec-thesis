@@ -22,6 +22,7 @@ Conventions
 from __future__ import annotations
 
 import dataclasses
+import re
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -36,6 +37,7 @@ __all__ = [
     "TrainConfig",
     "NECConfig",
     "pyramid_dims",
+    "target_horizon",
 ]
 
 ExpertInputMode = Literal["snapshot", "snapshot_plus_hidden"]
@@ -63,12 +65,34 @@ def pyramid_dims(first_width: int, depth: int) -> tuple[int, ...]:
     return tuple(max(first_width // (2**i), 1) for i in range(depth))
 
 
+_HORIZON_IN_TARGET = re.compile(r"_(\d+)d$")
+
+
+def target_horizon(target: str) -> int | None:
+    """The forward horizon a target's name declares, in periods, or ``None``.
+
+    The real panels name their targets ``fwd_ret_{h}d`` and
+    ``fwd_resid_ret_{h}d`` (:class:`nec_moe.features.StageBSpec`), so the
+    horizon travels with the target. A target over ``(t, t+h]`` is realised
+    only at ``t+h``, which decides what may condition on it (audit M-1), and
+    consecutive targets overlap by ``h-1`` periods, which decides how its
+    daily statistics must be tested (audit E-2).
+    """
+    m = _HORIZON_IN_TARGET.search(target)
+    return int(m.group(1)) if m else None
+
+
 @dataclass(frozen=True)
 class DataConfig:
     """Tensor dimensions and (optional) feature names of the data contract (§6).
 
     ``sequence_features`` / ``snapshot_features`` are optional documentation of
     channel order; when provided their lengths must match ``d_seq`` / ``d_snap``.
+
+    ``horizon`` is the target's forward horizon in periods. ``None`` (the
+    default) reads it from the target's name (``fwd_ret_5d`` gives 5) and
+    falls back to 1 when the name declares none, as for the synthetic
+    panels. See :attr:`horizon_periods`.
     """
 
     d_seq: int
@@ -77,6 +101,15 @@ class DataConfig:
     sequence_features: tuple[str, ...] = ()
     snapshot_features: tuple[str, ...] = ()
     target: str = "fwd_return"
+    horizon: int | None = None
+
+    @property
+    def horizon_periods(self) -> int:
+        """The effective forward horizon: explicit, else from the name, else 1."""
+        if self.horizon is not None:
+            return self.horizon
+        parsed = target_horizon(self.target)
+        return parsed if parsed is not None else 1
 
 
 @dataclass(frozen=True)
@@ -391,6 +424,15 @@ class NECConfig:
             raise bad(
                 f"len(snapshot_features)={len(d.snapshot_features)} != d_snap={d.d_snap}"
             )
+        if d.horizon is not None:
+            if d.horizon < 1:
+                raise bad(f"data.horizon must be >= 1, got {d.horizon}")
+            named = target_horizon(d.target)
+            if named is not None and named != d.horizon:
+                raise bad(
+                    f"data.horizon={d.horizon} contradicts the target "
+                    f"{d.target!r}, whose name declares {named}"
+                )
 
         # encoder
         if e.hidden_dim < 1 or e.num_layers < 1:

@@ -1,13 +1,14 @@
 """Tests that pin bugs found by the code audit of 2026-09-25 (brief 05).
 
-Every test here asserts the CORRECT behaviour and currently fails, so each is
-marked ``xfail(strict=True)`` with the finding ID from
-``Master Thesis/Code_Audit_2026-09-25.md``. The suite stays green while the
-bug stays pinned; when a fix lands, the test starts passing, strict mode turns
-that into a failure, and the marker has to be removed by hand, so a fix can
-never go unnoticed.
+Every test here asserts the CORRECT behaviour. A test whose bug is still open
+is marked ``xfail(strict=True)`` with the finding ID from
+``Master Thesis/Code_Audit_2026-09-25.md``: the suite stays green while the
+bug stays pinned, and when a fix lands the test starts passing, strict mode
+turns that into a failure, and the marker has to be removed by hand, so a fix
+can never go unnoticed.
 
-Nothing here changes production code.
+Fixed (marker removed, the test now guards the fix): D-1, E-1, M-1.
+Still open: B-1, G-2, G-3.
 """
 
 from __future__ import annotations
@@ -66,13 +67,8 @@ def _prices(seed: int, dates: pd.DatetimeIndex) -> pd.DataFrame:
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="D-1: build_panel ranks each date over every candidate ticker, and "
-    "filter_point_in_time only drops rows afterwards, so a member's rank on a "
-    "date depends on names that are not in the index that day (including "
-    "future joiners)",
-)
+# D-1, fixed: filter_point_in_time re-ranks a rank-normalized panel among
+# each date's members.
 def test_D1_point_in_time_ranks_use_only_that_dates_members():
     dates = pd.bdate_range("2019-01-02", periods=330)
     tickers = ["aaa", "bbb", "ccc", "ddd", "eee", "fff", "ggg"]
@@ -143,13 +139,8 @@ def test_B1_arm_result_does_not_depend_on_base_cache_state():
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="E-1: base_and_correction scores the base as one Gaussian at the "
-    "prior-weighted sigma while the mixture NLL is a scale mixture of the "
-    "experts' sigmas, so the reported NLL improvement is nonzero even when "
-    "every correction is exactly zero",
-)
+# E-1, fixed: the base is scored as the same model with every correction
+# forced to zero (NECModel.corrections_disabled).
 def test_E1_nll_improvement_is_zero_when_every_correction_is_zero():
     panel = _sticky_panel(120, 8)
     cfg = small_config(
@@ -174,13 +165,8 @@ def test_E1_nll_improvement_is_zero_when_every_correction_is_zero():
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="M-1: HMMRegimePrior's prior at date t is the predict step from the "
-    "posterior at t-1, which was updated with y_{t-1}; with a 5-day forward "
-    "target y_{t-1} is realised only at t+4, so the prior at t uses returns "
-    "after t",
-)
+# M-1, fixed: with an h-period target the prior at t is the posterior from
+# h dates back carried forward h steps (Trainer._lagged_context).
 def test_M1_stateful_prior_ignores_targets_not_yet_realised():
     base = small_config(prior_kind="hmm")
     data = dataclasses.replace(base.data, target="fwd_ret_5d")  # horizon 5

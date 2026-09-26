@@ -147,6 +147,22 @@ def test_filter_point_in_time_on_panel():
     assert torch.equal(filtered.date, filtered.date.sort().values)
 
 
+def test_filter_leaves_an_unranked_panel_untouched():
+    """Re-ranking (audit D-1) applies only to rank-normalized panels: a panel
+    whose snapshot features are raw values keeps them exactly, row for row."""
+    panel = SyntheticRegimePanel(SyntheticSpec(seed=0)).generate(
+        n_dates=4, n_entities=2
+    )
+    assert panel.schema.rank_normalized is False
+    panel.date_labels = ("2021-05-28", "2021-05-31", "2021-06-01", "2021-06-02")
+    panel.entity_labels = ("www", "ccc-d")
+    filtered = filter_point_in_time(panel, _fixture_universe())
+    for row in range(len(filtered)):
+        d, e = int(filtered.date[row]), int(filtered.entity[row])
+        src = int(((panel.date == d) & (panel.entity == e)).nonzero()[0])
+        assert torch.equal(filtered.x_snap[row], panel.x_snap[src])
+
+
 def test_filter_requires_labels():
     panel = SyntheticRegimePanel(SyntheticSpec(seed=0)).generate(
         n_dates=3, n_entities=2

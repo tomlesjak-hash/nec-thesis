@@ -61,6 +61,9 @@ __all__ = [
     "rank_ic_by_date",
     "IcSummary",
     "ic_summary",
+    "HAC_KERNELS",
+    "long_run_variance",
+    "resolve_hac_lags",
     "long_short_by_date",
     "PortfolioSummary",
     "portfolio_summary",
@@ -182,8 +185,11 @@ def rank_ic_by_date(
 class IcSummary:
     """Summary of a daily rank-IC series.
 
-    ``icir`` is the per-period information ratio ``mean/std``; ``t_stat`` is
-    the syllabus's ``IC-bar / SE(IC-bar) = icir * sqrt(T)``.
+    ``icir`` is the per-period information ratio ``mean/std``, a descriptive
+    statistic. ``t_stat`` is ``IC-bar / SE(IC-bar)`` with a heteroskedasticity-
+    and autocorrelation-consistent standard error over ``hac_lags``
+    autocovariances, weighted by ``hac_kernel`` (:func:`long_run_variance`).
+    With ``hac_lags = 0`` it is the i.i.d. ``icir * sqrt(T)``.
     """
 
     mean_ic: float
@@ -191,21 +197,103 @@ class IcSummary:
     icir: float
     t_stat: float
     n_dates: int
+    hac_lags: int = 0
+    hac_kernel: str = "uniform"
 
 
-def ic_summary(ics: Tensor) -> IcSummary:
+#: Kernels for :func:`long_run_variance`. ``"uniform"`` is Hansen and Hodrick
+#: (1980): every autocovariance up to the lag at full weight, which is exact
+#: for the MA(h-1) structure that overlapping h-period returns create.
+#: ``"bartlett"`` is Newey and West (1987): weights ``1 - l/(L+1)``, always
+#: non-negative, but they shrink exactly the autocovariances the overlap
+#: produces. Measured on 2,000 simulated overlapping 5-period series per
+#: length (2026-09-26), rejection rate of a nominal 5% two-sided test:
+#:
+#: ======  =====  ==================  =========================  ================
+#: T       iid    bartlett, lag h-1   bartlett, lag 2(h-1)       uniform, lag h-1
+#: ======  =====  ==================  =========================  ================
+#: 120     0.402  0.132               0.112                      0.073
+#: 360     0.384  0.120               0.094                      0.060
+#: 500     0.374  0.108               0.077                      0.054
+#: ======  =====  ==================  =========================  ================
+HAC_KERNELS: tuple[str, ...] = ("uniform", "bartlett")
+
+
+def long_run_variance(x: Tensor, lags: int, kernel: str = "uniform") -> float:
+    """Long-run variance of a series, for the standard error of its mean.
+
+    ``gamma_0 + 2 * sum_{l=1..L} w_l * gamma_l``, every autocovariance divided
+    by ``T - 1`` so that ``lags = 0`` returns exactly the unbiased sample
+    variance. ``kernel`` sets ``w_l``: ``"uniform"`` (Hansen-Hodrick,
+    ``w_l = 1``) or ``"bartlett"`` (Newey-West, ``w_l = 1 - l/(L+1)``); see
+    :data:`HAC_KERNELS` for why the default is uniform.
+
+    Why (audit finding E-2): a daily series built on ``h``-period forward
+    returns overlaps itself by ``h - 1`` periods, so neighbouring values
+    share most of their return days. On the real panel the daily rank IC of
+    5-day targets has lag-1 autocorrelation of 0.6 to 0.8, and an i.i.d.
+    standard error overstated t by 1.6 to 1.8 times. ``lags = h - 1`` spans
+    exactly that overlap. The uniform estimate can come out non-positive in
+    finite samples; callers then fall back to Bartlett (see :func:`ic_summary`).
+    """
+    if lags < 0:
+        raise ValueError(f"lags must be >= 0, got {lags}")
+    if kernel not in HAC_KERNELS:
+        raise ValueError(f"unknown HAC kernel {kernel!r}; registered: {list(HAC_KERNELS)}")
+    xd = x.detach().double().flatten()
+    t = int(xd.numel())
+    if t < 2:
+        raise ValueError(f"need >= 2 observations, got {t}")
+    xc = xd - xd.mean()
+    denom = t - 1
+    lrv = float((xc * xc).sum()) / denom
+    for lag in range(1, min(lags, t - 1) + 1):
+        weight = 1.0 if kernel == "uniform" else 1.0 - lag / (lags + 1.0)
+        lrv += 2.0 * weight * float((xc[:-lag] * xc[lag:]).sum()) / denom
+    return lrv
+
+
+def hac_variance(x: Tensor, lags: int, kernel: str) -> tuple[float, str]:
+    """:func:`long_run_variance`, falling back to Bartlett if uniform is <= 0.
+
+    Returns the variance and the kernel actually used, so a summary can say
+    which standard error its t-statistic rests on.
+    """
+    lrv = long_run_variance(x, lags, kernel)
+    if lrv <= 0 and kernel == "uniform" and lags > 0:
+        return long_run_variance(x, lags, "bartlett"), "bartlett"
+    return lrv, kernel
+
+
+def resolve_hac_lags(panel: Panel, hac_lags: int | None) -> int:
+    """``hac_lags``, or ``horizon - 1`` from the panel's target when ``None``."""
+    if hac_lags is None:
+        return panel.horizon - 1
+    if hac_lags < 0:
+        raise ValueError(f"hac_lags must be >= 0, got {hac_lags}")
+    return hac_lags
+
+
+def ic_summary(ics: Tensor, hac_lags: int = 0, hac_kernel: str = "uniform") -> IcSummary:
     t = int(ics.numel())
     if t < 2:
         raise ValueError(f"need >= 2 daily ICs to summarize, got {t}")
     mean = float(ics.mean())
     std = float(ics.std(unbiased=True))
     icir = mean / std if std > 0 else float("inf") if mean != 0 else 0.0
+    lrv, used = hac_variance(ics, hac_lags, hac_kernel)
+    if lrv > 0:
+        t_stat = mean / math.sqrt(lrv / t)
+    else:
+        t_stat = float("inf") if mean != 0 else 0.0
     return IcSummary(
         mean_ic=mean,
         ic_std=std,
         icir=icir,
-        t_stat=icir * t**0.5,
+        t_stat=t_stat,
         n_dates=t,
+        hac_lags=hac_lags,
+        hac_kernel=used,
     )
 
 
@@ -382,9 +470,17 @@ class _FoldAccumulator:
     """Shared per-fold scoring + pooling for the NEC and baseline harnesses —
     both model families are graded by exactly the same code path."""
 
-    def __init__(self, backtest_quantiles: int | None, cost_rate: float) -> None:
+    def __init__(
+        self,
+        backtest_quantiles: int | None,
+        cost_rate: float,
+        hac_lags: int = 0,
+        hac_kernel: str = "uniform",
+    ) -> None:
         self.backtest_quantiles = backtest_quantiles
         self.cost_rate = cost_rate
+        self.hac_lags = hac_lags
+        self.hac_kernel = hac_kernel
         self.folds: list[FoldResult] = []
         self._ics: list[Tensor] = []
         self._base_ics: list[Tensor] = []
@@ -427,7 +523,7 @@ class _FoldAccumulator:
         base_ics: Tensor | None = None
         if base_pred is not None:
             _, base_ics = rank_ic_by_date(base_pred, test.y, test.date)
-            base_ic = ic_summary(base_ics)
+            base_ic = ic_summary(base_ics, self.hac_lags, self.hac_kernel)
             if self.backtest_quantiles is not None:
                 _, b_gross, b_tno = long_short_by_date(
                     base_pred, test.y, test.date, test.entity,
@@ -438,7 +534,7 @@ class _FoldAccumulator:
             "fold_result": FoldResult(
                 fold=fold.fold,
                 nll=nll,
-                ic=ic_summary(ics),
+                ic=ic_summary(ics, self.hac_lags, self.hac_kernel),
                 n_train=len(train),
                 n_test=len(test),
                 portfolio=portfolio,
@@ -494,13 +590,13 @@ class _FoldAccumulator:
         # pooled only when every fold has a base series: a partial pool
         # would silently compare the mixture's dates with a subset of them
         pooled_base_ic = (
-            ic_summary(torch.cat(self._base_ics))
+            ic_summary(torch.cat(self._base_ics), self.hac_lags, self.hac_kernel)
             if self._base_ics and len(self._base_ics) == len(self._ics)
             else None
         )
         return WalkForwardResult(
             folds=self.folds,
-            pooled_ic=ic_summary(torch.cat(self._ics)),
+            pooled_ic=ic_summary(torch.cat(self._ics), self.hac_lags, self.hac_kernel),
             pooled_portfolio=pooled_portfolio,
             pooled_base_ic=pooled_base_ic,
         )
@@ -515,18 +611,21 @@ def _predict_memoryless(trainer: Trainer, test: Panel) -> Tensor:
 
 
 def _fold_predictions(
-    trainer: Trainer, train: Panel, test: Panel
+    trainer: Trainer, train: Panel | None, test: Panel
 ) -> tuple[Tensor, float]:
     """Per-sample causal predictions (in ``test``'s row order) + held-out NLL.
 
     Memoryless: one-shot. Stateful (HMM): a strictly-causal filtering pass,
     with the filter state warmed through the *training* sequence first — legal
-    because every training date precedes the test block.
+    because every training date precedes the test block. With ``train=None``
+    the stateful pass starts cold from the prior's initial distribution.
     """
     if trainer.model.prior.stateful:
-        warm = trainer.evaluate_sequence(train.time_sequence())
+        init = None
+        if train is not None:
+            init = trainer.evaluate_sequence(train.time_sequence()).log_filtered
         seq = test.time_sequence()
-        ev = trainer.evaluate_sequence(seq, init_state=warm.log_filtered[-1])
+        ev = trainer.evaluate_sequence(seq, init_state=init)
         pred = torch.cat([ev.y_hat[t] for t in range(len(seq))])
         # lock the ordering contract: per-date batches concatenated in date
         # order must reproduce the panel's (date-major) row order exactly
@@ -641,6 +740,8 @@ def base_and_correction(
     trainer: Trainer,
     test: Panel,
     quantiles: tuple[float, ...] = (0.05, 0.25, 0.5, 0.75, 0.95),
+    *,
+    train: Panel | None = None,
 ) -> tuple[Tensor | None, float | None, tuple[tuple[str, float], ...]]:
     """The frozen base's own test predictions/NLL, and the correction applied.
 
@@ -648,22 +749,26 @@ def base_and_correction(
     performance is the floor every mixture number is measured from, and the
     correction magnitude answers the thesis question directly — a model whose
     corrections are numerically negligible has answered it in the negative
-    whatever the R-squared does. The base's NLL uses the mixture's own noise
-    scale (the responsibility-weighted sigma), so the two NLLs differ only in
-    the mean, which is the thing being compared.
+    whatever the R-squared does.
+
+    **The base's NLL is the same model's NLL with every correction forced to
+    zero** (:meth:`NECModel.corrections_disabled`): the mixture density
+    ``sum_k pi_k N(y; f0, s_k^2)`` under the model's own noise scales, prior
+    and evaluation path. ``base_nll - nll`` therefore measures what the
+    corrections add and nothing else, and it is exactly zero when every
+    correction is zero. (Audit finding E-1: the earlier single Gaussian at a
+    prior-averaged sigma credited the experts' variance structure to the
+    corrections.) Pass ``train`` for a stateful prior so the base is scored
+    through the same warmed-up recursion as the mixture.
     """
     model = trainer.model
     if model.base is None:
         return None, None, ()
     model.eval()
     base_pred = model.base(test.x_snap)
+    with model.corrections_disabled():
+        _, base_nll = _fold_predictions(trainer, train, test)
     out = model(test.x_seq, test.x_snap, PriorContext(date=test.date))
-    pi = out.prior.log_prior.exp()
-    sigma = (pi * out.log_sigma.exp().unsqueeze(0)).sum(dim=-1)
-    resid = test.y - base_pred
-    base_nll = float(
-        (0.5 * math.log(2 * math.pi) + sigma.log() + 0.5 * (resid / sigma) ** 2).mean()
-    )
     stats: tuple[tuple[str, float], ...] = ()
     correction = out.correction
     if correction is not None:
@@ -717,8 +822,17 @@ def walk_forward_evaluate(
     seed: int = 0,
     registry: TrialRegistry | None = None,
     registry_tag: str | None = None,
+    hac_lags: int | None = None,
+    hac_kernel: str = "uniform",
 ) -> WalkForwardResult:
     """Fit-once-per-window walk-forward evaluation (Decision D protocol).
+
+    ``hac_lags`` / ``hac_kernel``: the autocorrelation-consistent standard
+    error behind every IC t-statistic (fold, base and pooled). ``hac_lags =
+    None``, the default, uses ``horizon - 1`` from the panel's target
+    (``fwd_ret_5d`` gives 4; a target that declares no horizon gives 0), the
+    overlap between consecutive forward returns; the default kernel is
+    Hansen-Hodrick (see :data:`HAC_KERNELS`; audit E-2).
 
     For each fold: build a **fresh** model/trainer via ``make_trainer`` (a
     fresh optimization per window — refits are independent, which is exactly
@@ -763,7 +877,9 @@ def walk_forward_evaluate(
     resume = Path(resume_dir) if resume_dir is not None else None
     if resume is not None:
         resume.mkdir(parents=True, exist_ok=True)
-    acc = _FoldAccumulator(backtest_quantiles, cost_rate)
+    acc = _FoldAccumulator(
+        backtest_quantiles, cost_rate, resolve_hac_lags(panel, hac_lags), hac_kernel
+    )
     for fold in folds:
         done_file = resume / f"fold_{fold.fold}.pt" if resume is not None else None
         if done_file is not None and done_file.exists():
@@ -821,7 +937,7 @@ def walk_forward_evaluate(
             if transition is not None
             else ()
         )
-        base_pred, base_nll, correction = base_and_correction(trainer, test)
+        base_pred, base_nll, correction = base_and_correction(trainer, test, train=train)
         gate_perm, gate_metrics = _gate_report(trainer, fold, registry, registry_tag, seed)
         payload = acc.add(
             fold, pred, train, test, nll,
@@ -861,8 +977,12 @@ def walk_forward_evaluate_baseline(
     min_train_dates: int = 1,
     backtest_quantiles: int | None = None,
     cost_rate: float = 0.0,
+    hac_lags: int | None = None,
+    hac_kernel: str = "uniform",
 ) -> WalkForwardResult:
     """The single-model counterpart of :func:`walk_forward_evaluate`.
+
+    ``hac_lags`` and ``hac_kernel`` as in :func:`walk_forward_evaluate`.
 
     Same folds, same purging, same fit-once-per-window discipline, and —
     via the shared accumulator — byte-identical scoring: a baseline row and an
@@ -877,7 +997,9 @@ def walk_forward_evaluate_baseline(
         purge_dates=purge_dates,
         min_train_dates=min_train_dates,
     )
-    acc = _FoldAccumulator(backtest_quantiles, cost_rate)
+    acc = _FoldAccumulator(
+        backtest_quantiles, cost_rate, resolve_hac_lags(panel, hac_lags), hac_kernel
+    )
     for fold in folds:
         train = panel.subset_dates(fold.train_dates)
         test = panel.subset_dates(fold.test_dates)

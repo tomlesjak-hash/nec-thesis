@@ -18,8 +18,25 @@ Sources (``source=`` on the loaders):
   the cache under the documented filename — the pipeline then runs fully
   offline — or use the fallback source.
 - ``"yfinance"`` (the syllabus's sanctioned *prototyping fallback*; unofficial
-  Yahoo endpoints via the ``yfinance`` package, imported lazily) — fetched
-  bars are auto-adjusted and written to the same cache format.
+  Yahoo endpoints via the ``yfinance`` package, imported lazily). Fetched
+  **without** dividend back-adjustment, with the adjusted close alongside
+  (see *Price adjustment* below), into a cache file of its own.
+
+Price adjustment (audit finding D-2)
+------------------------------------
+A back-adjusted close at date ``t`` is scaled by every dividend and spin-off
+paid **after** ``t``. Return features are unaffected, because a price ratio
+only involves adjustments inside its own window, but a **level** built from
+it is not: dollar volume at ``t`` would carry the size of later dividends.
+The yfinance cache therefore holds two closes. ``Close`` is Yahoo's
+split-adjusted, not dividend-adjusted close; with the split-adjusted
+``Volume``, the split factors cancel in ``Close x Volume``, which is the
+dollar volume actually traded that day. ``Adj Close`` adds dividends, and
+returns, drawdown and the target use it. The files used to be auto-adjusted
+(``Close`` dividend-adjusted), and those legacy files are never read for
+``source="yfinance"``: the new contract lives under its own file name
+(``*.raw.csv``). A source that supplies one close column (Stooq) is used for
+both, and must not be dividend back-adjusted for dollar volume to be causal.
 
 SURVIVORSHIP BIAS — read before believing any backtest on this data
 --------------------------------------------------------------------
@@ -66,6 +83,11 @@ DEFAULT_UNIVERSE: tuple[str, ...] = (
 )
 
 _STOOQ_COLUMNS = ("Date", "Open", "High", "Low", "Close", "Volume")
+#: optional column: the dividend-and-split adjusted close, for returns only
+_ADJ_CLOSE = "Adj Close"
+#: cache file suffix of the yfinance contract that carries both closes; the
+#: legacy auto-adjusted files have no suffix and are never read for yfinance
+_YF_RAW_SUFFIX = ".raw"
 
 
 def stooq_url(symbol: str, start: str, end: str) -> str:
@@ -75,8 +97,10 @@ def stooq_url(symbol: str, start: str, end: str) -> str:
     return f"https://stooq.com/q/d/l/?s={symbol}.us&d1={d1}&d2={d2}&i=d"
 
 
-def _cache_path(cache_dir: Path, symbol: str, start: str, end: str) -> Path:
-    return cache_dir / f"{symbol}.us.{start}.{end}.csv"
+def _cache_path(
+    cache_dir: Path, symbol: str, start: str, end: str, suffix: str = ""
+) -> Path:
+    return cache_dir / f"{symbol}.us.{start}.{end}{suffix}.csv"
 
 
 def fetch_stooq_csv(
@@ -136,28 +160,34 @@ def fetch_yfinance_csv(
     refresh: bool = False,
     pause_s: float = 0.5,
 ) -> Path:
-    """Fetch auto-adjusted daily bars via ``yfinance`` into the same cache format.
+    """Fetch daily bars via ``yfinance``: raw close plus adjusted close.
 
-    The syllabus's prototyping fallback (unofficial Yahoo endpoints). Writes
-    the identical ``Date,Open,High,Low,Close,Volume`` CSV as the Stooq path,
-    so everything downstream is source-agnostic. ``yfinance`` is imported
-    lazily — it is an optional dependency.
+    The syllabus's prototyping fallback (unofficial Yahoo endpoints). Written
+    as ``Date,Open,High,Low,Close,Adj Close,Volume`` with ``auto_adjust=False``
+    (see the module's *Price adjustment* note, audit finding D-2), to
+    ``<symbol>.us.<start>.<end>.raw.csv``. ``yfinance`` is imported lazily;
+    it is an optional dependency.
     """
     cache_dir = Path(cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
-    path = _cache_path(cache_dir, symbol, start, end)
+    path = _cache_path(cache_dir, symbol, start, end, _YF_RAW_SUFFIX)
     if path.exists() and not refresh:
         return path
     import yfinance as yf  # lazy: optional dependency
 
     df = yf.download(
-        symbol.upper(), start=start, end=end, progress=False, auto_adjust=True
+        symbol.upper(), start=start, end=end, progress=False, auto_adjust=False
     )
     if df is None or df.empty:
         raise RuntimeError(f"yfinance returned no data for {symbol!r}")
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
-    out = df[["Open", "High", "Low", "Close", "Volume"]].copy()
+    if _ADJ_CLOSE not in df.columns:
+        raise RuntimeError(
+            f"yfinance returned no {_ADJ_CLOSE!r} column for {symbol!r}; "
+            "the cache contract needs both the raw and the adjusted close"
+        )
+    out = df[["Open", "High", "Low", "Close", _ADJ_CLOSE, "Volume"]].copy()
     out.insert(0, "Date", out.index.strftime("%Y-%m-%d"))
     path.write_text(out.to_csv(index=False))
     time.sleep(pause_s)
@@ -170,14 +200,19 @@ def _parse_stooq_csv(text: str, symbol: str) -> pd.DataFrame:
     if missing:
         raise ValueError(f"{symbol}: CSV missing columns {missing}")
     df["Date"] = pd.to_datetime(df["Date"])
+    cols = ["Open", "High", "Low", "Close", "Volume"]
+    if _ADJ_CLOSE in df.columns:
+        cols.append(_ADJ_CLOSE)
     df = (
-        df.set_index("Date")[["Open", "High", "Low", "Close", "Volume"]]
-        .rename(columns=str.lower)
+        df.set_index("Date")[cols]
+        .rename(columns=lambda c: c.lower().replace(" ", "_"))
         .sort_index()
     )
     df = df[~df.index.duplicated(keep="last")]
     if (df["close"] <= 0).any():
         raise ValueError(f"{symbol}: non-positive close prices in CSV")
+    if "adj_close" in df.columns and (df["adj_close"] <= 0).any():
+        raise ValueError(f"{symbol}: non-positive adjusted close prices in CSV")
     return df.astype("float64")
 
 
@@ -194,6 +229,9 @@ def load_ohlcv(
     refresh: bool = False,
 ) -> pd.DataFrame:
     """Cached daily OHLCV for one symbol: DatetimeIndex, columns o/h/l/c/v.
+
+    Plus ``adj_close`` when the source provides it (yfinance): returns use it,
+    dollar volume uses the raw ``close`` (audit finding D-2).
 
     Cache-first regardless of ``source`` — a present cache file short-circuits
     any network access (which is also how the offline tests and the

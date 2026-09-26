@@ -729,7 +729,10 @@ manual-download workflow and how the tests run.
   detects Stooq's JavaScript anti-bot wall and **raises with instructions** (browser URL
   + exact cache filename) rather than circumventing it — a deliberate ethics/robustness
   stance. `source="yfinance"` (the syllabus's sanctioned prototyping fallback) fetches
-  auto-adjusted bars and writes the *identical* cache format.
+  unadjusted bars plus the adjusted close (`Date,Open,High,Low,Close,Adj Close,Volume`,
+  file `<symbol>.us.<start>.<end>.raw.csv`): returns use `Adj Close`, dollar volume uses
+  the raw `Close` x `Volume`, so no level feature carries dividends paid after its date
+  (audit finding D-2). Legacy auto-adjusted yfinance files are never read.
 - `load_universe(tickers, …, min_tickers=5)` loads the whole list plus the market
   symbol (`spy`), collecting and reporting per-ticker failures; too few successes is an
   error (a 3-name "panel" would be meaningless silently).
@@ -1146,8 +1149,8 @@ Notes: the first candidate download is slow (hundreds of symbols; polite 0.5 s p
   (`https://stooq.com/q/d/l/?s=aapl.us&d1=20150101&d2=20241231&i=d`) and the exact
   filename to save into the cache — after which everything runs offline. Deliberately
   not circumvented.
-- **yfinance** (syllabus's sanctioned prototyping fallback): auto-adjusted bars,
-  identical cache format, `pip install yfinance` if missing.
+- **yfinance** (syllabus's sanctioned prototyping fallback): raw bars plus the adjusted
+  close in its own `*.raw.csv` cache file (audit D-2), `pip install yfinance` if missing.
 - VIX + factors for Stage C land in the same cache: `vix_history.csv`,
   `ff_factors_daily.zip`, `ff_momentum_daily.zip`, `sp500_wiki.html`.
 

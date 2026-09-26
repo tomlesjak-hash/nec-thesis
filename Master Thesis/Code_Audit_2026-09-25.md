@@ -98,10 +98,17 @@ property or only the guard does. X1 to X10 are further critical properties found
 
 ### 0.3 Findings by severity
 
+*Update 2026-09-26:*
+- G-6 and B-5 are closed by new tests, and the break-it table was re-run (section 9).
+- The five Critical findings (D-1, D-2, E-1, E-2, M-1) are then fixed in code and pinned by tests, and the table was run again on the fixed code: every fix-reversal mutation is caught (section 10).
+- D-1 and D-2 still need the real panel rebuilt.
+- One new Major finding, M-5, is added.
+- Counts now: 5 Critical (all fixed), 12 Major (2 closed), 19 Minor, 13 Notes.
+
 | Severity | Count | Findings |
 |---|---|---|
-| Critical | 5 | D-1, D-2, M-1, E-1, E-2 |
-| Major | 11 | B-1, B-5, X-1, G-2, G-3, G-6, E-3, O-1, O-3, S-2, S-3 |
+| Critical | 5 | D-1, D-2, M-1, E-1, E-2 (all fixed 2026-09-26, section 10) |
+| Major | 12 | B-1, B-5 (closed), X-1, G-2, G-3, G-6 (closed), E-3, O-1, O-3, S-2, S-3, M-5 (new) |
 | Minor | 19 | D-3, D-4, B-2, B-3, B-4, X-2, G-4, G-8, M-2, M-3, T-1, T-2, E-4, E-5, E-9, E-10, O-2, O-4, O-5 |
 | Note | 13 | D-5, D-6, D-7, G-1, G-5, M-4, T-3, E-6, E-7, E-8, O-6, O-7, S-1 |
 
@@ -112,6 +119,8 @@ property or only the guard does. X1 to X10 are further critical properties found
 
 **Not yet. Build nothing that produces or interprets a number until the Critical findings are
 fixed.**
+
+*Update 2026-09-26:* items 1 and 2 below are fixed in code (section 10). Item 2 still needs the panel rebuilt, which requires re-downloading the price cache, and the smoke run needs re-running after that. Items 3 and 4 and the smoke test (S-3) are still open.
 
 The structural core is sound, and mostly well tested:
 - the `RegimePrior.fit` / `PrecomputedRegimePrior` interface;
@@ -137,8 +146,9 @@ evaluated honestly.
    cross-arm comparison.
 4. **O-1 and O-3**: the quick-mode purge, and asserting the purge against the target's horizon (this
    also closes G-4).
-5. **The critical-property test gaps**: G-6 (canonical ordering), B-5 (base fitted on the training
-   block only), and a smoke test of the current design (S-3).
+5. **The critical-property test gaps**: G-6 (canonical ordering) and B-5 (base fitted on the training
+   block only), both closed 2026-09-26 (section 9), and a smoke test of the current design (S-3),
+   still open.
 
 **Then, before the paths they affect are used:**
 - M-1 before the backprop-HMM baseline arm is run on the 5-day target;
@@ -178,8 +188,8 @@ but tests at an easy signal-to-noise ratio, and has no forward horizon at all.
 
 | ID | Severity | File and line | Description | Evidence | Proposed fix |
 |---|---|---|---|---|---|
-| D-1 | Critical | `features.py:285-286`; `scripts/build_pit_panel.py:77-80`; `universe.py:259` | Snapshot features are rank-normalised per date over **every candidate ticker** (the 2015 to 2024 membership union). `filter_point_in_time` then only drops rows; it does not re-rank. A member's feature value on date `t` therefore depends on names that are not in the index that day, including names that join later and are in the candidate list only because they grew. Ordering among members is preserved per feature; spacing is not. | On all 48 sampled dates of `pit_panel_2015_2024.pt`, members' ranks deviate from their own-cross-section ranks by up to 0.073 (0.0728 on 2016-11-11). The build dropped 246,708 non-member rows over 2,390 dates. Pinned by `test_D1_point_in_time_ranks_use_only_that_dates_members` (xfail). | Filter to point-in-time membership **before** ranking: pass the membership mask into `build_panel`, or re-rank `x_snap` per date inside `filter_point_in_time`. Ranks of ranks among members equal member-only ranks exactly. Apply `min_names_per_date` after the filter too (D-4). Rebuild the panel. |
-| D-2 | Critical | `market_data.py:153-154`; `features.py:190` | `yfinance.download(..., auto_adjust=True)` back-adjusts OHLC for every dividend, split and spin-off up to the download date. Return-based features are unaffected, because a price ratio only involves adjustments inside its own window. `dollar_vol_20d = log mean(close x volume)` is a **level**, however, and carries the cumulative adjustment factor of all corporate actions after `t`. | Cached 2015-06-25 closes: XOM 52.49 (traded near 83.5), KO 28.38 (near 39.5), T 12.65 (near 35.8). These are factors of about 0.63, 0.72 and 0.35 from 2015 to 2024 events, so the log factor reaches about -1.0 on a feature whose cross-sectional spread is a few log units. The magnitude of predictive leakage is unmeasured and is probably small, but it is look-ahead. | Extend the cache contract to hold the raw close and the adjusted close (`auto_adjust=False`). Compute returns from adjusted prices and dollar volume from raw close x raw volume. For CRSP use `abs(PRC) x VOL`. Do not let a future CRSP loader write adjusted closes into the single `Close` column. |
+| D-1 | Critical, **fixed 2026-09-26** (section 10; panel rebuild pending) | `features.py:285-286`; `scripts/build_pit_panel.py:77-80`; `universe.py:259` | Snapshot features are rank-normalised per date over **every candidate ticker** (the 2015 to 2024 membership union). `filter_point_in_time` then only drops rows; it does not re-rank. A member's feature value on date `t` therefore depends on names that are not in the index that day, including names that join later and are in the candidate list only because they grew. Ordering among members is preserved per feature; spacing is not. | On all 48 sampled dates of `pit_panel_2015_2024.pt`, members' ranks deviate from their own-cross-section ranks by up to 0.073 (0.0728 on 2016-11-11). The build dropped 246,708 non-member rows over 2,390 dates. Pinned by `test_D1_point_in_time_ranks_use_only_that_dates_members` (xfail). | Filter to point-in-time membership **before** ranking: pass the membership mask into `build_panel`, or re-rank `x_snap` per date inside `filter_point_in_time`. Ranks of ranks among members equal member-only ranks exactly. Apply `min_names_per_date` after the filter too (D-4). Rebuild the panel. |
+| D-2 | Critical, **fixed 2026-09-26** (section 10; panel rebuild pending) | `market_data.py:153-154`; `features.py:190` | `yfinance.download(..., auto_adjust=True)` back-adjusts OHLC for every dividend, split and spin-off up to the download date. Return-based features are unaffected, because a price ratio only involves adjustments inside its own window. `dollar_vol_20d = log mean(close x volume)` is a **level**, however, and carries the cumulative adjustment factor of all corporate actions after `t`. | Cached 2015-06-25 closes: XOM 52.49 (traded near 83.5), KO 28.38 (near 39.5), T 12.65 (near 35.8). These are factors of about 0.63, 0.72 and 0.35 from 2015 to 2024 events, so the log factor reaches about -1.0 on a feature whose cross-sectional spread is a few log units. The magnitude of predictive leakage is unmeasured and is probably small, but it is look-ahead. | Extend the cache contract to hold the raw close and the adjusted close (`auto_adjust=False`). Compute returns from adjusted prices and dollar volume from raw close x raw volume. For CRSP use `abs(PRC) x VOL`. Do not let a future CRSP loader write adjusted closes into the single `Close` column. |
 | D-3 | Minor | `features.py:176-211` | Rolling windows and the forward target are computed over each ticker's **own rows**, not the market calendar. A ticker with missing days gets windows and an `h`-row target spanning more than `h` trading days. | 10 of 590 cached tickers miss market days inside their own range: cce 158, hot 55, col 28, har 12, teg 8, and five with 1. | Reindex each ticker to the market calendar before computing features. Missing days become NaN and are dropped by validity. |
 | D-4 | Minor | `features.py:246-251` | `min_names_per_date` and the date codes are computed on the pre-filter candidate set, so after the point-in-time filter a date may hold fewer names than the threshold. Not observed on the current panel: the minimum is 402 names per date. | Code reading. | Apply the threshold after filtering (with D-1). |
 | D-5 | Note | `context_data.py:146-159` | French factors are the current vintage. The library is revised with each release, so the gate series is revised Mkt-RF, not what was known in real time. | Code and source reading. | State it in the methodology. Record the factor file's "created by" line with each run. |
@@ -215,7 +225,7 @@ sweep in the same order. The smoke run used expert dropout 0.05.
 | B-2 | Minor | `base.py:114` | The validation tail (`val_fraction=0.2`: the most recent 20% of training dates) is withheld from base training **even when `early_stopping_patience=None`**; it then only feeds a reported `val_loss`. The experts train on the full block, so on the tail they learn from out-of-sample base residuals. Derivation Stage 5 step 3 can be read either way; this is reported, not decided. | Code reading. | Decide and pre-register: without early stopping, either train on the whole block or document the withholding. |
 | B-3 | Minor | `base.py:114` | The base's train/validation split has no purge. With patience set, the first `h` validation labels overlap the last training labels, which makes the early-stopping criterion optimistic. This stays within the training block; there is no test leakage. | Code reading. | Split with `validation_tail(..., purge_dates=h)`. |
 | B-4 | Minor | `base.py:168-193` | The cache key has no panel identity: no target, feature set or date mapping. Two panels with equal window codes and width would share a base inside one cache. Every current caller builds one cache per panel, so this cannot happen today. | Code reading. | Add a panel fingerprint to the key. |
-| B-5 | Major (test gap) | `evaluation.py:794` (`_attach_base(trainer, train, ...)`) | No test pins that the base is fitted on the **training block only** (critical property P7). Fitting it on the full panel, test block included, is caught by one test, and only by accident: a 1e-12 float comparison in `test_pooled_base_ic_is_the_base_scored_over_the_same_dates` that a different base happens to perturb (E-10). | P7 mutation; failure traced to a float32 rounding difference, not to the base's scope. | Add a spy test in the style of `test_fit_called_once_per_fold_on_training_block_only`: record the date range `fit_base` receives per fold and assert it is the fold's training dates. |
+| B-5 | Major (test gap), **closed 2026-09-26** (section 9) | `evaluation.py:794` (`_attach_base(trainer, train, ...)`) | No test pins that the base is fitted on the **training block only** (critical property P7). Fitting it on the full panel, test block included, is caught by one test, and only by accident: a 1e-12 float comparison in `test_pooled_base_ic_is_the_base_scored_over_the_same_dates` that a different base happens to perturb (E-10). | P7 mutation; failure traced to a float32 rounding difference, not to the base's scope. | Add a spy test in the style of `test_fit_called_once_per_fold_on_training_block_only`: record the date range `fit_base` receives per fold and assert it is the fold's training dates. |
 
 ### 2b. Experts: `experts.py`, zero initialisation, correction mode, `r` materialised separately
 
@@ -273,7 +283,7 @@ Weaknesses:
 | G-2 | Major | `markov_gate.py:577, 587-589` | With `order > 0` (MarkovAutoregression) statsmodels returns filtered probabilities for `nobs - order` dates, and `fit` writes them against all training dates, so the fit raises. The option is offered in `MarkovGateConfig.order` and `run_experiment.gate_order`, and is untested. | `test_G2_markov_autoregression_gate_fits` (xfail): "expected (300, 2), got (299, 2)". | Drop the first `order` dates from the fitted table, and from the lookup's information set. Add the AR case to the recovery tests. |
 | G-4 | Minor (known) | `evaluation.py` (`_fit_gate`, `walk_forward_evaluate`) | The brief 03 §3 horizon-alignment assertion was never implemented: nothing ties the gate's filtered date to the target horizon or the purge (see O-3). | Code reading; brief 03 §3. | Parse the horizon from the target and assert `purge_dates >= horizon` in the harness. |
 | G-5 | Note (brief disagreements) | `markov_gate.py:212-248, 448-459` | (a) Informed centres cut volatility with an **expanding** quantile, not a training-block quantile as brief 04 B.2 describes. This is stricter, and the docstring says why. (b) Distinct optima are clustered by **gap at most 1 nat**, not "rounding to one nat" as brief 04 B.3 says. This avoids splitting two values on either side of a rounding boundary. | Code and brief reading. | Tom to accept or reverse. Both are config-independent choices. |
-| G-6 | Major (test gap) | `markov_gate.py:647-650` | The canonical regime reordering (critical property P13) is untested. The informed starts assign regime 0 to the lowest-volatility group, so statsmodels' raw labels already come out calm-first, and the permutation is the identity in every test. Removing the sort changes nothing any test observes. The code itself does reorder correctly. | P13 mutation (identity permutation): 0 of 243 tests fail. | Add a test that forces turbulent-first raw labels: fit from an explicit start vector with the two regimes' moments swapped, or apply `_canonical_order` to a result with permuted labels. Assert ascending variance, the matching permutation, and the permuted transition matrix. |
+| G-6 | Major (test gap), **closed 2026-09-26** (section 9) | `markov_gate.py:647-650` | The canonical regime reordering (critical property P13) is untested. The informed starts assign regime 0 to the lowest-volatility group, so statsmodels' raw labels already come out calm-first, and the permutation is the identity in every test. Removing the sort changes nothing any test observes. The code itself does reorder correctly. | P13 mutation (identity permutation): 0 of 243 tests fail. | Add a test that forces turbulent-first raw labels: fit from an explicit start vector with the two regimes' moments swapped, or apply `_canonical_order` to a result with permuted labels. Assert ascending variance, the matching permutation, and the permuted transition matrix. |
 
 ### 2e. Baseline gates: soft, hard, top-k, Gumbel, uniform, backprop HMM, `gate.py`, `encoder.py`
 
@@ -295,10 +305,11 @@ unaffected, because it filters the market return `r_t`, which is known at `t`.
 
 | ID | Severity | File and line | Description | Evidence | Proposed fix |
 |---|---|---|---|---|---|
-| M-1 | Critical (for the HMM baseline arm) | `priors.py:507-522`; `train.py:570-599, 735-759`; `evaluation.py:517-534`; `alignment.py:48-50`; `plots.py` (utilisation) | With an `h`-day forward target, the stateful prior at `t` conditions on `y_{t-1}`, realised at `t-1+h`: a look-ahead of `h-1` = 4 trading days on the real panel. It enters training, the test-block predictions (the filter is updated with each test date's `y`), and the HMM alignment and utilisation diagnostics. Nothing forbids `prior="hmm"` with the 5-day panel. | `test_M1_stateful_prior_ignores_targets_not_yet_realised` (xfail): the prior at `t` moves when `y_{t-1}` is perturbed, with target `fwd_ret_5d`. The HMM tests all run on synthetic data with no horizon. | Carry the horizon into the stateful path, and update the filter only with targets dated at or before `t-h` (a lagged update). Or refuse stateful priors when the horizon exceeds 1. Correct the brief 01 §0 and Code_State wording. |
+| M-1 | Critical (for the HMM baseline arm), **fixed 2026-09-26** (section 10) | `priors.py:507-522`; `train.py:570-599, 735-759`; `evaluation.py:517-534`; `alignment.py:48-50`; `plots.py` (utilisation) | With an `h`-day forward target, the stateful prior at `t` conditions on `y_{t-1}`, realised at `t-1+h`: a look-ahead of `h-1` = 4 trading days on the real panel. It enters training, the test-block predictions (the filter is updated with each test date's `y`), and the HMM alignment and utilisation diagnostics. Nothing forbids `prior="hmm"` with the 5-day panel. | `test_M1_stateful_prior_ignores_targets_not_yet_realised` (xfail): the prior at `t` moves when `y_{t-1}` is perturbed, with target `fwd_ret_5d`. The HMM tests all run on synthetic data with no horizon. | Carry the horizon into the stateful path, and update the filter only with targets dated at or before `t-h` (a lagged update). Or refuse stateful priors when the horizon exceeds 1. Correct the brief 01 §0 and Code_State wording. |
 | M-2 | Minor | `config.py:validate` | `freeze_gate=True` with a trainable memoryless prior (soft, hard, top-k, Gumbel) freezes a zero-initialised gate: exactly uniform for soft, a constant arg-max for hard, forever. The config is accepted silently, so a "frozen soft" arm is a uniform arm under another name. | Code reading; the brief 02 memory note. | Refuse `freeze_gate` unless the prior is precomputed or uniform. |
 | M-3 | Minor | `config.py:validate`; `model.py:155-163` | `freeze_gate=True` with `input_mode="snapshot_plus_hidden"` feeds the experts a frozen, randomly initialised GRU state (random features). Accepted silently. | Code reading. | Refuse the combination, or warn. |
 | M-4 | Note (known issue 4) | `model.py:112-113, 175-176`; `train.py:224-243` | The encoder and gate head are still built and run on every forward pass on the frozen path, which costs compute. They are frozen and outside the optimiser. They count in `total_param_count` but not `live_param_count`, and are listed under the audit's `frozen`. They are not counted anywhere they should not be. | Code reading; `test_frozen_parameters_never_enter_the_optimizer`. | Optionally skip the encoder when the prior is precomputed and `input_mode="snapshot"`. |
+| M-5 | Major (found 2026-09-26) | `train.py` (`_lagged_context`, `evaluate_sequence`, `train_step_sequence`); `priors.py:507-530` | The backprop-HMM baseline threads each date's per-row posterior into the next date **by row position**. That assumes the same entities in the same order on every date, which a point-in-time panel does not have: membership changes. When a date's cross-section has a different size, the forward pass raises; when sizes happen to match but the names differ, it silently hands one stock's regime state to another. | A panel with one name dropped on one date: `ValueError: shape mismatch for 'prev_filtered': expected (3, 2), got (4, 2)`. | Key the recursion's state by entity (carry a per-entity table and look up each row's previous posterior; new entrants start from pi_0), or make the HMM regime date-level. Until then the HMM baseline arm cannot run on the point-in-time panel. |
 
 ### 2f. Assembly: `likelihood.py`, `model.py`
 
@@ -382,8 +393,8 @@ Two statistical errors sit on top of these mechanics, and both reach headline nu
 
 | ID | Severity | File and line | Description | Evidence | Proposed fix |
 |---|---|---|---|---|---|
-| E-1 | Critical | `evaluation.py:640-700` (sigma at 662) | `base_and_correction` scores the base as a **single Gaussian** at the prior-weighted sigma, while the mixture's NLL is a **scale mixture** of the experts' different sigmas. `nll_improvement` therefore includes the variance structure, not only the correction. Under the Hamilton gate the experts can lower NLL with regime-dependent sigmas alone. The docstring's claim that the two NLLs "differ only in the mean" is false; it also says "responsibility-weighted" where the code uses the prior. | `test_E1_nll_improvement_is_zero_when_every_correction_is_zero` (xfail): with every correction exactly 0 and sigmas (0.6, 2.4), the "improvement" is -0.038. It is 0 when the sigmas are equal. Mutation X9 (base NLL at sigma 1) survives every test: nothing pins the base NLL's definition. | Score the base with the **same** mixture density and corrections set to zero: `-logsumexp_k(log pi_k + log N(y; f0, s_k^2))`. If wanted, report the variance-only gain separately. Re-derive the smoke report's NLL columns. |
-| E-2 | Critical | `evaluation.py:196-209`; `multiple_testing.py:77-163`; `sweep.py:177-183, 373-386` | `t_stat = ICIR * sqrt(T)`, `ic_pvalue`, `corrected_claims` (BH over arms) and PSR/DSR all assume independent periods. The target is a 5-day forward return, so consecutive daily ICs share 4 of 5 return days, and consecutive long-short returns overlap likewise. | Real panel, three single-feature predictors: lag-1 autocorrelation of the daily IC is 0.63, 0.78 and 0.78, dying out by lag 5. The iid t-stat is 1.62x, 1.79x and 1.81x the Newey-West (lag 4) t-stat. | Use HAC (Newey-West, lag `h-1`) standard errors in `ic_summary` and PSR/DSR, or evaluate on non-overlapping dates (every `h`-th date). Carry the horizon into the metric functions. |
+| E-1 | Critical, **fixed 2026-09-26** (section 10) | `evaluation.py:640-700` (sigma at 662) | `base_and_correction` scores the base as a **single Gaussian** at the prior-weighted sigma, while the mixture's NLL is a **scale mixture** of the experts' different sigmas. `nll_improvement` therefore includes the variance structure, not only the correction. Under the Hamilton gate the experts can lower NLL with regime-dependent sigmas alone. The docstring's claim that the two NLLs "differ only in the mean" is false; it also says "responsibility-weighted" where the code uses the prior. | `test_E1_nll_improvement_is_zero_when_every_correction_is_zero` (xfail): with every correction exactly 0 and sigmas (0.6, 2.4), the "improvement" is -0.038. It is 0 when the sigmas are equal. Mutation X9 (base NLL at sigma 1) survives every test: nothing pins the base NLL's definition. | Score the base with the **same** mixture density and corrections set to zero: `-logsumexp_k(log pi_k + log N(y; f0, s_k^2))`. If wanted, report the variance-only gain separately. Re-derive the smoke report's NLL columns. |
+| E-2 | Critical, **fixed 2026-09-26** (section 10) | `evaluation.py:196-209`; `multiple_testing.py:77-163`; `sweep.py:177-183, 373-386` | `t_stat = ICIR * sqrt(T)`, `ic_pvalue`, `corrected_claims` (BH over arms) and PSR/DSR all assume independent periods. The target is a 5-day forward return, so consecutive daily ICs share 4 of 5 return days, and consecutive long-short returns overlap likewise. | Real panel, three single-feature predictors: lag-1 autocorrelation of the daily IC is 0.63, 0.78 and 0.78, dying out by lag 5. The iid t-stat is 1.62x, 1.79x and 1.81x the Newey-West (lag 4) t-stat. | Use HAC (Newey-West, lag `h-1`) standard errors in `ic_summary` and PSR/DSR, or evaluate on non-overlapping dates (every `h`-th date). Carry the horizon into the metric functions. |
 | E-3 | Major | `evaluation.py:217-303` | The long-short book is re-formed **daily** on 5-day forward returns. Each date's gross is a 5-day return, while turnover and costs are charged per day, so the net return mixes horizons. The overlapping holding periods also autocorrelate the series, which overstates its IR and t-stat. | Code reading; E-2's measurement of the overlap. | Use Jegadeesh-Titman overlapping portfolios (1/`h` of the book re-formed per day, each held `h` days), or rebalance every `h` dates. Charge costs on the same horizon. |
 | E-4 | Minor | `sweep.py:177-209` | The arm summary mixes pooled statistics (`mean_ic`, `icir`, `p` from the pooled IC) with fold means (`base_mean_ic`, `base_icir`, `ic_improvement`), so `icir` and `base_icir` are not comparable. `WalkForwardResult.pooled_base_ic` exists but is unused, and `nll` is an unweighted fold mean. | Code reading. | Use pooled numbers for both sides. |
 | E-5 | Minor (known issue 2, confirmed) | `evaluation.py:576-614` (`_gate_report`) | Gate starts are logged once per (arm, seed) run, although the fit is seed-independent, so with S seeds the tag holds S times the distinct starts. No production code reads that tag yet: DSR inputs are supplied by the caller. It becomes Critical the moment the tag feeds a DSR or correction. Conceptually, gate starts are optimiser restarts of one estimator, not strategy candidates. | Smoke registry: 144 gate-start rows for 72 distinct starts. | Log starts once per (fold, gate-config fingerprint), under a family kept apart from strategy trials. Document which N feeds the DSR. |
@@ -565,3 +576,173 @@ with 2 folds, 2 seeds, the uniform control arm and a few dozen steps. Assert:
 
 Also give the smoke script's `gate_preflight` and `consistency_checks` a unit test on synthetic data.
 
+
+---
+
+## 9. Re-run of the break-it table (2026-09-26): closing G-6 and B-5
+
+**No fixes have been applied yet.** No production code has changed since this audit (`9a29368`), so
+this re-run does not test any fix. It does two things:
+
+1. It closes the two critical-property test gaps the audit found, which needed tests, not code
+   changes, because the code already behaves correctly.
+2. It re-runs every mutation to confirm that the new tests catch what they should and that nothing
+   else changed.
+
+Repeat this table once the Critical findings are fixed.
+
+**New tests** (both pass on the current code):
+
+- `tests/test_markov_gate.py::test_canonical_reordering_relabels_turbulent_first_raw_output` closes
+  **G-6** (P13). A test-only start scheme (`monkeypatch` on `START_SCHEME_REGISTRY`) swaps one informed
+  centre's regime moments, so statsmodels returns the **turbulent regime as raw label 0**. The test
+  asserts that the raw permutation really was `(1, 0)`, so the sort had real work to do. It then checks
+  that the stored moments, the transition matrix, the durations, the metrics and the
+  filtered-probability table all come out calm-first. The table is compared against a manual filter
+  with its columns permuted, and column 0 is checked against the true simulated calm path.
+- `tests/test_residual_base.py::test_base_is_fitted_on_each_folds_training_block_only` closes **B-5**
+  (P7). A spy on `nec_moe.base.fit_base` records the dates the base actually receives in each fold of
+  `walk_forward_evaluate` and asserts they are exactly that fold's purged training dates: never a
+  purge-gap date, never a test date, once per fold.
+
+**Method.** A fresh scratch worktree at `9a29368` with the two new test files copied in. The same 28
+mutations as section 0.2, plus three stricter variants written to make sure the new tests could not
+pass by accident:
+- **P13b:** the probability table is left unpermuted while the moments are still sorted.
+- **P13c:** the transition matrix is left unpermuted.
+- **P7b:** the base is fitted on the training block **plus the purge gap**, the subtlest version of
+  the leak.
+
+Unmutated baseline in the worktree: 245 passed, 3 skipped, 6 xfailed. The worktree was deleted
+afterwards; nothing from a mutation reached the main checkout.
+
+| # | Mutation | Tests failing, audit run | Tests failing, re-run | Tests newly catching it |
+|---|---|---|---|---|
+| P1 | shift one feature (ret_5d) by -1 day (uses t+1) | 1 | 1 | — |
+| P2 | shift the target by one day (fwd return from t+1) | 3 | 3 | — |
+| P3 | purge set to 0 in walk_forward_folds | 6 | **7** | `test_base_is_fitted_on_each_folds_training_block_only` |
+| P4 | gate table built from smoothed, not filtered, probabilities | 10 | **11** | `test_canonical_reordering_relabels_turbulent_first_raw_output` |
+| P5 | gate fitted on train plus test (guard left in place) | 1 | 1 | — |
+| P6 | test-block gate re-fitted on the extended series (in-code assert kept) | 9 | 9 | — |
+| P6b | as P6, and the in-code parameter-identity assert disabled | 1 | 1 | — |
+| P7 | base fitted on the full panel instead of the training block | 1 | **2** | `test_base_is_fitted_on_each_folds_training_block_only` |
+| P7b | base fitted on the training block PLUS the purge gap | new | **3** | `test_base_is_fitted_on_each_folds_training_block_only`, `test_pooled_base_ic_is_the_base_scored_over_the_same_dates`, `test_residual_mixture_recovers_the_regime_conditional_part` |
+| P8 | base freeze() leaves requires_grad on (attach check kept) | 24 | **25** | `test_base_is_fitted_on_each_folds_training_block_only` |
+| P8b | as P8, and attach_base's frozen check removed (base trains) | 5 | 5 | — |
+| P9 | expert heads initialised randomly in correction mode | 3 | 3 | — |
+| P10 | prior scaled by 0.9 in y_hat (after the normalisation guard) | 7 | 7 | — |
+| P11 | rank normalisation across the whole panel, not per date | 1 | 1 | — |
+| P12 | tuning tail loses its purge (validation_tail purge forced to 0) | 1 | 1 | — |
+| P13 | canonical regime reordering skipped (identity permutation) | 0 | **1** | `test_canonical_reordering_relabels_turbulent_first_raw_output` |
+| P13b | gate table columns left unpermuted (moments still sorted) | new | **1** | `test_canonical_reordering_relabels_turbulent_first_raw_output` |
+| P13c | transition matrix left unpermuted (moments still sorted) | new | **1** | `test_canonical_reordering_relabels_turbulent_first_raw_output` |
+| P14 | base refitted per arm (cache never hits) | 1 | **2** | `test_B1_arm_result_does_not_depend_on_base_cache_state` (the B-1 xfail flipping to a strict XPASS; see below) |
+| P15 | selection-event row dropped from registry.best | 4 | 4 | — |
+| P16 | mixture NLL via exp-then-log instead of logsumexp | 1 | 1 | — |
+| X1 | gate series uses the NEXT day's Mkt-RF (look-ahead in gate input) | 1 | 1 | — |
+| X2 | informed-start volatility window centred (future data at init) | 2 | 2 | — |
+| X3 | apply path may overwrite fitted rows of the gate table | 0 | 0 | — |
+| X4 | rank IC pooled over all dates instead of per date | 5 | 5 | — |
+| X5 | frozen base left in train mode during expert training | 1 | 1 | — |
+| X6 | log_sigma warm-up freeze disabled | 2 | 2 | — |
+| X7 | stateful test-block filter not warmed through the training block | 0 | 0 | — |
+| X8 | freeze_gate leaves the encoder trainable | 3 | 3 | — |
+| X9 | base-comparison NLL uses a fixed sigma of 1 (metric definition) | 0 | 0 | — |
+| X10 | objective registry routes to a different (scaled) objective | 2 | 2 | — |
+
+**Reading the table:**
+
+- **Both gaps are closed.**
+  - P13 and its two variants are each caught by the new ordering test. In the audit run nothing
+    caught P13.
+  - P7 is caught by the new base-scope test as well as the accidental float check (E-10).
+  - P7b, fitting on the purge gap, is caught by the new test and two others.
+- **Nothing regressed.** No mutation lost a catching test, and every other row matches the audit run.
+  The new tests also add catches to P3, P4 and P8.
+- **P14's extra catch is not new protection.** Refitting the base in every arm reseeds the global RNG
+  every time, which removes the arm-order effect that `test_B1_arm_result_does_not_depend_on_base_cache_state`
+  pins. That xfail therefore passes, and strict mode reports the pass as a failure. The only direct
+  protection of P14 is still the object-identity check.
+- **X3, X7 and X9 still survive, as expected.**
+  - X3 is an equivalent mutant (section 0.2).
+  - X7 is E-9 and X9 is part of E-1, which await their fixes and tests.
+
+**Status changes:** G-6 and B-5 are **closed** (Major, test gaps). The remaining findings,
+including all five Critical ones, are open.
+
+
+---
+
+## 10. Critical fixes (2026-09-26)
+
+All five Critical findings are fixed in code, each pinned by tests. Every test asserts the property,
+not the implementation. The three audit xfails for fixed findings (D-1, E-1, M-1) now pass as plain
+tests; B-1, G-2 and G-3 remain pinned as xfail.
+
+**Suite:** 272 passed, 3 skipped (the network tests), 3 xfailed. ruff and mypy are clean.
+
+| Finding | What changed | Tests that pin it |
+|---|---|---|
+| **E-1** base-comparison NLL | `NECModel.corrections_disabled()` forces every correction to exactly zero. `base_and_correction` scores the base as the same model through the same evaluation path, stateful warm-up included (`train=` is passed from the harness and quick mode). The base NLL is `-mean logsumexp_k(log pi_k + log N(y; f0, s_k^2))`, and `nll_improvement` is exactly zero when the corrections are. | `test_E1_nll_improvement_is_zero_when_every_correction_is_zero`, `test_nll_improvement_is_exactly_zero_before_any_training[uniform, hmm]`, `test_base_nll_is_the_mixture_density_at_the_base`, `test_corrections_disabled_is_a_scoped_switch` |
+| **E-2** overlap-robust inference | `ic_summary` computes its t-stat from a HAC long-run variance over `h-1` lags, where `h` is read from the panel's target (`fwd_ret_5d` gives 4 lags). This flows through the harness, the baseline harness, `run_sweep`, `tune` and the control panel (`ic_hac_lags`, `ic_hac_kernel`), and sweep rows record `ic_hac_lags`. PSR and DSR take the same correction through an effective sample size. | `tests/test_overlap_inference.py` (11 tests), including a Monte Carlo size test |
+| **D-1** point-in-time ranks | `FeatureSchema.rank_normalized` records that a panel's snapshot features are per-date ranks. `filter_point_in_time` then re-ranks the survivors per date among themselves, which equals ranking over the members alone, exactly. That fixes both the PIT script and the control panel's real-data path. | `test_D1_point_in_time_ranks_use_only_that_dates_members`, `test_filter_leaves_an_unranked_panel_untouched`, `test_build_panel_records_whether_it_rank_normalized` |
+| **D-2** adjusted prices | yfinance is fetched with `auto_adjust=False` into a new cache file (`*.raw.csv`) holding the raw close (split-adjusted only) and `Adj Close`. Returns, drawdown and the target use the adjusted close; dollar volume uses raw close x volume, where the split factors cancel. Legacy auto-adjusted files are never read. | `test_features_at_t_ignore_dividends_paid_after_t` (which also shows the old contract failing), `test_yfinance_cache_holds_raw_and_adjusted_close` |
+| **M-1** HMM look-ahead | `DataConfig.horizon` (explicit, else read from the target name, else 1). The HMM prior at `t` is the posterior from `h` dates back carried forward `h` predict steps. The trainer carries the last `h` posteriors between chunks and in checkpoints, and training, evaluation and the test-block warm-up all use the same lagged recursion. The HMM alignment and utilisation diagnostics report the prior, not the posterior (Q-1). `h = 1` is unchanged: every existing HMM reference test passes. | `test_M1_stateful_prior_ignores_targets_not_yet_realised`, `test_prior_is_the_posterior_h_dates_back_carried_h_steps`, `test_training_and_evaluation_use_the_same_lagged_recursion`, `test_hmm_alignment_series_is_the_prior_not_the_posterior`, `test_horizon_config_is_read_from_the_target_and_validated`, `test_fit_sequence_resume_is_exact_with_a_multi_day_target` |
+
+**A refinement to the audit's own recommendation (E-2).** The audit proposed Newey-West at lag `h-1`.
+Measured before choosing, on 2,000 simulated overlapping 5-period series per length, the rejection
+rate of a nominal 5% test:
+
+| T | i.i.d. | Newey-West, lag h-1 | Newey-West, lag 2(h-1) | Hansen-Hodrick, lag h-1 |
+|---|---|---|---|---|
+| 120 | 40.2% | 13.2% | 11.2% | 7.3% |
+| 360 | 38.4% | 12.0% | 9.4% | 6.0% |
+| 500 | 37.4% | 10.8% | 7.7% | 5.4% |
+
+Bartlett weights shrink exactly the autocovariances the overlap creates. The default is therefore
+**Hansen-Hodrick (uniform weights) at lag `h-1`**, which is exact for this structure. Bartlett stays
+available, and is used automatically, and recorded on the summary, if the uniform estimate is ever
+non-positive; that never happened in 6,000 draws. The audit's measured t-stat inflation (1.6 to
+1.8x, against Newey-West) understates the true inflation somewhat.
+
+**Break-it table on the fixed code.** A fresh scratch worktree held `9a29368` with the fixes overlaid,
+and each mutated file was restored from a snapshot of its fixed version. It ran the 31 mutations of
+section 9 plus ten **fix-reversal** mutations, each of which undoes one fix:
+
+| # | Fix undone | Tests failing | Caught by |
+|---|---|---|---|
+| F1 | D-1 undone: no re-rank after the point-in-time filter | 1 | `test_D1_point_in_time_ranks_use_only_that_dates_members` |
+| F2 | D-2 undone: dollar volume from the adjusted close | 1 | `test_features_at_t_ignore_dividends_paid_after_t` |
+| F3 | D-2 undone: yfinance fetched auto-adjusted again | 1 | `test_yfinance_cache_holds_raw_and_adjusted_close` |
+| F4 | E-1 undone: corrections_disabled has no effect | 2 | `test_base_nll_is_the_mixture_density_at_the_base`, `test_corrections_disabled_is_a_scoped_switch` |
+| F5 | E-2 undone: harness default HAC lags forced to 0 | 2 | `test_harness_uses_horizon_minus_one_lags_by_default[fwd_ret_5d-None-4]`, `test_sweep_rows_record_the_lags_their_p_values_rest_on` |
+| F6 | E-2 weakened: uniform kernel silently uses Bartlett weights | 3 | `test_a_non_positive_uniform_estimate_falls_back_to_bartlett_and_says_so`, `test_hac_t_stat_has_honest_size_on_overlapping_series`, `test_long_run_variance_is_the_kernel_formula[uniform]` |
+| F7 | E-2 undone in PSR/DSR: effective sample size ignored | 1 | `test_psr_and_dsr_count_overlapping_periods_honestly` |
+| F8 | M-1 undone: prior from the previous date's posterior, one step | 2 | `test_M1_stateful_prior_ignores_targets_not_yet_realised`, `test_prior_is_the_posterior_h_dates_back_carried_h_steps` |
+| F9 | M-1 undone in diagnostics: HMM alignment reads the posterior | 1 | `test_hmm_alignment_series_is_the_prior_not_the_posterior` |
+| F10 | M-1 weakened: multi-step predict collapsed to one step | 1 | `test_prior_is_the_posterior_h_dates_back_carried_h_steps` |
+
+**Every fix reversal is caught.** Among the earlier mutations:
+- None lost a catching test (lost: none).
+- X9, the base-NLL definition, which no test caught before E-1, is now caught.
+- Counts changed only upward: P2 3 → 4, P8 25 → 30, P9 3 → 6, P10 7 → 8, X9 0 → 1, X10 2 → 3.
+- X3 (an equivalent mutant) and X7 (E-9, not a Critical finding) still survive, as expected.
+- F8, the M-1 trainer reversal, is caught by the hand-written reference test and the look-ahead test,
+  but not by the training-equals-evaluation test. That is by design: both paths share the reverted
+  helper, and the reference test pins the rule itself.
+- The worktree was deleted afterwards.
+
+**What the fixes do not yet cover.**
+
+- **The real panel must be rebuilt.** `data_cache/pit_panel_2015_2024.pt` was built with the old
+  ranking and the auto-adjusted prices, so it still carries D-1 and D-2. The D-2 fix needs the raw
+  closes, so the rebuild re-downloads the price cache: about 590 tickers plus SPY from yfinance. That
+  has not been done without Tom's go-ahead.
+- **The smoke run is stale.** `Smoke_Run_2026-09-25.md` predates all five fixes: its NLL columns
+  (E-1), and its inputs (D-1, D-2). It should be re-run once the panel is rebuilt, and its footer
+  updated (S-1).
+- **New finding M-5 (Major).** The backprop-HMM baseline threads its state by row position, so it
+  cannot run on a panel whose membership changes (section 2e).
+- **Other findings.** Every other open finding is as before, including the Majors B-1, X-1, E-3,
+  O-1, O-3, S-2, S-3, G-2 and G-3, and D-4, whose `min_names_per_date` is still counted before the
+  filter.

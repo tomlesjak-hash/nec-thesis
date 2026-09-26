@@ -86,8 +86,16 @@ class ExpertBank(Emission):
     In ``correction_mode`` each expert's output is a *correction* to a frozen
     base rather than a full forecast, and ``zero_init_head`` zeroes every
     expert's output layer so the correction starts identically zero. The
-    symmetry-breaking seeded re-init still runs on the hidden layers, and the
-    head is re-zeroed afterwards — diversified interiors, zero outputs.
+    seeded re-init still runs on the hidden layers, and the head is re-zeroed
+    afterwards.
+
+    ``cfg.hidden_init`` picks the seeds (brief 06 D): ``"diversified"`` gives
+    expert k the seed ``seed + 7919 (k + 1)`` (diversified interiors);
+    ``"identical"`` gives every expert expert 0's seed, so all start equal.
+    The draws come from a private generator, never the global RNG, so an
+    expert's start depends on ``seed`` alone and is bit-identical across gate
+    arms that share it. ``log_sigma`` starts at ``sigma_init`` for every
+    expert in both settings.
     """
 
     def __init__(
@@ -112,8 +120,10 @@ class ExpertBank(Emission):
             )
             for _ in range(cfg.n_experts)
         ]
+        identical = cfg.hidden_init == "identical"
         for k, expert in enumerate(experts):
-            expert.reset_parameters_seeded(seed + 7919 * (k + 1), zero_head=zero_head)
+            expert_seed = seed + 7919 * (1 if identical else k + 1)
+            expert.reset_parameters_seeded(expert_seed, zero_head=zero_head)
         self.experts = nn.ModuleList(experts)
         self.log_sigma = nn.Parameter(
             torch.full((cfg.n_experts,), math.log(sigma_init))

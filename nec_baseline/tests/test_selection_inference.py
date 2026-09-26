@@ -31,7 +31,7 @@ from nec_moe.evaluation import ic_summary
 # --------------------------------------------------------------------------- #
 
 #: every registry row must carry its provenance (brief 06 A.6)
-PROV = {"data_source": "synthetic", "post_delisting_return": None}
+PROV = {"data_source": "synthetic", "post_delisting_return": None, "hidden_init": None}
 
 
 def test_registry_roundtrip_and_persistence(tmp_path: Path):

@@ -135,6 +135,7 @@ class Experiment:
     expert_hidden_dims: tuple[int, ...] = (64, 32)  # depth AND width; see pyramid_dims
     expert_dropout: float = 0.05
     expert_activation: str = "relu"  # relu|gelu|tanh|silu|elu (registry key)
+    expert_hidden_init: str = "diversified"  # | "identical" (brief 06 D); not decided
     input_mode: str = "snapshot"    # "snapshot" | "snapshot_plus_hidden" (Decision A)
     top_k: int = 2                  # topk prior only
     tau_init: float = 1.0           # gumbel prior only …
@@ -296,7 +297,8 @@ def _nec_config(exp: Experiment, panel: Panel, sigma_init: float) -> NECConfig:
                              input_mode=exp.input_mode,  # type: ignore[arg-type]
                              kind=exp.emission,  # type: ignore[arg-type]
                              correction_mode=exp.correction_mode,
-                             zero_init_head=exp.zero_init_head),
+                             zero_init_head=exp.zero_init_head,
+                             hidden_init=exp.expert_hidden_init),  # type: ignore[arg-type]
         prior=PriorConfig(kind=exp.prior, top_k=exp.top_k, tau_init=exp.tau_init,
                           tau_anneal_steps=exp.tau_anneal_steps,
                           transition_diag_bias=exp.transition_diag_bias),
@@ -533,7 +535,7 @@ def _quick(exp: Experiment, panel: Panel, purge: int, out: Path,
         )
     results |= {k: v for k, v in trial.items() if k != "nll"}
     registry.log(exp.tag, trial, config={"mode": "quick",
-                 **dataclasses.asdict(exp), **trial_provenance(panel)},
+                 **dataclasses.asdict(exp), **trial_provenance(panel, trainer.cfg)},
                  seed=exp.seeds[0])
     return results
 

@@ -352,6 +352,7 @@ def _arm_config(name: str, cfg: NECConfig, exp: rx.Experiment) -> dict[str, Any]
         "arm": name,
         "objective": cfg.train.objective,
         "correction_penalty_weight": cfg.train.correction_penalty_weight,
+        "hidden_init": cfg.experts.hidden_init,
         "nec_config": cfg.to_dict(),
         "n_folds": exp.n_folds,
         "test_dates_per_fold": exp.test_dates_per_fold,

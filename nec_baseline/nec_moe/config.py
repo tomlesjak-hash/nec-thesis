@@ -42,6 +42,7 @@ __all__ = [
 
 ExpertInputMode = Literal["snapshot", "snapshot_plus_hidden"]
 EmissionKind = Literal["mlp", "classical"]
+HiddenInit = Literal["diversified", "identical"]
 
 
 def pyramid_dims(first_width: int, depth: int) -> tuple[int, ...]:
@@ -157,6 +158,23 @@ class ExpertConfig:
       (Ye & Borde's zero-initialization; their ablation shows random init
       costs IC and destabilizes training). Only meaningful with
       ``correction_mode``.
+
+    ``hidden_init`` (brief 06 D, audit X-1) sets how the experts start:
+
+    - ``"diversified"``: expert k's layers are re-drawn from its own seed,
+      ``train.seed + 7919 (k + 1)``, so the experts start different (today's
+      behaviour, kept so existing results reproduce);
+    - ``"identical"``: every expert gets expert 0's draw, so all experts
+      share their hidden-layer weights, and they share the initial
+      ``log_sigma`` (``sigma_init``). Only the gate can then pull them apart.
+
+    Heads stay zero in both under ``zero_init_head``. **The default is not a
+    decision**: which start the thesis uses is open, and every trial records
+    the setting. Under ``"identical"`` with ``dropout > 0`` the experts still
+    diverge under a uniform gate, because each expert's dropout layer draws
+    its own mask; the clean "no regime information" control needs
+    ``dropout = 0``. A warm start (``Trainer.warmstart_experts``) breaks the
+    symmetry on purpose and is a separate choice.
     """
 
     n_experts: int = 2
@@ -167,6 +185,7 @@ class ExpertConfig:
     kind: EmissionKind = "mlp"
     correction_mode: bool = False
     zero_init_head: bool = True
+    hidden_init: HiddenInit = "diversified"
 
 
 @dataclass(frozen=True)
@@ -467,6 +486,11 @@ class NECConfig:
             )
         if x.input_mode not in ("snapshot", "snapshot_plus_hidden"):
             raise bad(f"unknown experts.input_mode {x.input_mode!r}")
+        if x.hidden_init not in ("diversified", "identical"):
+            raise bad(
+                f"unknown experts.hidden_init {x.hidden_init!r}; "
+                "use 'diversified' or 'identical'"
+            )
         from .experts import EMISSION_REGISTRY  # late import: avoid cycle
 
         if x.kind not in EMISSION_REGISTRY:

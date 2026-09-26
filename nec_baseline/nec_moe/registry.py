@@ -38,19 +38,23 @@ __all__ = ["PROVENANCE_KEYS", "TrialRecord", "TrialRegistry", "trial_provenance"
 _SELECTION_SUFFIX = "#selection"
 
 #: Config keys every logged trial must carry (see the module docstring).
-PROVENANCE_KEYS: tuple[str, ...] = ("data_source", "post_delisting_return")
+PROVENANCE_KEYS: tuple[str, ...] = ("data_source", "post_delisting_return", "hidden_init")
 
 
-def trial_provenance(panel: Any) -> dict[str, Any]:
-    """The provenance keys of a trial run on ``panel``.
+def trial_provenance(panel: Any, cfg: Any = None) -> dict[str, Any]:
+    """The provenance keys of a trial run on ``panel`` with model config ``cfg``.
 
     ``data_source`` and, from the panel's build metadata, the post-delisting
-    fill (``None`` on panels without one, such as synthetic panels).
+    fill (``None`` on panels without one, such as synthetic panels); and the
+    experts' ``hidden_init`` from ``cfg`` (``None`` without a config, e.g. for
+    a baseline model, which has no experts).
     """
     metadata = getattr(panel, "metadata", None) or {}
+    experts = getattr(cfg, "experts", None)
     return {
         "data_source": getattr(panel, "data_source", "unspecified"),
         "post_delisting_return": metadata.get("post_delisting_return"),
+        "hidden_init": getattr(experts, "hidden_init", None),
     }
 
 

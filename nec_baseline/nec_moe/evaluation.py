@@ -1002,7 +1002,7 @@ def walk_forward_evaluate(
         base_pred, base_nll, correction = base_and_correction(trainer, test, train=train)
         base_single_nll = base_single_gaussian_nll(trainer, test)
         gate_perm, gate_metrics = _gate_report(
-            trainer, fold, registry, registry_tag, seed, trial_provenance(panel)
+            trainer, fold, registry, registry_tag, seed, trial_provenance(panel, trainer.cfg)
         )
         payload = acc.add(
             fold, pred, train, test, nll,

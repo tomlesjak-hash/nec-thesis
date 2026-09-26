@@ -119,6 +119,8 @@ def nec_arm(
             # comparable across objectives, so neither means anything alone
             "objective": cfg.train.objective,
             "correction_penalty_weight": cfg.train.correction_penalty_weight,
+            # how the experts started (brief 06 D): not decided, so on record
+            "hidden_init": cfg.experts.hidden_init,
             "nec_config": cfg.to_dict(),
         },
     )
@@ -136,6 +138,7 @@ def baseline_arm(
         build_baseline=build,
         config_record={
             "arm": name, "objective": None, "correction_penalty_weight": None,
+            "hidden_init": None,
         },
     )
 
@@ -368,7 +371,7 @@ def run_sweep(
                 )
             metrics = _metrics_from_result(res)
             registry.log(
-                tag, metrics, config={**(arm.config_record or {}), **trial_provenance(panel)},
+                tag, metrics, config={**trial_provenance(panel), **(arm.config_record or {})},
                 seed=seed,
             )
             per_arm[arm.name].append(metrics)

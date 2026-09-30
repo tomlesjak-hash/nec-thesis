@@ -37,6 +37,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
 import torch
 from torch import Tensor
 
@@ -65,6 +66,8 @@ __all__ = [
     "long_run_variance",
     "resolve_hac_lags",
     "long_short_by_date",
+    "long_short_book",
+    "PORTFOLIO_SCHEMES",
     "PortfolioSummary",
     "portfolio_summary",
     "FoldResult",
@@ -73,6 +76,7 @@ __all__ = [
     "walk_forward_evaluate_baseline",
     "base_and_correction",
     "base_single_gaussian_nll",
+    "expert_stage_seed",
 ]
 
 
@@ -303,6 +307,42 @@ def ic_summary(ics: Tensor, hac_lags: int = 0, hac_kernel: str = "uniform") -> I
 # --------------------------------------------------------------------------- #
 
 
+def _quantile_legs(
+    pred: Tensor, date: Tensor, n_quantiles: int
+) -> list[tuple[Tensor, Tensor, Tensor]]:
+    """Per date, in date order: ``(date, short rows, long rows)``.
+
+    Rank by ``pred``; the long leg is the top ``n // n_quantiles`` names and
+    the short leg the bottom as many.
+    """
+    if n_quantiles < 2:
+        raise ValueError(f"n_quantiles must be >= 2, got {n_quantiles}")
+    legs = []
+    for d in torch.unique(date, sorted=True):
+        rows = torch.nonzero(date == d, as_tuple=True)[0]
+        leg = len(rows) // n_quantiles
+        if leg < 1:
+            raise ValueError(
+                f"date {int(d)} has {len(rows)} names — too few for "
+                f"{n_quantiles} quantiles (need >= {n_quantiles})"
+            )
+        order = rows[torch.argsort(pred[rows])]  # ascending by prediction
+        legs.append((d, order[:leg], order[-leg:]))
+    return legs
+
+
+def _leg_weights(entity: Tensor, short: Tensor, long: Tensor) -> dict[int, float]:
+    """Equal weights, dollar neutral: ``+1/leg`` long, ``-1/leg`` short."""
+    w = {int(entity[r]): 1.0 / len(long) for r in long}
+    w |= {int(entity[r]): -1.0 / len(short) for r in short}
+    return w
+
+
+def _turnover(w: dict[int, float], prev: dict[int, float]) -> float:
+    """One-sided turnover ``0.5 * sum_e |w(e) - prev(e)|`` over the union of names."""
+    return 0.5 * sum(abs(w.get(e, 0.0) - prev.get(e, 0.0)) for e in set(prev) | set(w))
+
+
 def long_short_by_date(
     pred: Tensor,
     y: Tensor,
@@ -320,30 +360,19 @@ def long_short_by_date(
     aligned by ``entity``; the first date's position entry counts (turnover 1.0
     for a fresh two-sided book).
 
+    This is the **daily** book: right for a one-period target only. With an
+    ``h``-period target use :func:`long_short_book` (audit finding E-3).
+
     Returns ``(dates (T,), gross (T,), turnover (T,))``.
     """
-    if n_quantiles < 2:
-        raise ValueError(f"n_quantiles must be >= 2, got {n_quantiles}")
     if not (pred.shape == y.shape == date.shape == entity.shape):
         raise ValueError("pred/y/date/entity shapes must match")
     out_dates, gross_l, tno_l = [], [], []
     prev_w: dict[int, float] = {}
-    for d in torch.unique(date, sorted=True):
-        rows = torch.nonzero(date == d, as_tuple=True)[0]
-        leg = len(rows) // n_quantiles
-        if leg < 1:
-            raise ValueError(
-                f"date {int(d)} has {len(rows)} names — too few for "
-                f"{n_quantiles} quantiles (need >= {n_quantiles})"
-            )
-        order = rows[torch.argsort(pred[rows])]  # ascending by prediction
-        short_rows, long_rows = order[:leg], order[-leg:]
-        gross_l.append(float(y[long_rows].mean() - y[short_rows].mean()))
-        w = {int(entity[r]): 1.0 / leg for r in long_rows}
-        w |= {int(entity[r]): -1.0 / leg for r in short_rows}
-        names = set(prev_w) | set(w)
-        traded = sum(abs(w.get(e, 0.0) - prev_w.get(e, 0.0)) for e in names)
-        tno_l.append(0.5 * traded)
+    for d, short, long in _quantile_legs(pred, date, n_quantiles):
+        gross_l.append(float(y[long].mean() - y[short].mean()))
+        w = _leg_weights(entity, short, long)
+        tno_l.append(_turnover(w, prev_w))
         prev_w = w
         out_dates.append(d)
     return (
@@ -353,27 +382,126 @@ def long_short_by_date(
     )
 
 
+#: How the long-short book handles an ``h``-period target (audit E-3).
+PORTFOLIO_SCHEMES: tuple[str, ...] = ("nonoverlapping", "staggered")
+
+
+def long_short_book(
+    pred: Tensor,
+    y: Tensor,
+    date: Tensor,
+    entity: Tensor,
+    *,
+    n_quantiles: int,
+    horizon: int,
+    scheme: str = "nonoverlapping",
+    y_daily: Tensor | None = None,
+) -> tuple[Tensor, Tensor, Tensor]:
+    """A horizon-consistent quantile long-short book (audit finding E-3).
+
+    The daily book (:func:`long_short_by_date`) re-forms every date on an
+    ``h``-day forward return: its gross is an ``h``-day return, its turnover
+    and costs are charged per day, and the overlapping holding periods
+    autocorrelate the series. Two consistent books, ``scheme``:
+
+    - ``"nonoverlapping"``: form a portfolio on every ``h``-th date (the 1st,
+      the ``h+1``-th, ...), hold it ``h`` dates. Each period's gross is the
+      ``h``-day return ``y`` of its legs; turnover is charged once per
+      rebalance, against the previous portfolio (the first from an empty
+      book). Returns are ``h``-day and non-overlapping.
+    - ``"staggered"`` (Jegadeesh and Titman 1993): a cohort is formed on every
+      date and held ``h`` dates, so ``h`` overlapping cohorts are live, each
+      with weight ``1/h``. Each date's return is the average of the live
+      cohorts' **daily** returns on the next day (a cohort formed ``m`` dates
+      ago earns the ``m+1``-th day of its window, from ``y_daily``), and
+      turnover is charged daily on the combined book. The book is built up
+      over its first ``h - 1`` dates (fewer cohorts live, same ``1/h``
+      weights), so every entry is charged; it reports one value per date.
+
+    With ``h = 1`` both equal the daily book exactly. ``y_daily`` is the
+    ``(N, h)`` daily forward returns under the target's timing rule
+    (``Panel.y_daily``), needed by ``"staggered"`` when ``h > 1``. Formation
+    dates are taken as consecutive trading dates, as a test block's are.
+
+    Returns ``(formation dates, gross, turnover)``, one entry per period.
+    """
+    if scheme not in PORTFOLIO_SCHEMES:
+        raise ValueError(f"unknown portfolio_scheme {scheme!r}; use one of {PORTFOLIO_SCHEMES}")
+    if horizon < 1:
+        raise ValueError(f"horizon must be >= 1, got {horizon}")
+    if not (pred.shape == y.shape == date.shape == entity.shape):
+        raise ValueError("pred/y/date/entity shapes must match")
+    legs = _quantile_legs(pred, date, n_quantiles)
+    dates_l, gross_l, tno_l = [], [], []
+    if scheme == "nonoverlapping":
+        prev_w: dict[int, float] = {}
+        for d, short, long in legs[::horizon]:
+            w = _leg_weights(entity, short, long)
+            gross_l.append(float(y[long].mean() - y[short].mean()))
+            tno_l.append(_turnover(w, prev_w))
+            prev_w = w
+            dates_l.append(d)
+        return torch.stack(dates_l), torch.tensor(gross_l), torch.tensor(tno_l)
+
+    if horizon == 1:
+        daily = y.unsqueeze(1)
+    elif y_daily is None or y_daily.shape != (len(y), horizon):
+        raise ValueError(
+            f"portfolio_scheme='staggered' with a {horizon}-period target needs the "
+            f"daily forward returns (Panel.y_daily, shape (N, {horizon})); this panel "
+            "carries none — rebuild it, or use 'nonoverlapping'"
+        )
+    else:
+        daily = y_daily
+    cohort_w = [_leg_weights(entity, short, long) for _, short, long in legs]
+    # cohort j's return on the m+1-th day after its formation date
+    cohort_r = [
+        daily[long].mean(dim=0) - daily[short].mean(dim=0) for _, short, long in legs
+    ]
+    book_prev: dict[int, float] = {}
+    for j, (d, _, _) in enumerate(legs):
+        live = range(min(j, horizon - 1) + 1)  # cohorts formed j-m, m = 0..
+        gross_l.append(sum(float(cohort_r[j - m][m]) for m in live) / horizon)
+        book: dict[int, float] = {}
+        for m in live:
+            for e, wt in cohort_w[j - m].items():
+                book[e] = book.get(e, 0.0) + wt / horizon
+        tno_l.append(_turnover(book, book_prev))
+        book_prev = book
+        dates_l.append(d)
+    return torch.stack(dates_l), torch.tensor(gross_l), torch.tensor(tno_l)
+
+
 @dataclass(frozen=True)
 class PortfolioSummary:
     """Per-period (no annualization — synthetic dates carry no calendar).
 
     ``cost_rate`` is cost per unit of *traded notional*; traded notional per
-    date is ``2 * turnover`` (turnover is one-sided), so
-    ``net_t = gross_t - cost_rate * 2 * turnover_t``.
+    period is ``2 * turnover`` (turnover is one-sided), so
+    ``net_t = gross_t - cost_rate * 2 * turnover_t``. A period is
+    ``period_dates`` dates long: ``h`` under the ``"nonoverlapping"`` scheme,
+    1 otherwise, so IRs of books on different schemes are in different units.
     """
 
     mean_gross: float
     mean_net: float
     gross_std: float
-    ir_gross: float  # mean/std of the gross per-date series
-    ir_net: float  # mean/std of the net per-date series
+    ir_gross: float  # mean/std of the gross per-period series
+    ir_net: float  # mean/std of the net per-period series
     mean_turnover: float
     cost_rate: float
-    n_dates: int
+    n_dates: int  # number of periods in the series
+    scheme: str = "daily"
+    period_dates: int = 1
 
 
 def portfolio_summary(
-    gross: Tensor, turnover: Tensor, cost_rate: float = 0.0
+    gross: Tensor,
+    turnover: Tensor,
+    cost_rate: float = 0.0,
+    *,
+    scheme: str = "daily",
+    period_dates: int = 1,
 ) -> PortfolioSummary:
     if gross.numel() < 2 or gross.shape != turnover.shape:
         raise ValueError("need >= 2 matching per-date observations")
@@ -389,6 +517,8 @@ def portfolio_summary(
         mean_turnover=float(turnover.mean()),
         cost_rate=cost_rate,
         n_dates=int(gross.numel()),
+        scheme=scheme,
+        period_dates=period_dates,
     )
 
 
@@ -418,6 +548,10 @@ class FoldResult:
     # the correction magnitude actually applied out of sample.
     base_ic: IcSummary | None = None
     base_nll: float | None = None
+    # training dates left out of expert training because the gate has no
+    # filtered probability there (the first `order` dates of an
+    # autoregressive Hamilton gate, audit G-2); 0 for every other gate
+    gate_excluded_dates: int = 0
     # NLL_single: the base scored as ONE Gaussian at the prior-weighted sigma
     # (base_single_gaussian_nll); base_nll above is NLL_base, the mixture
     # density at the base (brief 06 section C)
@@ -504,11 +638,21 @@ class _FoldAccumulator:
         cost_rate: float,
         hac_lags: int = 0,
         hac_kernel: str = "uniform",
+        portfolio_scheme: str = "nonoverlapping",
+        horizon: int = 1,
     ) -> None:
+        if portfolio_scheme not in PORTFOLIO_SCHEMES:
+            raise ValueError(
+                f"unknown portfolio_scheme {portfolio_scheme!r}; use one of {PORTFOLIO_SCHEMES}"
+            )
         self.backtest_quantiles = backtest_quantiles
         self.cost_rate = cost_rate
         self.hac_lags = hac_lags
         self.hac_kernel = hac_kernel
+        self.portfolio_scheme = portfolio_scheme
+        self.horizon = horizon
+        # a period of the book is h dates under "nonoverlapping", 1 otherwise
+        self.period_dates = horizon if portfolio_scheme == "nonoverlapping" else 1
         self.folds: list[FoldResult] = []
         self._ics: list[Tensor] = []
         self._base_ics: list[Tensor] = []
@@ -532,6 +676,7 @@ class _FoldAccumulator:
         gate_permutation: tuple[int, ...] = (),
         gate_metrics: tuple[tuple[str, float], ...] = (),
         timing: tuple[tuple[str, float], ...] = (),
+        gate_excluded_dates: int = 0,
     ) -> dict[str, Any]:
         """Score a freshly-evaluated fold. Returns the picklable payload that
         fold-level resume persists and :meth:`add_completed` re-ingests."""
@@ -540,11 +685,8 @@ class _FoldAccumulator:
         gross: Tensor | None = None
         tno: Tensor | None = None
         if self.backtest_quantiles is not None:
-            _, gross, tno = long_short_by_date(
-                pred, test.y, test.date, test.entity,
-                n_quantiles=self.backtest_quantiles,
-            )
-            portfolio = portfolio_summary(gross, tno, self.cost_rate)
+            gross, tno = self._book(pred, test)
+            portfolio = self._summary(gross, tno)
         # The base scored through the identical code path — same dates, same
         # ranking, same backtest — so "improvement over the base" is a
         # difference of like-for-like numbers rather than of two protocols.
@@ -554,11 +696,8 @@ class _FoldAccumulator:
             _, base_ics = rank_ic_by_date(base_pred, test.y, test.date)
             base_ic = ic_summary(base_ics, self.hac_lags, self.hac_kernel)
             if self.backtest_quantiles is not None:
-                _, b_gross, b_tno = long_short_by_date(
-                    base_pred, test.y, test.date, test.entity,
-                    n_quantiles=self.backtest_quantiles,
-                )
-                base_portfolio = portfolio_summary(b_gross, b_tno, self.cost_rate)
+                b_gross, b_tno = self._book(base_pred, test)
+                base_portfolio = self._summary(b_gross, b_tno)
         payload = {
             "fold_result": FoldResult(
                 fold=fold.fold,
@@ -578,14 +717,31 @@ class _FoldAccumulator:
                 gate_permutation=gate_permutation,
                 gate_metrics=gate_metrics,
                 timing=timing,
+                gate_excluded_dates=gate_excluded_dates,
             ),
             "ics": ics,
             "base_ics": base_ics,
             "gross": gross,
             "turnover": tno,
+            "portfolio_scheme": self.portfolio_scheme,
         }
         self._ingest(payload)
         return payload
+
+    def _book(self, pred: Tensor, test: Panel) -> tuple[Tensor, Tensor]:
+        assert self.backtest_quantiles is not None
+        _, gross, tno = long_short_book(
+            pred, test.y, test.date, test.entity,
+            n_quantiles=self.backtest_quantiles, horizon=self.horizon,
+            scheme=self.portfolio_scheme, y_daily=test.y_daily,
+        )
+        return gross, tno
+
+    def _summary(self, gross: Tensor, tno: Tensor) -> PortfolioSummary:
+        return portfolio_summary(
+            gross, tno, self.cost_rate,
+            scheme=self.portfolio_scheme, period_dates=self.period_dates,
+        )
 
     def add_completed(self, payload: dict[str, Any]) -> None:
         """Re-ingest a persisted fold (resume path) — pooled results come out
@@ -596,6 +752,12 @@ class _FoldAccumulator:
                 "resume mismatch: the persisted fold was scored with a "
                 "different backtest_quantiles setting — rerun with the "
                 "original settings or clear the resume directory"
+            )
+        stored = payload.get("portfolio_scheme", "daily")
+        if payload["gross"] is not None and stored != self.portfolio_scheme:
+            raise ValueError(
+                f"resume mismatch: the persisted fold's book used portfolio_scheme "
+                f"{stored!r}, this run {self.portfolio_scheme!r}"
             )
         self._ingest(payload)
 
@@ -611,9 +773,7 @@ class _FoldAccumulator:
 
     def result(self) -> WalkForwardResult:
         pooled_portfolio = (
-            portfolio_summary(
-                torch.cat(self._gross), torch.cat(self._tno), self.cost_rate
-            )
+            self._summary(torch.cat(self._gross), torch.cat(self._tno))
             if self.backtest_quantiles is not None
             else None
         )
@@ -653,7 +813,7 @@ def _fold_predictions(
     if trainer.model.prior.stateful:
         init = None
         if train is not None:
-            init = trainer.evaluate_sequence(train.time_sequence()).log_filtered
+            init = trainer.evaluate_sequence(train.time_sequence()).final_state
         seq = test.time_sequence()
         ev = trainer.evaluate_sequence(seq, init_state=init)
         pred = torch.cat([ev.y_hat[t] for t in range(len(seq))])
@@ -700,6 +860,23 @@ def _fit_gate(
         prior.apply_causal(  # type: ignore[operator]
             panel.subset_dates(torch.cat([fold.train_dates, fold.test_dates]))
         )
+
+
+def _gate_training_block(trainer: Trainer, train: Panel) -> tuple[Panel, int]:
+    """The training rows the experts can use: the dates the gate covers.
+
+    A precomputed gate may leave some training dates without a prior (an
+    autoregressive Hamilton gate has none for its first ``order`` dates, audit
+    G-2). Those dates cannot be scored by the mixture, so they are left out of
+    expert training; the count is returned so the fold can report it.
+    """
+    prior = trainer.model.prior
+    if not getattr(prior, "precomputed", False):
+        return train, 0
+    dates = torch.unique(train.date, sorted=True)
+    covered = prior.covers(dates)  # type: ignore[operator]
+    excluded = int((~covered).sum())
+    return (train if excluded == 0 else train.subset_dates(dates[covered])), excluded
 
 
 def _gate_report(
@@ -867,6 +1044,19 @@ def base_single_gaussian_nll(trainer: Trainer, test: Panel) -> float | None:
         )
 
 
+def expert_stage_seed(seed: int, fold: int) -> int:
+    """The global-RNG seed the expert stage starts from, for a run seed and fold.
+
+    Everything before the experts (the gate fit, the base fit or cache hit)
+    may or may not have consumed random numbers, depending on what ran earlier
+    in the process; seeding here makes expert training (dropout, warm-start)
+    independent of all of it (audit finding B-1). Derived through
+    ``numpy.random.SeedSequence([seed, fold])``: distinct (seed, fold) pairs get
+    well-separated streams, with no arbitrary constant.
+    """
+    return int(np.random.SeedSequence([seed, fold]).generate_state(1)[0])
+
+
 def walk_forward_evaluate(
     panel: Panel,
     make_trainer: Callable[[], Trainer],
@@ -886,6 +1076,7 @@ def walk_forward_evaluate(
     registry_tag: str | None = None,
     hac_lags: int | None = None,
     hac_kernel: str = "uniform",
+    portfolio_scheme: str = "nonoverlapping",
 ) -> WalkForwardResult:
     """Fit-once-per-window walk-forward evaluation (Decision D protocol).
 
@@ -904,10 +1095,12 @@ def walk_forward_evaluate(
     test block causally.
 
     With ``backtest_quantiles`` set, each fold also gets a quantile long-short
-    backtest (:func:`long_short_by_date`) with turnover and a cost drag of
-    ``cost_rate`` per unit traded notional. Each fold's book starts fresh
-    (full entry turnover on its first date) — a slight overstatement for
-    adjacent folds, deterministic and conservative.
+    backtest (:func:`long_short_book`) with turnover and a cost drag of
+    ``cost_rate`` per unit traded notional, on the horizon-consistent book
+    ``portfolio_scheme`` (``"nonoverlapping"`` | ``"staggered"``, audit E-3;
+    the default is **not a decision**). Each fold's book starts fresh (full
+    entry turnover on its first date) — a slight overstatement for adjacent
+    folds, deterministic and conservative.
 
     **Resume** (``resume_dir``): each completed fold is persisted there
     (``fold_<i>.pt``: scored payload + the trained model's state dict and
@@ -940,8 +1133,10 @@ def walk_forward_evaluate(
     if resume is not None:
         resume.mkdir(parents=True, exist_ok=True)
     acc = _FoldAccumulator(
-        backtest_quantiles, cost_rate, resolve_hac_lags(panel, hac_lags), hac_kernel
+        backtest_quantiles, cost_rate, resolve_hac_lags(panel, hac_lags), hac_kernel,
+        portfolio_scheme, panel.horizon,
     )
+    provenance = trial_provenance(panel, None, portfolio_scheme)
     for fold in folds:
         done_file = resume / f"fold_{fold.fold}.pt" if resume is not None else None
         if done_file is not None and done_file.exists():
@@ -959,6 +1154,7 @@ def walk_forward_evaluate(
             remaining = max(steps - trainer.step_count, 0)
             t_gate = t_base = 0.0  # not refitted in this process
             _attach_base(trainer, train, fold, base_cache, seed)
+            expert_train, excluded = _gate_training_block(trainer, train)
         else:
             trainer = make_trainer()
             # Order matters (brief 02 §4, brief 03 §1): the gate is fitted on
@@ -971,20 +1167,26 @@ def walk_forward_evaluate(
             t0 = time.perf_counter()
             base_fit = _attach_base(trainer, train, fold, base_cache, seed)
             t_base = time.perf_counter() - t0
+            # the expert stage starts from a known RNG state, whatever ran
+            # before it (B-1); a resumed fit restores its own state instead
+            torch.manual_seed(expert_stage_seed(seed, fold.fold))
+            expert_train, excluded = _gate_training_block(trainer, train)
             x = trainer.cfg.experts
             if warmstart_key is not None and not (
                 x.correction_mode and x.zero_init_head
             ):
-                trainer.warmstart_experts(train.full_batch(), warmstart_key(train))
+                trainer.warmstart_experts(
+                    expert_train.full_batch(), warmstart_key(expert_train)
+                )
             del base_fit
             remaining = steps
         t0 = time.perf_counter()
         if trainer.model.prior.stateful:
             trainer.fit_sequence(
-                train.time_sequence(), steps=remaining, checkpoint_path=fit_ckpt
+                expert_train.time_sequence(), steps=remaining, checkpoint_path=fit_ckpt
             )
         else:
-            trainer.fit(train, steps=remaining, checkpoint_path=fit_ckpt)
+            trainer.fit(expert_train, steps=remaining, checkpoint_path=fit_ckpt)
         t_train = time.perf_counter() - t0
 
         pred, nll = _fold_predictions(trainer, train, test)
@@ -1002,7 +1204,8 @@ def walk_forward_evaluate(
         base_pred, base_nll, correction = base_and_correction(trainer, test, train=train)
         base_single_nll = base_single_gaussian_nll(trainer, test)
         gate_perm, gate_metrics = _gate_report(
-            trainer, fold, registry, registry_tag, seed, trial_provenance(panel, trainer.cfg)
+            trainer, fold, registry, registry_tag, seed,
+            {**provenance, "hidden_init": trainer.cfg.experts.hidden_init},
         )
         payload = acc.add(
             fold, pred, train, test, nll,
@@ -1020,6 +1223,7 @@ def walk_forward_evaluate(
                 ("base_fit_s", t_base),
                 ("expert_train_s", t_train),
             ),
+            gate_excluded_dates=excluded,
         )
         if done_file is not None:
             payload = dict(
@@ -1045,10 +1249,12 @@ def walk_forward_evaluate_baseline(
     cost_rate: float = 0.0,
     hac_lags: int | None = None,
     hac_kernel: str = "uniform",
+    portfolio_scheme: str = "nonoverlapping",
 ) -> WalkForwardResult:
     """The single-model counterpart of :func:`walk_forward_evaluate`.
 
-    ``hac_lags`` and ``hac_kernel`` as in :func:`walk_forward_evaluate`.
+    ``hac_lags``, ``hac_kernel`` and ``portfolio_scheme`` as in
+    :func:`walk_forward_evaluate`.
 
     Same folds, same purging, same fit-once-per-window discipline, and —
     via the shared accumulator — byte-identical scoring: a baseline row and an
@@ -1064,7 +1270,8 @@ def walk_forward_evaluate_baseline(
         min_train_dates=min_train_dates,
     )
     acc = _FoldAccumulator(
-        backtest_quantiles, cost_rate, resolve_hac_lags(panel, hac_lags), hac_kernel
+        backtest_quantiles, cost_rate, resolve_hac_lags(panel, hac_lags), hac_kernel,
+        portfolio_scheme, panel.horizon,
     )
     for fold in folds:
         train = panel.subset_dates(fold.train_dates)

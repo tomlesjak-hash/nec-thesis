@@ -108,12 +108,17 @@ class PriorContext:
     - ``step``: global training step, for temperature/annealing schedules.
     - ``date``: ``(B,)`` int64 date codes — the lookup key for a
       :class:`PrecomputedRegimePrior`. Ignored by every other prior.
+    - ``prev_mask``: ``(B,)`` bool, which rows of ``prev_filtered`` hold a
+      real previous posterior. ``False`` marks an entity with no state ``h``
+      dates back (a new entrant, audit M-5): its prior is ``pi_0``, as at a
+      sequence start. ``None`` means every row has one.
     """
 
     prev_filtered: Tensor | None = None
     predict_steps: int = 1
     step: int | None = None
     date: Tensor | None = None
+    prev_mask: Tensor | None = None
 
 
 class RegimePrior(nn.Module, ABC):
@@ -215,6 +220,10 @@ class PrecomputedRegimePrior(RegimePrior):
             table.append(log_prior[torch.tensor(keep, dtype=torch.long)].detach())
         self._rows = rows
         self._log_table = torch.cat(table, dim=0)
+
+    def covers(self, dates: Tensor) -> Tensor:
+        """Which of ``dates`` have a table row (a fitted or applied prior)."""
+        return torch.tensor([int(d) in self._rows for d in dates], dtype=torch.bool)
 
     def set_fitted_table(self, dates: Tensor, log_prior: Tensor) -> None:
         """Install the rows produced by :meth:`fit` (the training block)."""
@@ -476,7 +485,15 @@ class HMMRegimePrior(RegimePrior):
       assumed sticky, so training *starts* sticky.
     - Initial distribution ``pi_0 = softmax(pi0_logits)`` (learnable when
       ``learn_pi0``; else fixed uniform), used when ``ctx.prev_filtered`` is
-      ``None`` (a sequence start).
+      ``None`` (a sequence start) and for rows ``ctx.prev_mask`` marks as
+      having no previous state (a new entrant).
+    - **The state is per entity** (audit M-5). The regime posterior is a
+      per-row quantity (each row is updated with its own target), and the
+      trainer carries it keyed by entity: each row's previous posterior is
+      looked up by its entity, new entrants start from ``pi_0``, exits are
+      dropped. So a point-in-time panel whose membership changes runs, and
+      the row order within a date is irrelevant. (A date-level regime would
+      be a different model; that is not decided.)
     - Predict step: ``log pi_t[b, k] = logsumexp_j(log r_{t-1}[b, j] + log A[j, k])``.
     - **Multi-period targets** (audit finding M-1). The posterior ``r_s`` is
       updated with the target dated ``s``, a forward return over ``(s, s+h]``
@@ -538,6 +555,10 @@ class HMMRegimePrior(RegimePrior):
                 log_prior = torch.logsumexp(
                     log_prior.unsqueeze(2) + log_a.unsqueeze(0), dim=1
                 )
+            if ctx.prev_mask is not None:
+                assert_shape(ctx.prev_mask, (b,), "prev_mask")
+                log_pi0 = F.log_softmax(self.pi0_logits, dim=0).unsqueeze(0).expand(b, -1)
+                log_prior = torch.where(ctx.prev_mask.unsqueeze(1), log_prior, log_pi0)
         return PriorOutput(log_prior=log_prior, info={"log_transition": log_a})
 
 

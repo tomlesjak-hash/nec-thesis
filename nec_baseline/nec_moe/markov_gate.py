@@ -582,7 +582,15 @@ class MarkovSwitchingRegimePrior(PrecomputedRegimePrior):
         return MarkovRegression(series, **common)
 
     def fit(self, train_panel: Panel) -> None:
-        """Fit by maximum likelihood on the **training block** only."""
+        """Fit by maximum likelihood on the **training block** only.
+
+        With ``order = p > 0`` (``MarkovAutoregression``) the first ``p`` dates
+        are the autoregression's initial conditions: statsmodels returns
+        filtered probabilities for the other ``nobs - p`` dates only, so the
+        table starts at ``dates[p]`` (audit finding G-2). The first ``p``
+        training dates have no gate row; the harness leaves them out of expert
+        training and reports how many (``FoldResult.gate_excluded_dates``).
+        """
         dates, series = date_level_series(train_panel, self.cfg)
         model = self._build_model(series)
         result, trace = self._multi_start_fit(model, series)
@@ -590,7 +598,7 @@ class MarkovSwitchingRegimePrior(PrecomputedRegimePrior):
         self.fit_result = self._summarize(result, perm, trace)
         # the fitted table: filtered probabilities over the training dates
         log_prior = self._filtered_log_prior(result, perm)
-        self.set_fitted_table(dates, log_prior)
+        self.set_fitted_table(dates[self.cfg.order :], log_prior)
 
     def _multi_start_fit(self, model, series: np.ndarray):
         """Best converged fit over the scheme's starts; every start is a trial.
@@ -696,6 +704,10 @@ class MarkovSwitchingRegimePrior(PrecomputedRegimePrior):
         Constructs the model over the **extended** series and runs
         ``filter(params)`` — not ``fit`` — with the parameters estimated on the
         training block, then asserts they came back element-wise identical.
+        The series begins at the training block's first date, far more than
+        ``order`` dates before the first test date, so with an autoregressive
+        gate every test date still gets a filtered probability; the output is
+        aligned to ``dates[order:]`` as in :meth:`fit`.
         """
         if self.fit_result is None:
             raise ValueError("apply_causal before fit: nothing is frozen yet")
@@ -711,7 +723,9 @@ class MarkovSwitchingRegimePrior(PrecomputedRegimePrior):
                 f"max |difference| = {np.abs(used - frozen).max():.3e}"
             )
         perm = np.asarray(self.fit_result.permutation, dtype=int)
-        self.extend_causal_table(dates, self._filtered_log_prior(applied, perm))
+        self.extend_causal_table(
+            dates[self.cfg.order :], self._filtered_log_prior(applied, perm)
+        )
 
     # ------------------------------------------------------------ forward
     def forward(self, gate_logits: Tensor, ctx=None) -> PriorOutput:

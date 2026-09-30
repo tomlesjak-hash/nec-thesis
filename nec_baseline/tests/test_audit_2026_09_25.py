@@ -103,13 +103,8 @@ def test_D1_point_in_time_ranks_use_only_that_dates_members():
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="B-1: fit_base calls torch.manual_seed on a cache miss only, so the "
-    "global RNG that drives expert dropout differs between a run that fitted "
-    "the base and one that reused it; the same arm, seed and base give "
-    "different results depending on arm order",
-)
+# B-1, fixed: fit_base leaves the global RNG untouched and the harness seeds
+# the expert stage explicitly (evaluation.expert_stage_seed).
 def test_B1_arm_result_does_not_depend_on_base_cache_state():
     panel = _sticky_panel()
     cfg = small_config(
@@ -196,12 +191,7 @@ def test_M1_stateful_prior_ignores_targets_not_yet_realised():
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="G-2: with markov_gate.order > 0 statsmodels returns filtered "
-    "probabilities for nobs - order dates, and fit() writes them against all "
-    "training dates, which raises a shape mismatch",
-)
+# G-2, fixed: the AR gate's filtered probabilities are aligned to dates[order:].
 def test_G2_markov_autoregression_gate_fits():
     pytest.importorskip("statsmodels")
     from nec_moe import MarkovSwitchingRegimePrior

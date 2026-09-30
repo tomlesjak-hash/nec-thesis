@@ -78,36 +78,64 @@ __all__ = [
     "SequenceEval",
     "GradientAudit",
     "DeadParameterWarning",
+    "FilterState",
 ]
 
 #: Bumped when the checkpoint payload layout changes incompatibly.
 CHECKPOINT_FORMAT = 1
 
 
-FilterHistory = list[Tensor]
+@dataclass(frozen=True)
+class FilterState:
+    """One date's filtered posteriors, keyed by entity.
+
+    ``entity`` is ``(B,)`` entity codes (``None`` for batches that carry none:
+    then rows are matched by position, the pre-M-5 behaviour, which needs the
+    same rows in the same order on every date); ``log_filtered`` is ``(B, K)``.
+    """
+
+    entity: Tensor | None
+    log_filtered: Tensor
+
+    def detach(self) -> FilterState:
+        return FilterState(self.entity, self.log_filtered.detach())
+
+
+FilterHistory = list[FilterState]
 """The recursion's state: the latest filtered posteriors, oldest first.
 
 The HMM prior at date ``t`` may use only targets realised by ``t``. With an
 ``h``-period forward target that is the posterior from ``h`` dates back, so
 the state carried between chunks and passed to :meth:`Trainer.evaluate_sequence`
-is the last ``h`` posteriors, not only the last one (audit finding M-1). A
-bare ``(B, K)`` tensor or a stacked ``(L, B, K)`` tensor is accepted and read
-as a history.
+is the last ``h`` dates' posteriors, not only the last one (audit finding M-1).
+Each is keyed by entity (audit M-5). A bare ``(B, K)`` tensor, a stacked
+``(L, B, K)`` tensor or a list of tensors is accepted and read as a
+positional history.
 """
 
 
-def _as_history(state: Tensor | Sequence[Tensor] | None) -> FilterHistory:
+def _as_history(
+    state: Tensor | Sequence[Tensor] | Sequence[FilterState] | None,
+) -> FilterHistory:
     if state is None:
         return []
     if isinstance(state, Tensor):
         if state.ndim == 2:
-            return [state]
+            return [FilterState(None, state)]
         if state.ndim == 3:
-            return list(state.unbind(0))
+            return [FilterState(None, s) for s in state.unbind(0)]
         raise ValueError(
             f"filter state must be (B, K) or (L, B, K), got {tuple(state.shape)}"
         )
-    return list(state)
+    return [s if isinstance(s, FilterState) else FilterState(None, s) for s in state]
+
+
+def _lookup_rows(entity: Tensor, prev_entity: Tensor) -> tuple[Tensor, Tensor]:
+    """For each of ``entity``: its row in ``prev_entity`` and whether it exists."""
+    sorted_prev, order = torch.sort(prev_entity)
+    pos = torch.searchsorted(sorted_prev, entity).clamp(max=len(sorted_prev) - 1)
+    found = sorted_prev[pos] == entity
+    return order[pos], found
 
 
 class DeadParameterWarning(UserWarning):
@@ -119,9 +147,15 @@ class SequenceEval:
     """Result of a no-grad filtering pass over a chronological sequence."""
 
     nll: float  # mean per-sample NLL over all timesteps
-    log_filtered: Tensor  # (L, B, K) log-domain filtered posteriors
-    log_prior: Tensor  # (L, B, K) log-domain priors (the predict step)
-    y_hat: Tensor  # (L, B) causal point predictions
+    # log-domain filtered posteriors, priors (the predict step) and causal
+    # point predictions: stacked (L, B, K) / (L, B, K) / (L, B) when every
+    # date has the same number of rows, else one tensor per date
+    log_filtered: Tensor | list[Tensor]
+    log_prior: Tensor | list[Tensor]
+    y_hat: Tensor | list[Tensor]
+    # the last h dates' posteriors, keyed by entity: the state to continue
+    # from (e.g. the training block's, into its test block)
+    final_state: FilterHistory = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -287,7 +321,9 @@ class Trainer:
         if self.model.base is not None:
             self.model.base.eval()
 
-    def _lagged_context(self, history: FilterHistory) -> PriorContext:
+    def _lagged_context(
+        self, history: FilterHistory, entity: Tensor | None = None
+    ) -> PriorContext:
         """Prior context for the next date: the posterior ``h`` dates back.
 
         ``h`` is the target's forward horizon (``DataConfig.horizon_periods``).
@@ -302,8 +338,17 @@ class Trainer:
         h = self.cfg.data.horizon_periods
         if len(history) < h:
             return PriorContext(step=self.step_count)
+        prev = history[-h]
+        if prev.entity is None or entity is None:  # positional (pre-M-5) history
+            return PriorContext(
+                prev_filtered=prev.log_filtered, predict_steps=h, step=self.step_count
+            )
+        # keyed by entity (audit M-5): each row's own posterior h dates back;
+        # an entity absent then (a new entrant) starts from pi_0
+        rows, found = _lookup_rows(entity, prev.entity)
         return PriorContext(
-            prev_filtered=history[-h], predict_steps=h, step=self.step_count
+            prev_filtered=prev.log_filtered[rows], prev_mask=found,
+            predict_steps=h, step=self.step_count,
         )
 
     def _apply_sigma_schedule(self) -> None:
@@ -615,7 +660,7 @@ class Trainer:
     def train_step_sequence(
         self,
         chunk: Sequence[Batch],
-        init_state: Tensor | Sequence[Tensor] | None = None,
+        init_state: Tensor | Sequence[Tensor] | Sequence[FilterState] | None = None,
     ) -> tuple[dict[str, float], FilterHistory]:
         """One optimizer step on a chronological chunk of per-date batches.
 
@@ -632,10 +677,13 @@ class Trainer:
         penalties: list[Tensor] = []
         last: tuple[NECOutput, MixtureNLLOutput] | None = None
         for batch in chunk:
-            out, nll_out = self._forward_nll(batch, self._lagged_context(history))
+            out, nll_out = self._forward_nll(
+                batch, self._lagged_context(history, batch.entity)
+            )
             per_sample.append(nll_out.per_sample_nll)
             penalties.append(self._correction_penalty(out))
-            history.append(nll_out.log_filtered)  # attached: the recursion's state
+            # attached: the recursion's state, keyed by entity
+            history.append(FilterState(batch.entity, nll_out.log_filtered))
             last = (out, nll_out)
         assert last is not None
         # mean over the chunk's dates, matching the per-sample NLL's scale so
@@ -644,7 +692,7 @@ class Trainer:
         self._optimize(loss)
         self.lb_buffer.update(last[1].responsibilities)
         h = self.cfg.data.horizon_periods
-        carried = [s.detach() for s in history[-h:]]
+        carried = [st.detach() for st in history[-h:]]
         return self._metrics(loss, last[1], last[0]), carried
 
     def fit_sequence(
@@ -786,7 +834,7 @@ class Trainer:
     def evaluate_sequence(
         self,
         sequence: Sequence[Batch],
-        init_state: Tensor | Sequence[Tensor] | None = None,
+        init_state: Tensor | Sequence[Tensor] | Sequence[FilterState] | None = None,
     ) -> SequenceEval:
         """No-grad filtering pass over a chronological sequence.
 
@@ -801,16 +849,23 @@ class Trainer:
         nlls, filt, priors, preds = [], [], [], []
         for batch in sequence:
             out, nll_out = self._forward_nll(
-                batch, self._lagged_context(history), train_objective=False
+                batch, self._lagged_context(history, batch.entity), train_objective=False
             )
             nlls.append(nll_out.per_sample_nll)
             filt.append(nll_out.log_filtered)
             priors.append(out.prior.log_prior)
             preds.append(out.y_hat)
-            history.append(nll_out.log_filtered)
+            history.append(FilterState(batch.entity, nll_out.log_filtered))
+        balanced = len({f.shape[0] for f in filt}) == 1
+
+        def stack(xs: list[Tensor]) -> Tensor | list[Tensor]:
+            return torch.stack(xs) if balanced else xs
+
+        h = self.cfg.data.horizon_periods
         return SequenceEval(
             nll=float(torch.cat(nlls).mean()),
-            log_filtered=torch.stack(filt),
-            log_prior=torch.stack(priors),
-            y_hat=torch.stack(preds),
+            log_filtered=stack(filt),
+            log_prior=stack(priors),
+            y_hat=stack(preds),
+            final_state=history[-h:],
         )

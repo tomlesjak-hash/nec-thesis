@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import math
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -73,6 +74,7 @@ from nec_moe import (  # noqa: E402
     build_crsp_panel,
     corrected_claims,
     data_config_from_panel,
+    expert_stage_seed,
     fit_temperature,
     gate_regime_alignment,
     gate_reliability,
@@ -90,9 +92,11 @@ from nec_moe import (  # noqa: E402
     plot_transition_matrix,
     rank_ic_by_date,
     run_sweep,
+    target_horizon,
     trial_provenance,
     walk_forward_folds,
 )
+from nec_moe.evaluation import _fit_gate, _gate_training_block  # noqa: E402
 
 # =========================================================================== #
 #  SETTINGS — this is the only part you edit
@@ -118,7 +122,10 @@ class Experiment:
     panel_file: str = "../Data/derived/pit_panel_crsp_2015-01-01_2024-12-31.pt"
     # feature/target spec (CRSP builds; a panel file carries its own):
     seq_len: int = 20               # encoder window T
-    horizon: int = 5                # forward-return days; ALSO the purge length
+    # forward-return days. None = the panel's own target (a CRSP build then
+    # uses StageBSpec's 5). The purge is always the TARGET's horizon; a value
+    # set here that contradicts the panel's target raises (audit O-3).
+    horizon: int | None = None
     target_kind: str = "raw"        # "raw" | "residual" (market-neutral target)
     # synthetic data (data="synthetic"):
     synth_dates: int = 300
@@ -223,12 +230,16 @@ class Experiment:
     ic_hac_lags: int | None = None  # HAC lags for IC t-stats; None = horizon - 1
     ic_hac_kernel: str = "uniform"  # "uniform" (Hansen-Hodrick) | "bartlett" (Newey-West)
     cost_rate: float = 0.001        # cost per unit traded notional (10 bps)
+    # long-short book for an h-day target (audit E-3): "nonoverlapping"
+    # (rebalance every h dates) | "staggered" (Jegadeesh-Titman cohorts).
+    # The default is NOT a decision; every trial records it.
+    portfolio_scheme: str = "nonoverlapping"
 
     # ---------------- extras ----------------
     figures: bool = True
     calibration: bool = True        # reliability + temperature (soft/gumbel gates)
     alignment: bool = False         # gate-vs-VIX/factors report (real panels)
-    quick_train_frac: float = 0.8   # quick mode's chronological split
+    quick_train_frac: float = 0.8   # quick mode's chronological split (purged)
 
 
 EXPERIMENT = Experiment(
@@ -250,8 +261,8 @@ CACHE = Path(__file__).resolve().parent / "data_cache"
 
 
 def _build_panel(exp: Experiment) -> tuple[Panel, int]:
-    """-> (panel, purge_dates). Purge = label horizon for real data; the
-    synthetic target has no forward overlap, so purge 0 is the honest value."""
+    """-> (panel, purge_dates). The purge is the panel's target horizon
+    (:func:`resolve_purge`)."""
     if exp.data == "synthetic":
         spec = SyntheticSpec(
             regime_process=exp.synth_regime_process,  # type: ignore[arg-type]
@@ -260,14 +271,13 @@ def _build_panel(exp: Experiment) -> tuple[Panel, int]:
             noise_std=0.4,
             seed=0,
         )
-        return SyntheticRegimePanel(spec).generate(exp.synth_dates, exp.synth_entities), 0
-    if exp.data == "panel_file":
+        panel: Panel = SyntheticRegimePanel(spec).generate(exp.synth_dates, exp.synth_entities)
+    elif exp.data == "panel_file":
         panel = torch.load(_repo_path(exp.panel_file), weights_only=False)
-        return panel, exp.horizon
-    if exp.data == "crsp":
+    elif exp.data == "crsp":
         bspec = StageBSpec(
             seq_len=exp.seq_len,
-            horizon=exp.horizon,
+            horizon=exp.horizon if exp.horizon is not None else StageBSpec().horizon,
             target_kind=exp.target_kind,  # type: ignore[arg-type]
         )
         crsp_spec = dataclasses.replace(
@@ -277,8 +287,43 @@ def _build_panel(exp: Experiment) -> tuple[Panel, int]:
         # the default window's extract covers every sub-window of it
         build = build_crsp_panel(crsp_spec, bspec, extract=load_extract(CRSPSpec()))
         print(build.coverage)
-        return build.panel, exp.horizon
-    raise ValueError(f"unknown data mode {exp.data!r}")
+        panel = build.panel
+    else:
+        raise ValueError(f"unknown data mode {exp.data!r}")
+    return panel, resolve_purge(exp, panel)
+
+
+def resolve_purge(exp: Experiment, panel: Panel) -> int:
+    """The purge: the horizon of the panel's target (audit O-3).
+
+    Read from the target name (``fwd_ret_5d`` gives 5, the same parse
+    ``DataConfig.horizon_periods`` uses); a target that declares no horizon
+    (the synthetic ``y_synth``) gives 1. ``Experiment.horizon``, when set,
+    must agree with a declared horizon: a 5-day panel run with ``horizon=1``
+    would purge 1 day and let 4 days of labels overlap the test block.
+    """
+    declared = target_horizon(panel.schema.target)
+    if exp.horizon is not None and declared is not None and exp.horizon != declared:
+        raise ValueError(
+            f"Experiment.horizon={exp.horizon} disagrees with the panel's target "
+            f"{panel.schema.target!r} (horizon {declared}); the purge must be the "
+            "target's horizon — set horizon=None or to match the target"
+        )
+    return panel.horizon
+
+
+def _quick_split(exp: Experiment, panel: Panel, purge: int) -> tuple[Panel, Panel, Any]:
+    """Quick mode's chronological split, **purged** like a walk-forward fold.
+
+    The last ``1 - quick_train_frac`` share of dates is the test block; the
+    ``purge`` dates before it are dropped, so no training label's forward
+    window reaches the test block (audit O-1). -> (train, test, fold)."""
+    dates = torch.unique(panel.date, sorted=True)
+    n_test = len(dates) - int(math.floor(exp.quick_train_frac * len(dates)))
+    fold = walk_forward_folds(
+        panel.date, n_folds=1, test_dates_per_fold=n_test, purge_dates=purge
+    )[0]
+    return panel.subset_dates(fold.train_dates), panel.subset_dates(fold.test_dates), fold
 
 
 def _nec_config(exp: Experiment, panel: Panel, sigma_init: float) -> NECConfig:
@@ -399,7 +444,7 @@ def _warm_key(exp: Experiment):
 
 def _quick(exp: Experiment, panel: Panel, purge: int, out: Path,
            registry: TrialRegistry) -> dict:
-    train, test = panel.split_by_date(exp.quick_train_frac)
+    train, test, fold = _quick_split(exp, panel, purge)
     cache = BaseCache()
     window = ("quick", int(train.date.min()), int(train.date.max()))
     sigma = _auto_sigma(exp, panel, train, cache, window)
@@ -416,12 +461,12 @@ def _quick(exp: Experiment, panel: Panel, purge: int, out: Path,
         torch.manual_seed(exp.seeds[0])
         trainer = Trainer(NECModel(cfg))
         remaining = exp.steps
-    # a precomputed (fitted-and-frozen) gate: fit on the training split, then
-    # extend causally to the test split with the frozen parameters
+    # a precomputed (fitted-and-frozen) gate: fit on the purged training
+    # split, then extend causally to the test split with the frozen
+    # parameters, exactly as the walk-forward harness does
     if getattr(trainer.model.prior, "precomputed", False) and not resumed:
         gate: Any = trainer.model.prior
-        gate.fit(train)
-        gate.apply_causal(panel)
+        _fit_gate(trainer, panel, train, fold)
         gf = getattr(gate, "fit_result", None)
         if gf is not None:
             print(f"[gate] markov: llf {gf.llf:.2f}, durations "
@@ -438,21 +483,29 @@ def _quick(exp: Experiment, panel: Panel, purge: int, out: Path,
               f"{base_fit.steps_run} steps"
               f"{' (early stop)' if base_fit.stopped_early else ''}; "
               f"sigma_init={sigma:.4f}")
+    if not resumed:  # the expert stage starts from a known RNG state (B-1)
+        torch.manual_seed(expert_stage_seed(exp.seeds[0], fold.fold))
+    # the dates the gate covers (all of them, except an AR gate's first
+    # `order` training dates, audit G-2)
+    expert_train, excluded = _gate_training_block(trainer, train)
+    if excluded:
+        print(f"[gate] {excluded} training date(s) have no filtered probability "
+              "(autoregressive gate): left out of expert training")
     key = _warm_key(exp)
     if key is not None and not resumed and not (
         exp.correction_mode and exp.zero_init_head
     ):
-        trainer.warmstart_experts(train.full_batch(), sort_key=key(train))
+        trainer.warmstart_experts(expert_train.full_batch(), sort_key=key(expert_train))
 
     if exp.prior == "hmm":
-        trainer.fit_sequence(train.time_sequence(), steps=remaining,
+        trainer.fit_sequence(expert_train.time_sequence(), steps=remaining,
                              chunk_len=exp.chunk_len, checkpoint_path=ckpt)
         warm = trainer.evaluate_sequence(train.time_sequence())
         ev = trainer.evaluate_sequence(test.time_sequence(),
-                                       init_state=warm.log_filtered)
+                                       init_state=warm.final_state)
         nll, pred = ev.nll, torch.cat(list(ev.y_hat))
     else:
-        trainer.fit(train, steps=remaining, checkpoint_path=ckpt)
+        trainer.fit(expert_train, steps=remaining, checkpoint_path=ckpt)
         nll = trainer.evaluate(test.full_batch())
         trainer.model.eval()
         with torch.no_grad():
@@ -467,13 +520,19 @@ def _quick(exp: Experiment, panel: Panel, purge: int, out: Path,
     if exp.figures:
         plot_training_dashboard(history, n_experts=exp.n_experts,
                                 path=out / "dashboard.png")
-        plot_gate_utilization(trainer, panel, path=out / "utilization.png")
+        # the dates the model has a prior for: the training rows it trained
+        # on and the test block (not the purge gap, which the gate skips)
+        scored = panel.subset_dates(torch.cat([torch.unique(expert_train.date),
+                                               fold.test_dates]))
+        plot_gate_utilization(trainer, scored, path=out / "utilization.png")
         try:
             plot_ic_series(pred, test.y, test.date, path=out / "ic.png")
             if exp.backtest_quantiles:
                 plot_long_short_curve(pred, test.y, test.date, test.entity,
                                       n_quantiles=exp.backtest_quantiles,
-                                      cost_rate=exp.cost_rate, path=out / "ls.png")
+                                      cost_rate=exp.cost_rate, horizon=test.horizon,
+                                      scheme=exp.portfolio_scheme, y_daily=test.y_daily,
+                                      path=out / "ls.png")
         except ValueError as e:
             print(f"[figures] IC/LS skipped: {e}")
         if exp.prior == "hmm":
@@ -498,7 +557,7 @@ def _quick(exp: Experiment, panel: Panel, purge: int, out: Path,
 
     # every trial carries the parameter-count confound and, where the prior
     # has a transition matrix, how sticky the fitted chain actually is
-    trial: dict[str, float] = {"nll": nll}
+    trial: dict[str, float] = {"nll": nll, "gate_excluded_dates": float(excluded)}
     # §5: the base's own out-of-sample score beside every result, the
     # improvement over it, and the correction magnitude actually applied
     if trainer.model.base is not None:
@@ -535,7 +594,8 @@ def _quick(exp: Experiment, panel: Panel, purge: int, out: Path,
         )
     results |= {k: v for k, v in trial.items() if k != "nll"}
     registry.log(exp.tag, trial, config={"mode": "quick",
-                 **dataclasses.asdict(exp), **trial_provenance(panel, trainer.cfg)},
+                 **dataclasses.asdict(exp),
+                 **trial_provenance(panel, trainer.cfg, exp.portfolio_scheme)},
                  seed=exp.seeds[0])
     return results
 
@@ -574,7 +634,8 @@ def _evaluate(exp: Experiment, panel: Panel, purge: int, out: Path,
                        backtest_quantiles=exp.backtest_quantiles,
                        cost_rate=exp.cost_rate, resume_dir=resume_dir,
                        base_cache=cache, hac_lags=exp.ic_hac_lags,
-                       hac_kernel=exp.ic_hac_kernel)
+                       hac_kernel=exp.ic_hac_kernel,
+                       portfolio_scheme=exp.portfolio_scheme)
     frame = report.to_frame().round(4)
     print("\n[evaluate] mean ± seed-std per arm:\n", frame.to_string())
     frame.to_csv(out / "report.csv")

@@ -74,6 +74,10 @@ class Batch:
     - ``date``   optional int64 ``(B,)``   — the row's date code. Not a
       feature and never reaches a network: it is the key a **precomputed**
       prior looks its date-level regime probabilities up by (brief 03 §1).
+    - ``entity`` optional int64 ``(B,)``   — the row's entity code. Not a
+      feature either: the key the stateful (HMM) trainer carries each row's
+      filtered posterior by, so a changing cross-section is handled (audit
+      M-5).
     """
 
     x_seq: Tensor
@@ -81,6 +85,7 @@ class Batch:
     y: Tensor
     regime: Tensor | None = None
     date: Tensor | None = None
+    entity: Tensor | None = None
 
     def __post_init__(self) -> None:
         if self.x_seq.ndim != 3:
@@ -92,6 +97,8 @@ class Batch:
             assert_shape(self.regime, (b,), "regime")
         if self.date is not None:
             assert_shape(self.date, (b,), "date")
+        if self.entity is not None:
+            assert_shape(self.entity, (b,), "entity")
 
     def __len__(self) -> int:
         return self.x_seq.shape[0]
@@ -130,6 +137,11 @@ class Panel:
     ``date_labels``/``entity_labels`` (optional) map codes back to calendar
     dates and entity ids (CRSP PERMNOs on the real panel) for reporting.
 
+    ``y_daily`` (optional, ``(N, h)``) holds each row's ``h`` **daily**
+    forward returns under the target's timing rule, the pieces the target is
+    built from (they sum to ``y``). Not a feature: only the staggered
+    long-short book reads it (audit E-3).
+
     ``data_source`` names where the rows came from (``"crsp_ciz202512"``,
     ``"synthetic"``); every trial logged on the panel carries it, so no result
     can be mistaken for another source's (brief 06 A.6). ``metadata`` holds
@@ -148,9 +160,14 @@ class Panel:
     entity_labels: tuple[str, ...] | None = None
     data_source: str = "unspecified"
     metadata: dict[str, Any] = field(default_factory=dict)
+    y_daily: Tensor | None = None  # (N, h) forward daily returns; never a feature
 
     def __post_init__(self) -> None:
         n = self.x_seq.shape[0]
+        if self.y_daily is not None and (
+            self.y_daily.ndim != 2 or self.y_daily.shape[0] != n
+        ):
+            raise ValueError(f"y_daily must be (N, h) with N={n}, got {tuple(self.y_daily.shape)}")
         assert_shape(self.x_snap, (n, len(self.schema.snapshot_features)), "x_snap")
         if self.x_seq.shape[2] != len(self.schema.sequence_features):
             raise ValueError(
@@ -183,6 +200,7 @@ class Panel:
             y=self.y[idx],
             date=self.date[idx],
             entity=self.entity[idx],
+            y_daily=None if self.y_daily is None else self.y_daily[idx],
         )
 
     def _take(self, idx: Tensor) -> Panel:
@@ -194,7 +212,7 @@ class Panel:
     def _batch(self, idx: Tensor) -> Batch:
         return Batch(
             self.x_seq[idx], self.x_snap[idx], self.y[idx],
-            self._batch_regime(idx), self.date[idx],
+            self._batch_regime(idx), self.date[idx], self.entity[idx],
         )
 
     # ------------------------------------------------------------- batching

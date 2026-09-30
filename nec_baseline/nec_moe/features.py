@@ -65,6 +65,7 @@ __all__ = [
     "market_frame",
     "stock_features",
     "post_fill_used",
+    "forward_daily_returns",
     "feature_warmup",
     "assemble_panel",
     "data_config_from_panel",
@@ -282,6 +283,32 @@ def post_fill_used(daily: pd.DataFrame, spec: StageBSpec) -> pd.Series:
     return _forward_sum(filled, spec.horizon).fillna(0.0) > 0
 
 
+def forward_daily_returns(
+    daily: pd.DataFrame, f: pd.DataFrame, spec: StageBSpec
+) -> np.ndarray:
+    """``(P, h)``: each row's ``h`` daily forward returns, the target's pieces.
+
+    Column ``k`` is the return on the ``k+1``-th day after the row, from the
+    same series as the target (the post-delisting fill included). For the
+    residual target each day's market part is removed with the row's
+    trailing beta, so the columns sum to the target for both kinds. Forward
+    by construction, like the target; never a feature.
+    """
+    tr = _target_returns(daily).to_numpy(dtype=float)
+    n, h = len(tr), spec.horizon
+    out = np.full((n, h), np.nan)
+    for k in range(1, h + 1):
+        out[: n - k, k - 1] = tr[k:]
+    if spec.target_kind == "residual":
+        beta = rolling_beta(f["ret_1d"], f["mkt_ret_1d"], spec.beta_window).to_numpy()
+        m = f["mkt_ret_1d"].to_numpy(dtype=float)
+        for k in range(1, h + 1):
+            mk = np.full(n, np.nan)
+            mk[: n - k] = m[k:]
+            out[:, k - 1] -= beta * mk
+    return out
+
+
 def stock_features(
     daily: pd.DataFrame, mkt: pd.DataFrame, spec: StageBSpec
 ) -> pd.DataFrame:
@@ -405,11 +432,14 @@ def assemble_panel(
     date_codes = {d: i for i, d in enumerate(kept_dates)}
 
     rows_snap, rows_seq, rows_y, rows_date, rows_ent = [], [], [], [], []
+    rows_daily: list[np.ndarray] = []
     for ent_code, t in enumerate(tickers):
         f = frames[t]
         keep = valid[t] & f.index.isin(kept_dates)
         if not keep.any():
             continue
+        fwd_daily = forward_daily_returns(daily[t], f, spec)
+        rows_daily.append(fwd_daily[keep.to_numpy()].astype(np.float32))
         # trailing windows over the entity's own rows (positions, not calendar)
         seq_mat = f[list(SEQUENCE_FEATURES)].to_numpy(dtype=np.float32)
         windows = sliding_window_view(seq_mat, spec.seq_len, axis=0)  # (P, d, T)
@@ -425,6 +455,7 @@ def assemble_panel(
     x_snap = torch.from_numpy(np.concatenate(rows_snap))
     x_seq = torch.from_numpy(np.concatenate(rows_seq))
     y = torch.from_numpy(np.concatenate(rows_y))
+    y_daily = torch.from_numpy(np.concatenate(rows_daily))
     date = torch.from_numpy(np.concatenate(rows_date)).long()
     entity = torch.from_numpy(np.concatenate(rows_ent)).long()
 
@@ -449,6 +480,7 @@ def assemble_panel(
         entity_labels=tuple(tickers),
         data_source=data_source,
         metadata=dict(metadata or {}),
+        y_daily=y_daily[order],
     )
 
 

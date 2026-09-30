@@ -38,7 +38,7 @@ from torch import Tensor
 from .alignment import gate_utilization_by_date
 from .data import Panel
 from .diagnostics import canonical_expert_order
-from .evaluation import long_short_by_date, rank_ic_by_date
+from .evaluation import long_short_book, rank_ic_by_date
 from .priors import HMMRegimePrior
 from .sweep import SweepReport
 from .train import Trainer
@@ -194,11 +194,18 @@ def plot_long_short_curve(
     *,
     n_quantiles: int,
     cost_rate: float = 0.0,
+    horizon: int = 1,
+    scheme: str = "nonoverlapping",
+    y_daily: Tensor | None = None,
     path: str | Path | None = None,
 ) -> Figure:
     """Cumulative gross and net quantile long-short returns (per-period sums —
-    no calendar, no annualization)."""
-    _, gross, tno = long_short_by_date(pred, y, date, entity, n_quantiles=n_quantiles)
+    no calendar, no annualization), on the horizon-consistent book
+    (:func:`~nec_moe.evaluation.long_short_book`, audit E-3)."""
+    _, gross, tno = long_short_book(
+        pred, y, date, entity, n_quantiles=n_quantiles, horizon=horizon,
+        scheme=scheme, y_daily=y_daily,
+    )
     net = gross - cost_rate * 2.0 * tno
     plt = _plt()
     fig, ax = plt.subplots(figsize=(11, 2.8), tight_layout=True)

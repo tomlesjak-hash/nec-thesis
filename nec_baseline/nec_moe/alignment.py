@@ -58,7 +58,8 @@ def gate_utilization_by_date(trainer: Trainer, panel: Panel) -> tuple[Tensor, Te
     dates = torch.unique(panel.date, sorted=True)
     if model.prior.stateful:
         ev = trainer.evaluate_sequence(panel.time_sequence())
-        util = ev.log_prior.exp().mean(dim=1)  # (L, K), L == len(dates)
+        # (L, K), L == len(dates); per date, so a changing cross-section works
+        util = torch.stack([lp.exp().mean(dim=0) for lp in ev.log_prior])
         return dates, util
     out = model(panel.x_seq, panel.x_snap, PriorContext(date=panel.date))
     pi = out.prior.log_prior.exp()  # (N, K)

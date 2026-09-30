@@ -91,6 +91,7 @@ def tune(
     verbose: bool = True,
     hac_lags: int | None = None,
     hac_kernel: str = "uniform",
+    portfolio_scheme: str = "nonoverlapping",
 ) -> TuneResult:
     """Score ``candidates`` × ``seeds`` on the training window's validation tail.
 
@@ -122,6 +123,7 @@ def tune(
         verbose=verbose,
         hac_lags=hac_lags,
         hac_kernel=hac_kernel,
+        portfolio_scheme=portfolio_scheme,
     )
 
     missing = [a.arm for a in report.arms if metric not in a.mean]
@@ -144,7 +146,7 @@ def tune(
                 "n_seeds": a.n_seeds,
                 "objective": rec.get("objective"),
                 "correction_penalty_weight": rec.get("correction_penalty_weight"),
-                **trial_provenance(train_panel),
+                **trial_provenance(train_panel, None, portfolio_scheme),
                 "hidden_init": rec.get("hidden_init"),
             },
             notes=f"tuning aggregate over {a.n_seeds} seeds",

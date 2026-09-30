@@ -355,7 +355,7 @@ def test_training_and_evaluation_use_the_same_lagged_recursion():
     before = trainer.evaluate_sequence(seq)
     metrics, carried = trainer.train_step_sequence(seq)
     assert metrics["loss"] == pytest.approx(before.nll, abs=1e-6)
-    assert len(carried) == 4 and not any(s.requires_grad for s in carried)
+    assert len(carried) == 4 and not any(s.log_filtered.requires_grad for s in carried)
 
 
 def test_hmm_alignment_series_is_the_prior_not_the_posterior():

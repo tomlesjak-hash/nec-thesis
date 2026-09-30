@@ -236,6 +236,8 @@ def _metrics_from_result(res: WalkForwardResult) -> dict[str, float]:
     # The fitted gate's own summary (brief 03 §4/§5): expected durations, stay
     # probabilities, the multi-start counts. Averaged over folds in canonical
     # regime order, which is what makes the average meaningful at all.
+    # training dates the gate could not cover (autoregressive gate, G-2)
+    m["gate_excluded_dates"] = statistics.fmean(f.gate_excluded_dates for f in res.folds)
     per_gate: dict[str, list[float]] = {}
     for fold in res.folds:
         for key, value in fold.gate_metrics:
@@ -278,6 +280,7 @@ def run_sweep(
     base_cache: BaseCache | None = None,
     hac_lags: int | None = None,
     hac_kernel: str = "uniform",
+    portfolio_scheme: str = "nonoverlapping",
 ) -> SweepReport:
     """Run every arm over every seed through the shared harness; log; summarize.
 
@@ -298,7 +301,9 @@ def run_sweep(
     ``hac_lags`` and ``hac_kernel`` set the autocorrelation-consistent standard
     error of every IC t-statistic and hence of every ``p`` the corrected
     claims use; ``hac_lags=None`` means ``horizon - 1`` from the panel's
-    target (audit E-2).
+    target (audit E-2). ``portfolio_scheme`` sets the long-short book
+    (audit E-3, :func:`~nec_moe.evaluation.long_short_book`) and is recorded on
+    every row.
     """
     if not arms or not seeds:
         raise ValueError("need at least one arm and one seed")
@@ -354,6 +359,7 @@ def run_sweep(
                     registry=registry,
                     hac_lags=hac_lags,
                     hac_kernel=hac_kernel,
+                    portfolio_scheme=portfolio_scheme,
                 )
             else:
                 assert build_baseline is not None
@@ -368,10 +374,13 @@ def run_sweep(
                     cost_rate=cost_rate,
                     hac_lags=hac_lags,
                     hac_kernel=hac_kernel,
+                    portfolio_scheme=portfolio_scheme,
                 )
             metrics = _metrics_from_result(res)
             registry.log(
-                tag, metrics, config={**trial_provenance(panel), **(arm.config_record or {})},
+                tag, metrics,
+                config={**trial_provenance(panel, None, portfolio_scheme),
+                        **(arm.config_record or {})},
                 seed=seed,
             )
             per_arm[arm.name].append(metrics)

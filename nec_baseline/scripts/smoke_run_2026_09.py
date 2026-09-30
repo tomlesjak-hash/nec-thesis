@@ -360,6 +360,7 @@ def run_arm(
             panel, make, n_folds=exp.n_folds,
             test_dates_per_fold=exp.test_dates_per_fold, purge_dates=purge,
             steps=exp.steps, base_cache=cache, seed=seed, registry=registry,
+            portfolio_scheme=exp.portfolio_scheme,
         )
     st.runs[(name, seed)] = res
     st.trainers[(name, seed)] = trainers
@@ -1171,7 +1172,7 @@ def main(s: SmokeSettings = SMOKE) -> int:
     figures: dict[str, Path] = {}
 
     panel, purge = rx._build_panel(exp)
-    registry.provenance = trial_provenance(panel)
+    registry.provenance = trial_provenance(panel, None, exp.portfolio_scheme)
     if purge != exp.horizon:
         raise AssertionError(f"purge {purge} != horizon {exp.horizon}")
     folds = walk_forward_folds(panel.date, n_folds=exp.n_folds,

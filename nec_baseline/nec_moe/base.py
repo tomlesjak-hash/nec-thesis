@@ -110,6 +110,14 @@ def fit_base(panel: Panel, cfg: BaseConfig, *, seed: int) -> BaseFit:
     final one. ``panel`` must be a training block — this function has no way
     to know otherwise, so the caller owns that discipline (the walk-forward
     harness passes ``fold.train_dates`` only).
+
+    **The global RNG is left exactly as it was** (audit finding B-1). The
+    weights and the minibatches come from the base's own ``torch.Generator``
+    seeded with ``seed`` (the run seed plus ``BaseConfig.seed_offset``, from
+    :class:`BaseCache`); construction and dropout, which draw from the global
+    RNG, run inside ``torch.random.fork_rng``, reseeded from ``seed``. So a run
+    that fits the base and one that reuses it from the cache hand the expert
+    stage the same RNG state.
     """
     train, val = panel.split_by_date(1.0 - cfg.val_fraction)
     if len(train) == 0 or len(val) == 0:
@@ -118,8 +126,16 @@ def fit_base(panel: Panel, cfg: BaseConfig, *, seed: int) -> BaseFit:
             f"panel of {len(panel)} rows / "
             f"{int(torch.unique(panel.date).numel())} dates"
         )
-    torch.manual_seed(seed)
+    with torch.random.fork_rng(devices=[]):
+        torch.manual_seed(seed)  # dropout inside the fork only
+        return _fit_base(panel, train, val, cfg, seed)
+
+
+def _fit_base(
+    panel: Panel, train: Panel, val: Panel, cfg: BaseConfig, seed: int
+) -> BaseFit:
     model = BaseModel(panel.x_snap.shape[1], cfg)
+    model.net.reset_parameters_seeded(seed)  # the base's own generator
     opt = torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
 
     gen = torch.Generator().manual_seed(seed)

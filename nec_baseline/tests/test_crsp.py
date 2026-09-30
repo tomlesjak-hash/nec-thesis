@@ -17,6 +17,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
+import torch
 
 pytest.importorskip("pyarrow")
 
@@ -461,6 +462,15 @@ def test_build_report_and_panel_metadata(builds):
     assert list(b.coverage.columns) == ["members", "with_rows", "without_rows", "coverage"]
     # the rank re-normalization among the members (audit D-1) still holds
     assert float(b.panel.x_snap.min()) >= -0.5 and float(b.panel.x_snap.max()) <= 0.5
+
+
+@pytest.mark.parametrize("kind", ["cash", "market", "cash_residual"])
+def test_daily_forward_returns_sum_to_the_target_through_the_fill(builds, kind):
+    """``Panel.y_daily`` (audit E-3) carries the target's daily pieces, the
+    post-delisting fill included, and they sum to the target."""
+    panel = builds[kind].panel
+    assert panel.y_daily is not None and panel.y_daily.shape == (len(panel), H)
+    assert torch.allclose(panel.y_daily.sum(dim=1), panel.y, atol=1e-5)
 
 
 def test_build_refuses_a_short_extract_and_an_out_of_band_count(fixture, extract):

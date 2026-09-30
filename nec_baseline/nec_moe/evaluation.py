@@ -38,12 +38,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+import pandas as pd
 import torch
 from torch import Tensor
 
 from .base import BaseCache, BaseFit
 from .data import Panel
 from .registry import TrialRegistry, trial_provenance
+from .runstore import Run
 
 if TYPE_CHECKING:  # pragma: no cover
     from .baselines import BaselineModel
@@ -77,6 +79,7 @@ __all__ = [
     "base_and_correction",
     "base_single_gaussian_nll",
     "expert_stage_seed",
+    "fold_metrics_frame",
 ]
 
 
@@ -1044,6 +1047,48 @@ def base_single_gaussian_nll(trainer: Trainer, test: Panel) -> float | None:
         )
 
 
+def _save_predictions(
+    directory: Path | None, fold: int, test: Panel, pred: Tensor,
+    base_pred: Tensor | None,
+) -> None:
+    """Per-security outputs of one fold (licensed on a real panel): only ever
+    to a ``Data/derived/runs/<run_id>/`` folder, never under ``results/``."""
+    if directory is None:
+        return
+    atomic_torch_save(
+        {
+            "date": test.date, "entity": test.entity, "y": test.y,
+            "pred": pred.detach(), "base_pred": None if base_pred is None else base_pred.detach(),
+            "date_labels": test.date_labels, "entity_labels": test.entity_labels,
+        },
+        Path(directory) / f"fold_{fold}_predictions.pt",
+    )
+
+
+def fold_metrics_frame(result: WalkForwardResult) -> pd.DataFrame:
+    """Per-fold aggregate summary of a walk-forward result (one row per fold):
+    what the run store keeps under ``metrics/``. No per-security values."""
+    rows = []
+    for f in result.folds:
+        row: dict[str, Any] = {
+            "fold": f.fold, "n_train": f.n_train, "n_test": f.n_test, "nll": f.nll,
+            "mean_ic": f.ic.mean_ic, "icir": f.ic.icir, "t_stat": f.ic.t_stat,
+            "hac_lags": f.ic.hac_lags, "live_param_count": f.live_param_count,
+            "gate_excluded_dates": f.gate_excluded_dates,
+            "base_mean_ic": None if f.base_ic is None else f.base_ic.mean_ic,
+            "ic_improvement": f.ic_improvement, "base_nll": f.base_nll,
+            "base_single_nll": f.base_single_nll, "nll_improvement": f.nll_improvement,
+            "nll_variance_gain": f.nll_variance_gain, "nll_total_gain": f.nll_total_gain,
+        }
+        if f.portfolio is not None:
+            row |= {"mean_net": f.portfolio.mean_net, "ir_net": f.portfolio.ir_net,
+                    "mean_turnover": f.portfolio.mean_turnover,
+                    "portfolio_scheme": f.portfolio.scheme}
+        row |= dict(f.timing)
+        rows.append(row)
+    return pd.DataFrame(rows).set_index("fold")
+
+
 def expert_stage_seed(seed: int, fold: int) -> int:
     """The global-RNG seed the expert stage starts from, for a run seed and fold.
 
@@ -1077,6 +1122,8 @@ def walk_forward_evaluate(
     hac_lags: int | None = None,
     hac_kernel: str = "uniform",
     portfolio_scheme: str = "nonoverlapping",
+    run: Run | None = None,
+    predictions_dir: str | Path | None = None,
 ) -> WalkForwardResult:
     """Fit-once-per-window walk-forward evaluation (Decision D protocol).
 
@@ -1121,6 +1168,11 @@ def walk_forward_evaluate(
     measure against literally the same floor. Pass one
     :class:`~nec_moe.base.BaseCache` to every arm of a sweep (``run_sweep``
     does); ``seed`` identifies the run, so two seeds get two bases.
+
+    **Run store** (brief 07 B): with ``run`` given, ``status.json`` follows
+    the current fold. ``predictions_dir`` receives each fold's per-security
+    predictions (``fold_<i>_predictions.pt``); the run store points it at
+    ``Data/derived/runs/<run_id>/``, never at ``results/``.
     """
     folds = walk_forward_folds(
         panel.date,
@@ -1142,6 +1194,8 @@ def walk_forward_evaluate(
         if done_file is not None and done_file.exists():
             acc.add_completed(torch.load(done_file, weights_only=False))
             continue
+        if run is not None:
+            run.status(fold=fold.fold, step=0)
         train = panel.subset_dates(fold.train_dates)
         test = panel.subset_dates(fold.test_dates)
         fit_ckpt = (
@@ -1203,6 +1257,10 @@ def walk_forward_evaluate(
         )
         base_pred, base_nll, correction = base_and_correction(trainer, test, train=train)
         base_single_nll = base_single_gaussian_nll(trainer, test)
+        _save_predictions(
+            Path(predictions_dir) if predictions_dir is not None else None,
+            fold.fold, test, pred, base_pred,
+        )
         gate_perm, gate_metrics = _gate_report(
             trainer, fold, registry, registry_tag, seed,
             {**provenance, "hidden_init": trainer.cfg.experts.hidden_init},
@@ -1250,6 +1308,7 @@ def walk_forward_evaluate_baseline(
     hac_lags: int | None = None,
     hac_kernel: str = "uniform",
     portfolio_scheme: str = "nonoverlapping",
+    predictions_dir: str | Path | None = None,
 ) -> WalkForwardResult:
     """The single-model counterpart of :func:`walk_forward_evaluate`.
 
@@ -1278,5 +1337,10 @@ def walk_forward_evaluate_baseline(
         test = panel.subset_dates(fold.test_dates)
         model = make_model()
         model.fit(train)
-        acc.add(fold, model.predict(test), train, test, model.nll(test))
+        pred = model.predict(test)
+        _save_predictions(
+            Path(predictions_dir) if predictions_dir is not None else None,
+            fold.fold, test, pred, None,
+        )
+        acc.add(fold, pred, train, test, model.nll(test))
     return acc.result()

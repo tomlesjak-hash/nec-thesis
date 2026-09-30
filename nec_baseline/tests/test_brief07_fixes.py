@@ -95,9 +95,9 @@ def test_quick_mode_fits_the_gate_on_the_purged_training_block(tmp_path: Path):
     )
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeadParameterWarning)
-        rx.main(exp)
-    trial = TrialRegistry(tmp_path / exp.tag / "trials.jsonl").trials(exp.tag)[0]
-    assert trial.metrics["nll"] == trial.metrics["nll"]  # completed, finite
+        result = rx.main(exp)
+    trial = TrialRegistry(result["run_dir"] / "trials.jsonl").trials(exp.tag)[0]
+    assert math.isfinite(trial.metrics["nll"])
 
 
 # --------------------------------------------------------------------------- #
@@ -370,14 +370,24 @@ def _current_design(tmp_path: Path, mode: str, **kw) -> rx.Experiment:
 @pytest.mark.parametrize("mode", ["quick", "evaluate"])
 def test_current_design_runs_end_to_end(tmp_path: Path, mode: str):
     pytest.importorskip("statsmodels")
+    runs = {}
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeadParameterWarning)
         # before any expert step the corrections are zero: improvement exactly 0
-        rx.main(_current_design(tmp_path / "zero", mode, steps=0))
-        rx.main(_current_design(tmp_path / "trained", mode, steps=15))
+        runs["zero"] = rx.main(_current_design(tmp_path / "zero", mode, steps=0))
+        runs["trained"] = rx.main(_current_design(tmp_path / "trained", mode, steps=15))
     for sub in ("zero", "trained"):
-        out = tmp_path / sub / f"s3_{mode}"
-        assert (out / "settings.json").exists()
+        out = runs[sub]["run_dir"]
+        # the run store's layout (brief 07 B)
+        assert out.parent.parent == tmp_path / sub and out.parent.name == "dev"
+        for name in ("run.json", "settings.json", "status.json", "trials.jsonl",
+                     "SUMMARY.md", "logs/run.log"):
+            assert (out / name).exists(), name
+        for folder in ("metrics", "figures", "checkpoints"):
+            assert (out / folder).is_dir(), folder
+        assert json.loads((out / "status.json").read_text())["state"] == "completed"
+        preds = rx.RunStore().per_security_root / runs[sub]["run_id"]
+        assert list(preds.rglob("*_predictions.pt")), "per-security outputs"
         rows = TrialRegistry(out / "trials.jsonl").trials()
         assert rows
         for r in rows:

@@ -16,20 +16,23 @@ Two modes:
   to anyone.
 
 Everything is a thin driver over the tested package (`nec_moe`) — no logic is
-duplicated here. Outputs land in ``results/<tag>/``: a ``settings.json``
-snapshot (full provenance), the trial registry (``trials.jsonl``), and the
-figures. The handbook (HANDBOOK.md Part II) documents every underlying knob.
+duplicated here. Every run lands in the run store (``nec_moe.runstore``,
+brief 07): ``results/<campaign>/<run_id>/`` holds ``run.json``,
+``settings.json``, ``status.json``, the trial registry (``trials.jsonl``),
+``metrics/``, ``figures/``, ``logs/run.log`` and ``checkpoints/``, with one
+row per run in ``results/INDEX.csv``; per-security outputs (predictions) go to
+``Data/derived/runs/<run_id>/``. RUNBOOK.md is the how-to; the handbook (Part
+II) documents every underlying knob.
 
 Long runs are interruptible: set ``checkpoint_every`` (steps between saves),
-kill the process whenever, and continue with
+interrupt, and continue with
 
     python3.14 run_experiment.py --resume            # the EXPERIMENT block's tag
-    python3.14 run_experiment.py --resume results/my_experiment   # a specific run
+    python3.14 run_experiment.py --resume <run_id>   # a specific run
 
 Resume is exact — completed work (sweep runs, folds) is skipped, an
 interrupted fit continues from its last checkpoint on the same trajectory —
-provided the settings and data are unchanged (a changed ``settings.json``
-prints a loud warning).
+provided the settings and data are unchanged.
 """
 
 from __future__ import annotations
@@ -61,6 +64,8 @@ from nec_moe import (  # noqa: E402
     PriorConfig,
     PriorContext,
     RidgeBaseline,
+    Run,
+    RunStore,
     StageBSpec,
     SyntheticRegimePanel,
     SyntheticSpec,
@@ -74,6 +79,7 @@ from nec_moe import (  # noqa: E402
     build_crsp_panel,
     corrected_claims,
     data_config_from_panel,
+    data_fingerprint,
     expert_stage_seed,
     fit_temperature,
     gate_regime_alignment,
@@ -96,7 +102,11 @@ from nec_moe import (  # noqa: E402
     trial_provenance,
     walk_forward_folds,
 )
-from nec_moe.evaluation import _fit_gate, _gate_training_block  # noqa: E402
+from nec_moe.evaluation import (  # noqa: E402
+    _fit_gate,
+    _gate_training_block,
+    _save_predictions,
+)
 
 # =========================================================================== #
 #  SETTINGS — this is the only part you edit
@@ -106,9 +116,14 @@ from nec_moe.evaluation import _fit_gate, _gate_training_block  # noqa: E402
 @dataclass
 class Experiment:
     # ---------------- run identity ----------------
-    tag: str = "my_experiment"      # names the results/<tag>/ folder + registry
+    tag: str = "my_experiment"      # names the run (run_id = <time>_<tag>_<hash>)
+    campaign: str = "dev"           # results/<campaign>/<run_id>/ (e.g. "gates_k2")
+    purpose: str = ""               # free-text label ("smoke", "debug", ...); no rule
     mode: str = "quick"             # "quick" (one model + diagnostics) | "evaluate"
-    out_dir: str = "results"        # where outputs land (results/<tag>/)
+    out_dir: str = "results"        # the run store's root (aggregate outputs only)
+    # per-security outputs (predictions): licensed on real data, so never
+    # under results/. None = Quant Model/Data/derived/runs/
+    per_security_dir: str | None = None
 
     # ---------------- data ----------------
     data: str = "synthetic"         # "synthetic" | "crsp" | "panel_file"
@@ -219,7 +234,8 @@ class Experiment:
     # ---------------- checkpointing / resume ----------------
     checkpoint_every: int = 0       # save training state every N steps (0 = off);
                                     #   set for any run you might interrupt
-    resume: bool = False            # continue results/<tag>/checkpoints/ (CLI: --resume)
+    resume: bool = False            # continue a run's checkpoints (CLI: --resume [run_id])
+    resume_run_id: str | None = None  # which run; None = the latest of this tag
 
     # ---------------- evaluation (mode="evaluate") ----------------
     n_folds: int = 3
@@ -442,14 +458,15 @@ def _warm_key(exp: Experiment):
     return (lambda p: p.x_seq[:, :, ch].std(dim=1)) if exp.warmstart else None
 
 
-def _quick(exp: Experiment, panel: Panel, purge: int, out: Path,
-           registry: TrialRegistry) -> dict:
+def _quick(exp: Experiment, panel: Panel, purge: int, run: Run) -> dict:
     train, test, fold = _quick_split(exp, panel, purge)
     cache = BaseCache()
     window = ("quick", int(train.date.min()), int(train.date.max()))
     sigma = _auto_sigma(exp, panel, train, cache, window)
     cfg = _nec_config(exp, panel, sigma)
-    ckpt = (out / "checkpoints" / "trainer.pt"
+    registry = TrialRegistry(run.trials)
+    out = run.figures_dir
+    ckpt = (run.checkpoints_dir / "trainer.pt"
             if (exp.checkpoint_every or exp.resume) else None)
     resumed = exp.resume and ckpt is not None and ckpt.exists()
     if resumed:
@@ -553,7 +570,7 @@ def _quick(exp: Experiment, panel: Panel, purge: int, out: Path,
         ctx = build_context(load_vix(CACHE), load_french_factors(CACHE))
         report = gate_regime_alignment(trainer, test, ctx)
         print("[alignment] held-out gate-vs-context:\n", report.to_frame().round(3))
-        report.to_frame().to_csv(out / "alignment.csv")
+        run.write_metrics("alignment", report.to_frame())
 
     # every trial carries the parameter-count confound and, where the prior
     # has a transition matrix, how sticky the fitted chain actually is
@@ -593,6 +610,11 @@ def _quick(exp: Experiment, panel: Panel, purge: int, out: Path,
             canonical_expert_order(trainer.model.experts.log_sigma),
         )
     results |= {k: v for k, v in trial.items() if k != "nll"}
+    run.write_metrics("quick", trial)
+    # per-security: the test block's predictions go to Data/derived/runs/ only
+    b_pred_all = (base_and_correction(trainer, test, train=train)[0]
+                  if trainer.model.base is not None else None)
+    _save_predictions(run.per_security_dir, 0, test, pred, b_pred_all)
     registry.log(exp.tag, trial, config={"mode": "quick",
                  **dataclasses.asdict(exp),
                  **trial_provenance(panel, trainer.cfg, exp.portfolio_scheme)},
@@ -600,8 +622,7 @@ def _quick(exp: Experiment, panel: Panel, purge: int, out: Path,
     return results
 
 
-def _evaluate(exp: Experiment, panel: Panel, purge: int, out: Path,
-              registry: TrialRegistry) -> dict:
+def _evaluate(exp: Experiment, panel: Panel, purge: int, run: Run) -> dict:
     # One cache for the whole sweep, seeded with the sigma probe: the base of
     # the earliest training window is fitted once here and reused by fold 0
     # of every arm rather than refitted.
@@ -626,7 +647,9 @@ def _evaluate(exp: Experiment, panel: Panel, purge: int, out: Path,
             input_dim=d_snap, hidden_dims=tuple(exp.expert_hidden_dims),
             steps=exp.steps, seed=seed)))
 
-    resume_dir = (out / "checkpoints"
+    registry = TrialRegistry(run.trials)
+    out = run.figures_dir
+    resume_dir = (run.checkpoints_dir
                   if (exp.checkpoint_every or exp.resume) else None)
     report = run_sweep(panel, arms, seeds=exp.seeds, registry=registry, tag=exp.tag,
                        steps=exp.steps, n_folds=exp.n_folds,
@@ -635,10 +658,10 @@ def _evaluate(exp: Experiment, panel: Panel, purge: int, out: Path,
                        cost_rate=exp.cost_rate, resume_dir=resume_dir,
                        base_cache=cache, hac_lags=exp.ic_hac_lags,
                        hac_kernel=exp.ic_hac_kernel,
-                       portfolio_scheme=exp.portfolio_scheme)
+                       portfolio_scheme=exp.portfolio_scheme, run=run)
     frame = report.to_frame().round(4)
     print("\n[evaluate] mean ± seed-std per arm:\n", frame.to_string())
-    frame.to_csv(out / "report.csv")
+    run.write_metrics("report", frame)
     if len(arms) > 1:
         claims = corrected_claims(report, alpha=0.10)
         print("[evaluate] BH-corrected claims (arm: reject, q):", claims)
@@ -649,48 +672,72 @@ def _evaluate(exp: Experiment, panel: Panel, purge: int, out: Path,
     return {"report": report}
 
 
+def _snapshot(exp: Experiment) -> dict[str, Any]:
+    return json.loads(json.dumps(dataclasses.asdict(exp)))  # tuples -> lists
+
+
+def _touches_test(panel: Panel) -> bool:
+    """Both modes score a test block: true unless the panel is synthetic (Q15)."""
+    return panel.data_source != "synthetic"
+
+
+def _open_run(exp: Experiment, store: RunStore, panel: Panel) -> Run:
+    """A new run, or with ``resume`` the run to continue."""
+    if not exp.resume:
+        return store.create(
+            campaign=exp.campaign, tag=exp.tag, mode=exp.mode,
+            settings=_snapshot(exp), purpose=exp.purpose,
+            data_source=panel.data_source, fingerprint=data_fingerprint(panel),
+            touches_test=_touches_test(panel), default_settings=_snapshot(Experiment()),
+        )
+    run_id = exp.resume_run_id or store.latest(tag=exp.tag, campaign=exp.campaign)
+    if run_id is None:
+        raise ValueError(f"nothing to resume: no run of tag {exp.tag!r} in {store.index_path}")
+    run = store.open(run_id)
+    run.status(state="running", exit_reason="")
+    store.update_index(run_id, status="running", finished="", exit_reason="")
+    return run
+
+
 def main(exp: Experiment) -> dict:
-    base = Path(exp.out_dir)
-    if not base.is_absolute():
-        base = Path(__file__).resolve().parent / base
-    out = base / exp.tag
-    out.mkdir(parents=True, exist_ok=True)
-    settings_path = out / "settings.json"
-    snapshot = json.loads(json.dumps(dataclasses.asdict(exp)))  # tuples -> lists
-    if exp.resume and settings_path.exists():
-        previous = json.loads(settings_path.read_text())
-        changed = sorted(k for k in snapshot
-                         if k != "resume" and previous.get(k) != snapshot[k])
-        if changed:
-            print(f"[resume] WARNING: settings changed since launch: {changed} — "
-                  "resume assumes identical settings and data")
-    settings_path.write_text(json.dumps(snapshot, indent=2))
-    registry = TrialRegistry(out / "trials.jsonl")
-
+    if exp.mode not in ("quick", "evaluate"):
+        raise ValueError(f"unknown mode {exp.mode!r} (use 'quick' or 'evaluate')")
+    store = RunStore(
+        _repo_path(exp.out_dir),
+        _repo_path(exp.per_security_dir) if exp.per_security_dir is not None else None,
+    )
     panel, purge = _build_panel(exp)
-    n_dates = len(torch.unique(panel.date))
-    print(f"[data] {exp.data}: {len(panel):,} rows, {n_dates} dates, "
-          f"purge={purge}; outputs → {out}")
-
-    if exp.mode == "quick":
-        return _quick(exp, panel, purge, out, registry)
-    if exp.mode == "evaluate":
-        return _evaluate(exp, panel, purge, out, registry)
-    raise ValueError(f"unknown mode {exp.mode!r} (use 'quick' or 'evaluate')")
+    run = _open_run(exp, store, panel)
+    with run.logging():
+        n_dates = len(torch.unique(panel.date))
+        print(f"[run] {run.run_id} (campaign {run.campaign!r}) -> {run.dir}")
+        print(f"[data] {exp.data}: {len(panel):,} rows, {n_dates} dates, purge={purge}")
+        try:
+            if exp.mode == "quick":
+                results = _quick(exp, panel, purge, run)
+                metrics: Any = {k: v for k, v in results.items() if isinstance(v, float)}
+            else:
+                results = _evaluate(exp, panel, purge, run)
+                metrics = results["report"].to_frame().round(4)
+        except KeyboardInterrupt:
+            run.finish("interrupted", "KeyboardInterrupt")
+            raise
+        except Exception as exc:
+            run.finish("failed", f"{type(exc).__name__}: {exc}")
+            raise
+        run.finish("completed", metrics=metrics)
+    return results | {"run_id": run.run_id, "run_dir": run.dir}
 
 
 def _parse_cli(exp: Experiment, argv: list[str]) -> Experiment:
-    """``--resume [path]``: resume the EXPERIMENT block's run, or — with a
-    path to ``results/<tag>`` (or its ``checkpoints/``) — that specific run."""
+    """``--resume [run_id]``: continue the latest run of the EXPERIMENT block's
+    tag, or the named run."""
     if "--resume" not in argv:
         return exp
     exp = dataclasses.replace(exp, resume=True)
     i = argv.index("--resume")
     if i + 1 < len(argv) and not argv[i + 1].startswith("-"):
-        run_dir = Path(argv[i + 1]).resolve()
-        if run_dir.name == "checkpoints":
-            run_dir = run_dir.parent
-        exp = dataclasses.replace(exp, tag=run_dir.name, out_dir=str(run_dir.parent))
+        exp = dataclasses.replace(exp, resume_run_id=argv[i + 1])
     return exp
 
 

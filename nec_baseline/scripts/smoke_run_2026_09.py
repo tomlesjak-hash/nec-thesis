@@ -34,7 +34,8 @@ Usage (from ``nec_baseline/``)::
 
 Outputs: ``Master Thesis/Smoke_Run_2026-09-25.md`` with figures in
 ``Master Thesis/Smoke_Run_2026-09-25_figures/``; the trial registry and the raw
-numbers in ``results/smoke_2026_09/``.
+numbers in the run store, ``results/smoke/<run_id>/`` (brief 07 B; the
+2026-09-25 run's files are in ``results/legacy/smoke_2026_09/``).
 
 ``--crsp`` (brief 06 F) runs the same settings with only the data source
 changed, to the prebuilt CRSP panel in ``Data/derived/``. Its report,
@@ -42,9 +43,9 @@ changed, to the prebuilt CRSP panel in ``Data/derived/``. Its report,
 statistics, the gate per fold, that the experts trained (and their live
 parameter count) and the wall clock: no out-of-sample performance number,
 because the pre-registration is not written yet (Q15). Those numbers are
-still computed by the harness; they stay in the registry and raw results,
-which are derived from CRSP and so are written to ``Data/derived/`` (licensed,
-gitignored), and nothing prints them.
+still computed by the harness; they stay in the run's registry and
+``metrics/results.json`` (aggregate; ``touches_test`` is recorded), and
+nothing prints them. The 2026-09-26 run's files are in ``Data/derived/``.
 """
 
 from __future__ import annotations
@@ -75,7 +76,9 @@ from nec_moe import (
     NECConfig,
     Panel,
     PriorContext,
+    RunStore,
     TrialRegistry,
+    data_fingerprint,
     flag_meanings,
     load_extract,
     load_vix,
@@ -152,7 +155,10 @@ class SmokeSettings:
     # reporting
     report_path: Path = THESIS / "Smoke_Run_2026-09-25.md"
     figures_dir: Path = THESIS / "Smoke_Run_2026-09-25_figures"
-    results_dir: Path = ROOT / "results" / "smoke_2026_09"
+    # run store (brief 07 B): results/<campaign>/<run_id>/, per-security
+    # outputs under Data/derived/runs/<run_id>/
+    campaign: str = "smoke"
+    purpose: str = "brief 04 C smoke run (free data)"
     vix_dir: Path = ROOT / "data_cache"
     correction_quantiles: tuple[float, ...] = (0.05, 0.25, 0.5, 0.75, 0.95)
     hist_bins: int = 80
@@ -183,7 +189,7 @@ SMOKE_CRSP = dataclasses.replace(
     ),
     report_path=THESIS / "Smoke_Run_2026-09-26_CRSP.md",
     figures_dir=THESIS / "Smoke_Run_2026-09-26_CRSP_figures",
-    results_dir=_CRSP.derived_dir / "smoke_2026_09_crsp",
+    purpose="brief 06 F integration run on CRSP (no performance numbers reported)",
     report_performance=False,
     coverage_path=_CRSP.derived_dir / f"pit_coverage_crsp_{_CRSP.start}_{_CRSP.end}.csv",
 )
@@ -243,6 +249,7 @@ class RunState:
     probe_base_s: float | None = None
     base_params: int | None = None
     env: dict[str, str] = field(default_factory=dict)
+    run: Any = None  # the run store's Run (brief 07 B)
 
 
 # =========================================================================== #
@@ -630,7 +637,7 @@ def write_report(s: SmokeSettings, panel: Panel, folds, purge: int, st: RunState
       f"{len(torch.unique(panel.entity))} distinct entities; target `fwd_ret_5d` "
       "= log(C_{t+5}/C_t).")
     w(f"- Source recorded on every trial row: {s.source}.")
-    reg = s.results_dir / "trials.jsonl"
+    reg = st.run.trials
     reg_shown = reg.relative_to(ROOT.parent) if reg.is_relative_to(ROOT.parent) else reg
     w(f"- Registry: `{reg_shown}`, every "
       f"row tagged `{s.tag}` with `source` in its config.")
@@ -973,7 +980,7 @@ def write_integration_report(s: SmokeSettings, panel: Panel, purge: int, st: Run
       "trained, and the wall clock. **No out-of-sample performance number is "
       "reported** (no IC, ICIR, NLL or NLL gain, pooled or per fold): the "
       "pre-registration is not written yet (WORK_QUEUE item 8, Q15). The harness "
-      "computed them; they stay in the registry under `Data/derived/`, unread.\n")
+      "computed them; they stay in the run's registry, unread.\n")
     if st.stopped:
         w(f"> **STOPPED.** {st.stopped}\n")
 
@@ -1160,18 +1167,34 @@ def _env() -> dict[str, str]:
 
 
 def main(s: SmokeSettings = SMOKE) -> int:
+    """Create the run in the run store, run under its log, record the exit."""
     st = RunState(env=_env())
     s.figures_dir.mkdir(parents=True, exist_ok=True)
-    s.results_dir.mkdir(parents=True, exist_ok=True)
-    trials = s.results_dir / "trials.jsonl"
-    if trials.exists():
-        raise SystemExit(f"{trials} exists: move it aside first (the registry is "
-                         "append-only and this run must not mix with an earlier one)")
-    registry = SmokeRegistry(trials, s.tag, s.source)
     exp = s.experiment
-    figures: dict[str, Path] = {}
-
     panel, purge = rx._build_panel(exp)
+    run = RunStore().create(
+        campaign=s.campaign, tag=s.tag, mode=exp.mode, settings=rx._snapshot(exp),
+        purpose=s.purpose, data_source=panel.data_source,
+        fingerprint=data_fingerprint(panel), touches_test=rx._touches_test(panel),
+        default_settings=rx._snapshot(rx.Experiment()),
+    )
+    st.run = run
+    with run.logging():
+        try:
+            code = _run(s, st, panel, purge)
+        except Exception as exc:
+            run.finish("failed", f"{type(exc).__name__}: {exc}")
+            raise
+        # the report is the deliverable; no metrics in SUMMARY.md
+        run.finish("completed", "C.5 stop: " + st.stopped if st.stopped else "")
+    return code
+
+
+def _run(s: SmokeSettings, st: RunState, panel: Panel, purge: int) -> int:
+    exp = s.experiment
+    run = st.run
+    registry = SmokeRegistry(run.trials, s.tag, s.source)
+    figures: dict[str, Path] = {}
     registry.provenance = trial_provenance(panel, None, exp.portfolio_scheme)
     if purge != exp.horizon:
         raise AssertionError(f"purge {purge} != horizon {exp.horizon}")
@@ -1260,7 +1283,7 @@ def main(s: SmokeSettings = SMOKE) -> int:
         "warnings": {f"{n}_seed{sd}": m for (n, sd), m in st.warnings.items()},
         "env": st.env,
     }
-    (s.results_dir / "results.json").write_text(json.dumps(raw, indent=2, default=str))
+    run.write_metrics("results", raw)
     print(f"[report] {s.report_path}")
     return 1 if st.stopped else 0
 

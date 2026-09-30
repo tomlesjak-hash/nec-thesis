@@ -35,3 +35,8 @@ MLFB/
 # Licensed CRSP / Compustat data: redistribution prohibited by the CRSP Data Media Agreement.
 # Never commit anything in this folder.
 Data/
+
+# Run store (brief 07 B): resume state and logs are local, never committed.
+# Everything else under results/ is aggregate output and stays trackable.
+nec_baseline/results/**/checkpoints/
+nec_baseline/results/**/logs/

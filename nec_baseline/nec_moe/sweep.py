@@ -45,10 +45,16 @@ from .base import BaseCache
 from .baselines import BaselineModel
 from .config import NECConfig
 from .data import Panel
-from .evaluation import WalkForwardResult, walk_forward_evaluate, walk_forward_evaluate_baseline
+from .evaluation import (
+    WalkForwardResult,
+    fold_metrics_frame,
+    walk_forward_evaluate,
+    walk_forward_evaluate_baseline,
+)
 from .model import NECModel
 from .multiple_testing import benjamini_hochberg, ic_pvalue
 from .registry import TrialRegistry, trial_provenance
+from .runstore import Run
 from .train import Trainer
 
 __all__ = [
@@ -281,6 +287,7 @@ def run_sweep(
     hac_lags: int | None = None,
     hac_kernel: str = "uniform",
     portfolio_scheme: str = "nonoverlapping",
+    run: Run | None = None,
 ) -> SweepReport:
     """Run every arm over every seed through the shared harness; log; summarize.
 
@@ -304,6 +311,12 @@ def run_sweep(
     target (audit E-2). ``portfolio_scheme`` sets the long-short book
     (audit E-3, :func:`~nec_moe.evaluation.long_short_book`) and is recorded on
     every row.
+
+    **Run store** (brief 07 B): with ``run`` given, ``status.json`` follows
+    the current arm and seed, each (arm, seed)'s per-fold and pooled
+    summaries go to ``metrics/<arm>_seed<seed>_{folds.csv,pooled.json}``,
+    and its per-security predictions to the run's ``Data/derived/runs/``
+    folder.
     """
     if not arms or not seeds:
         raise ValueError("need at least one arm and one seed")
@@ -337,6 +350,11 @@ def run_sweep(
                     )
                 continue
             build_trainer, build_baseline = arm.build_trainer, arm.build_baseline
+            per_security = (
+                run.per_security_dir / f"{arm.name}_seed{seed}" if run is not None else None
+            )
+            if run is not None:
+                run.status(arm=arm.name, seed=seed, fold=None, step=None)
             if build_trainer is not None:
                 res = walk_forward_evaluate(
                     panel,
@@ -360,6 +378,8 @@ def run_sweep(
                     hac_lags=hac_lags,
                     hac_kernel=hac_kernel,
                     portfolio_scheme=portfolio_scheme,
+                    run=run,
+                    predictions_dir=per_security,
                 )
             else:
                 assert build_baseline is not None
@@ -375,8 +395,12 @@ def run_sweep(
                     hac_lags=hac_lags,
                     hac_kernel=hac_kernel,
                     portfolio_scheme=portfolio_scheme,
+                    predictions_dir=per_security,
                 )
             metrics = _metrics_from_result(res)
+            if run is not None:  # aggregate summaries only
+                run.write_metrics(f"{arm.name}_seed{seed}_folds", fold_metrics_frame(res))
+                run.write_metrics(f"{arm.name}_seed{seed}_pooled", metrics)
             registry.log(
                 tag, metrics,
                 config={**trial_provenance(panel, None, portfolio_scheme),

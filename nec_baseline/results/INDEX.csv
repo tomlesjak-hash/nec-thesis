@@ -1,0 +1,3 @@
+run_id,campaign,tag,purpose,mode,created,finished,status,exit_reason,git_commit,dirty,data_source,touches_test,settings_hash,data_fingerprint,path
+legacy_smoke_2026_09,legacy,smoke_2026_09,brief 04 C smoke run on free data (predates the audit fixes and CRSP),evaluate,2026-09-25T14:40:00+02:00,2026-09-25T14:40:00+02:00,completed,,fd1a8ed,False,free: yfinance + Wikipedia universe,True,,,legacy/smoke_2026_09
+legacy_pit_coverage_2015_2024,legacy,pit_coverage_2015_2024,free-data point-in-time coverage table (superseded by the CRSP build),build,2026-07-10T20:30:00+02:00,2026-07-10T20:30:00+02:00,completed,,,,free: yfinance + Wikipedia universe,False,,,legacy/pit_coverage_2015_2024.csv

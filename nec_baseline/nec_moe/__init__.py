@@ -70,6 +70,7 @@ from .evaluation import (
     base_and_correction,
     base_single_gaussian_nll,
     expert_stage_seed,
+    fold_metrics_frame,
     ic_summary,
     long_run_variance,
     long_short_book,
@@ -156,6 +157,16 @@ from .priors import (
     build_prior,
 )
 from .registry import PROVENANCE_KEYS, TrialRecord, TrialRegistry, trial_provenance
+from .runstore import (
+    INDEX_COLUMNS,
+    PER_SECURITY_DIR,
+    RESULTS_DIR,
+    Run,
+    RunStore,
+    atomic_write_text,
+    data_fingerprint,
+    settings_hash,
+)
 from .sweep import (
     ArmSummary,
     SweepArm,
@@ -255,6 +266,7 @@ __all__ = [
     "base_and_correction",
     "base_single_gaussian_nll",
     "expert_stage_seed",
+    "fold_metrics_frame",
     "BaselineModel",
     "RidgeBaseline",
     "MLPBaseline",
@@ -298,6 +310,14 @@ __all__ = [
     "TrialRegistry",
     "PROVENANCE_KEYS",
     "trial_provenance",
+    "RunStore",
+    "Run",
+    "RESULTS_DIR",
+    "PER_SECURITY_DIR",
+    "INDEX_COLUMNS",
+    "atomic_write_text",
+    "data_fingerprint",
+    "settings_hash",
     "plot_training_dashboard",
     "plot_gate_utilization",
     "plot_ic_series",

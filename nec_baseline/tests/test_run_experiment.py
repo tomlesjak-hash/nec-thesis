@@ -36,14 +36,14 @@ def test_quick_mode_end_to_end(tmp_path: Path):
     exp = _tiny(tag="smoke_quick", mode="quick", out_dir=str(tmp_path),
                 figures=True, calibration=True)
     result = main(exp)
-    out = tmp_path / "smoke_quick"
+    out = result["run_dir"]  # results/<campaign>/<run_id>/ (brief 07 B)
     # provenance snapshot + registry row + the diagnostics figures
     settings = json.loads((out / "settings.json").read_text())
     assert settings["prior"] == "soft" and settings["mode"] == "quick"
     assert (out / "trials.jsonl").exists()
     for fig in ["dashboard.png", "utilization.png", "ic.png", "ls.png",
                 "reliability.png", "reliability_scaled.png"]:
-        assert (out / fig).stat().st_size > 5_000, fig
+        assert (out / "figures" / fig).stat().st_size > 5_000, fig
     assert result["nll"] < 2.0 and "temperature" in result
 
 
@@ -53,8 +53,7 @@ def test_quick_mode_hmm_variant(tmp_path: Path):
                 prior="hmm", synth_regime_process="markov", chunk_len=25,
                 steps=60, calibration=True)  # calibration auto-skips for hmm
     result = main(exp)
-    out = tmp_path / "smoke_hmm"
-    assert (out / "transition.png").exists()  # the HMM-specific figure
+    assert (result["run_dir"] / "figures" / "transition.png").exists()  # HMM-specific
     assert "temperature" not in result  # calibration correctly skipped
 
 
@@ -65,13 +64,13 @@ def test_evaluate_mode_end_to_end(tmp_path: Path):
     result = main(exp)
     report = result["report"]
     assert [a.arm for a in report.arms] == ["soft", "ridge"]
-    frame_path = tmp_path / "smoke_eval" / "report.csv"
+    frame_path = result["run_dir"] / "metrics" / "report.csv"
     assert frame_path.exists()
     # the planted comparison holds even through the control panel
     scores = {a.arm: a.mean["mean_ic"] for a in report.arms}
     assert scores["soft"] > 0.3 and abs(scores["ridge"]) < 0.15
     # registry: 2 arms x 2 seeds
-    lines = (tmp_path / "smoke_eval" / "trials.jsonl").read_text().splitlines()
+    lines = (result["run_dir"] / "trials.jsonl").read_text().splitlines()
     assert len([ln for ln in lines if ln.strip()]) == 4
 
 

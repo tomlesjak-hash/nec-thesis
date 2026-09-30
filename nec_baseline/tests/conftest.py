@@ -88,3 +88,14 @@ def random_inputs(b: int = 16, *, seed: int = 0):
     x_snap = torch.randn(b, D_SNAP, generator=g)
     y = torch.randn(b, generator=g)
     return x_seq, x_snap, y
+
+
+@pytest.fixture(autouse=True)
+def _isolated_run_store(tmp_path_factory, monkeypatch):
+    """No test ever writes into the real run store or the licensed Data/:
+    both roots of the run store point into a temporary folder (brief 07 B)."""
+    import nec_moe.runstore as runstore
+
+    root = tmp_path_factory.mktemp("runstore")
+    monkeypatch.setattr(runstore, "RESULTS_DIR", root / "results")
+    monkeypatch.setattr(runstore, "PER_SECURITY_DIR", root / "Data" / "derived" / "runs")

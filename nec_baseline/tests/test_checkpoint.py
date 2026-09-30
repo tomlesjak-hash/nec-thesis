@@ -274,8 +274,8 @@ def test_run_experiment_quick_checkpoint_resume(tmp_path: Path):
         expert_dropout=0.0, steps=40, lr=3e-3, sigma_freeze_steps=20,
         checkpoint_every=10, figures=False, calibration=False,
     )
-    rx.main(exp)
-    ck = tmp_path / "ckq" / "checkpoints" / "trainer.pt"
+    first = rx.main(exp)
+    ck = first["run_dir"] / "checkpoints" / "trainer.pt"
     assert ck.exists()
     assert Trainer.load(ck).step_count == 40
 
@@ -286,13 +286,10 @@ def test_run_experiment_quick_checkpoint_resume(tmp_path: Path):
     assert Trainer.load(ck).step_count == 60
 
 
-def test_parse_cli_resume_path(tmp_path: Path):
+def test_parse_cli_resume_run_id():
     import run_experiment as rx
 
-    got = rx._parse_cli(
-        rx.Experiment(tag="x", out_dir="results"),
-        ["--resume", str(tmp_path / "results" / "runA" / "checkpoints")],
-    )
-    assert got.resume
-    assert got.tag == "runA"
-    assert Path(got.out_dir) == tmp_path / "results"
+    got = rx._parse_cli(rx.Experiment(tag="x"), ["--resume", "20260930-120000_x_abcd1234"])
+    assert got.resume and got.resume_run_id == "20260930-120000_x_abcd1234"
+    latest = rx._parse_cli(rx.Experiment(tag="x"), ["--resume"])
+    assert latest.resume and latest.resume_run_id is None

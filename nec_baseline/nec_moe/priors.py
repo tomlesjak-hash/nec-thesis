@@ -36,7 +36,7 @@ import math
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import torch
 import torch.nn as nn
@@ -220,6 +220,33 @@ class PrecomputedRegimePrior(RegimePrior):
             table.append(log_prior[torch.tensor(keep, dtype=torch.long)].detach())
         self._rows = rows
         self._log_table = torch.cat(table, dim=0)
+
+    def gate_state(self) -> dict[str, Any]:
+        """Everything a resumed fold needs to use this fitted gate again
+        (brief 07 C.1): the date-keyed log-prior table, which dates the fit
+        saw, and each subclass's fitted parameters (:meth:`_extra_state`).
+        The table is not in ``state_dict``, so a trainer checkpoint alone
+        brings back an unfitted gate (audit G-3)."""
+        return {
+            "rows": dict(self._rows),
+            "log_table": self._log_table.clone(),
+            "fit_max_date": self.fit_max_date,
+            "fitted": self.fitted,
+            "extra": self._extra_state(),
+        }
+
+    def load_gate_state(self, state: dict[str, Any]) -> None:
+        self._rows = dict(state["rows"])
+        self._log_table = state["log_table"].clone()
+        self.fit_max_date = state["fit_max_date"]
+        self.fitted = state["fitted"]
+        self._load_extra_state(state.get("extra", {}))
+
+    def _extra_state(self) -> dict[str, Any]:
+        return {}
+
+    def _load_extra_state(self, extra: dict[str, Any]) -> None:
+        del extra
 
     def covers(self, dates: Tensor) -> Tensor:
         """Which of ``dates`` have a table row (a fitted or applied prior)."""

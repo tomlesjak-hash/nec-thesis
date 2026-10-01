@@ -212,12 +212,8 @@ def test_G2_markov_autoregression_gate_fits():
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="G-3: the resume branch of walk_forward_evaluate loads the trainer "
-    "checkpoint but never re-fits the gate, and PrecomputedRegimePrior's table "
-    "is not in state_dict, so the resumed forward pass raises",
-)
+# G-3, fixed: a resumed fold restores its fitted gate (fold_<i>_gate.pt, or a
+# deterministic refit when the file is missing, as here).
 def test_G3_mid_fold_resume_with_a_precomputed_gate_matches_uninterrupted(tmp_path: Path):
     pytest.importorskip("statsmodels")
     from nec_moe.evaluation import _fit_gate

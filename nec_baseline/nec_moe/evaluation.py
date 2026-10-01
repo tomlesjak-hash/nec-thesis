@@ -42,7 +42,7 @@ import pandas as pd
 import torch
 from torch import Tensor
 
-from .base import BaseCache, BaseFit
+from .base import BaseCache, BaseFit, base_cache_key, load_base_fit, save_base_fit
 from .data import Panel
 from .registry import TrialRegistry, trial_provenance
 from .runstore import Run
@@ -865,6 +865,60 @@ def _fit_gate(
         )
 
 
+def _heartbeat(run: Run, fold: int) -> Callable[[int], None]:
+    def beat(step: int) -> None:
+        run.status(fold=fold, step=step)
+
+    return beat
+
+
+def _restore_gate(
+    trainer: Trainer, panel: Panel, train: Panel, fold: WalkForwardFold,
+    gate_file: Path | None,
+) -> None:
+    """Bring back a resumed fold's fitted gate (audit G-3, brief 07 C.1).
+
+    The precomputed prior's table is not in the trainer checkpoint's
+    ``state_dict``; it comes from ``fold_<i>_gate.pt``, saved when the gate was
+    fitted. Without that file (a fold checkpointed by an older version) the
+    gate is fitted again, which is deterministic and reproduces it."""
+    prior = trainer.model.prior
+    if not getattr(prior, "precomputed", False):
+        return
+    if gate_file is not None and gate_file.exists():
+        prior.load_gate_state(torch.load(gate_file, weights_only=False))  # type: ignore[operator]
+    else:
+        _fit_gate(trainer, panel, train, fold)
+
+
+def _base_key(trainer: Trainer, train: Panel, fold: WalkForwardFold, seed: int) -> tuple:
+    window = (int(fold.train_dates.min()), int(fold.train_dates.max()))
+    return base_cache_key(trainer.cfg.base, window, seed, train.x_snap.shape[1])
+
+
+def _restore_base(
+    trainer: Trainer, train: Panel, fold: WalkForwardFold, cache: BaseCache | None,
+    seed: int, base_file: Path | None,
+) -> None:
+    """Reload a resumed fold's frozen base from ``fold_<i>_base.pt`` instead
+    of refitting it (brief 07 C.2); it also seeds the in-memory cache, so the
+    other arms of the run reuse it. Refits only if the file is missing or its
+    cache key differs."""
+    if not trainer.cfg.base.enabled:
+        return
+    key = _base_key(trainer, train, fold, seed)
+    fit = (
+        load_base_fit(base_file, trainer.cfg.base, key)
+        if base_file is not None and base_file.exists() else None
+    )
+    if fit is None:
+        _attach_base(trainer, train, fold, cache, seed)
+        return
+    if cache is not None:
+        cache.put(key, fit)
+    trainer.model.attach_base(fit.model)
+
+
 def _gate_training_block(trainer: Trainer, train: Panel) -> tuple[Panel, int]:
     """The training rows the experts can use: the dates the gate covers.
 
@@ -1198,16 +1252,20 @@ def walk_forward_evaluate(
             run.status(fold=fold.fold, step=0)
         train = panel.subset_dates(fold.train_dates)
         test = panel.subset_dates(fold.test_dates)
-        fit_ckpt = (
-            resume / f"fold_{fold.fold}_trainer.pt" if resume is not None else None
-        )
-        if fit_ckpt is not None and fit_ckpt.exists():
+        fit_ckpt = gate_file = base_file = None
+        if resume is not None:
+            fit_ckpt = resume / f"fold_{fold.fold}_trainer.pt"
+            gate_file = resume / f"fold_{fold.fold}_gate.pt"
+            base_file = resume / f"fold_{fold.fold}_base.pt"
+        if fit_ckpt is not None and Trainer.checkpoint_exists(fit_ckpt):
             # interrupted mid-fit: warm-start already happened before step 0,
-            # so it must NOT rerun — everything is in the checkpoint
-            trainer = Trainer.load(fit_ckpt)
+            # so it must NOT rerun — everything is in the checkpoint, and the
+            # fold's gate and base come back from their own files (C.1, C.2)
+            trainer = Trainer.load_latest(fit_ckpt)
             remaining = max(steps - trainer.step_count, 0)
             t_gate = t_base = 0.0  # not refitted in this process
-            _attach_base(trainer, train, fold, base_cache, seed)
+            _restore_gate(trainer, panel, train, fold, gate_file)
+            _restore_base(trainer, train, fold, base_cache, seed, base_file)
             expert_train, excluded = _gate_training_block(trainer, train)
         else:
             trainer = make_trainer()
@@ -1218,9 +1276,13 @@ def walk_forward_evaluate(
             t0 = time.perf_counter()
             _fit_gate(trainer, panel, train, fold)
             t_gate = time.perf_counter() - t0
+            if gate_file is not None and getattr(trainer.model.prior, "precomputed", False):
+                atomic_torch_save(trainer.model.prior.gate_state(), gate_file)  # type: ignore[operator]
             t0 = time.perf_counter()
             base_fit = _attach_base(trainer, train, fold, base_cache, seed)
             t_base = time.perf_counter() - t0
+            if base_file is not None and base_fit is not None:
+                save_base_fit(base_fit, _base_key(trainer, train, fold, seed), base_file)
             # the expert stage starts from a known RNG state, whatever ran
             # before it (B-1); a resumed fit restores its own state instead
             torch.manual_seed(expert_stage_seed(seed, fold.fold))
@@ -1234,6 +1296,8 @@ def walk_forward_evaluate(
                 )
             del base_fit
             remaining = steps
+        if run is not None:  # status heartbeat while the experts train (C.5)
+            trainer.on_heartbeat = _heartbeat(run, fold.fold)
         t0 = time.perf_counter()
         if trainer.model.prior.stateful:
             trainer.fit_sequence(
@@ -1291,7 +1355,7 @@ def walk_forward_evaluate(
             )
             atomic_torch_save(payload, done_file)
             if fit_ckpt is not None:
-                fit_ckpt.unlink(missing_ok=True)  # superseded by the fold file
+                Trainer.remove_checkpoints(fit_ckpt)  # superseded by the fold file
     return acc.result()
 
 

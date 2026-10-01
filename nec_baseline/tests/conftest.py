@@ -91,11 +91,15 @@ def random_inputs(b: int = 16, *, seed: int = 0):
 
 
 @pytest.fixture(autouse=True)
-def _isolated_run_store(tmp_path_factory, monkeypatch):
+def _isolated_run_store(tmp_path_factory):
     """No test ever writes into the real run store or the licensed Data/:
-    both roots of the run store point into a temporary folder (brief 07 B)."""
+    both roots of the run store point into a temporary folder (brief 07 B).
+
+    Its own MonkeyPatch, so a test's ``monkeypatch.undo()`` cannot lift it."""
     import nec_moe.runstore as runstore
 
     root = tmp_path_factory.mktemp("runstore")
-    monkeypatch.setattr(runstore, "RESULTS_DIR", root / "results")
-    monkeypatch.setattr(runstore, "PER_SECURITY_DIR", root / "Data" / "derived" / "runs")
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(runstore, "RESULTS_DIR", root / "results")
+        patch.setattr(runstore, "PER_SECURITY_DIR", root / "Data" / "derived" / "runs")
+        yield

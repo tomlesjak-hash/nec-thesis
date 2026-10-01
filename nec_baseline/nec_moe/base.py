@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, replace
+from pathlib import Path
 
 import torch
 import torch.nn as nn
@@ -232,6 +233,13 @@ class BaseCache:
     def __len__(self) -> int:
         return len(self._fits)
 
+    def key(self, panel: Panel, cfg: BaseConfig, *, window: object, seed: int) -> tuple:
+        return base_cache_key(cfg, window, seed, panel.x_snap.shape[1])
+
+    def put(self, key: tuple, fit: BaseFit) -> None:
+        """Seed the cache with a base restored from a run's checkpoint."""
+        self._fits[key] = fit
+
     def get_or_fit(
         self, panel: Panel, cfg: BaseConfig, *, window: object, seed: int
     ) -> BaseFit:
@@ -244,6 +252,44 @@ class BaseCache:
         fit = fit_base(panel, cfg, seed=seed + cfg.seed_offset)
         self._fits[key] = fit
         return fit
+
+
+def save_base_fit(fit: BaseFit, key: tuple, path: str | Path) -> None:
+    """Persist a fold's frozen base with its cache key (brief 07 C.2), atomically."""
+    from .utils import atomic_torch_save
+
+    atomic_torch_save(
+        {
+            "key": key,
+            "input_dim": fit.model.net.input_dim,
+            "state": fit.model.state_dict(),
+            "train_loss": fit.train_loss,
+            "val_loss": fit.val_loss,
+            "steps_run": fit.steps_run,
+            "stopped_early": fit.stopped_early,
+        },
+        path,
+    )
+
+
+def load_base_fit(path: str | Path, cfg: BaseConfig, key: tuple) -> BaseFit | None:
+    """The base saved at ``path`` if its cache key equals ``key``, else None.
+
+    Leaves the global RNG untouched (construction runs inside
+    ``fork_rng``): a resumed fit has just restored its RNG state from the
+    trainer checkpoint, and a module's default initialisation would shift the
+    dropout stream away from the uninterrupted run's."""
+    payload = torch.load(path, weights_only=False)
+    if tuple(payload["key"]) != tuple(key):
+        return None
+    with torch.random.fork_rng(devices=[]):
+        model = BaseModel(payload["input_dim"], cfg)
+    model.load_state_dict(payload["state"])
+    return BaseFit(
+        model=model.freeze(), train_loss=payload["train_loss"],
+        val_loss=payload["val_loss"], steps_run=payload["steps_run"],
+        stopped_early=payload["stopped_early"],
+    )
 
 
 def base_config_with(cfg: BaseConfig, **overrides: object) -> BaseConfig:

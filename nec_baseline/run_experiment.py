@@ -45,11 +45,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
 import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from nec_moe import (  # noqa: E402
+    RESUMABLE_STATES,
     BaseCache,
     BaseConfig,
     CRSPSpec,
@@ -63,6 +65,7 @@ from nec_moe import (  # noqa: E402
     Panel,
     PriorConfig,
     PriorContext,
+    ResumeRefused,
     RidgeBaseline,
     Run,
     RunStore,
@@ -84,6 +87,7 @@ from nec_moe import (  # noqa: E402
     fit_temperature,
     gate_regime_alignment,
     gate_reliability,
+    graceful_interrupts,
     ic_summary,
     load_extract,
     load_french_factors,
@@ -98,6 +102,7 @@ from nec_moe import (  # noqa: E402
     plot_transition_matrix,
     rank_ic_by_date,
     run_sweep,
+    settings_hash,
     target_horizon,
     trial_provenance,
     walk_forward_folds,
@@ -105,8 +110,11 @@ from nec_moe import (  # noqa: E402
 from nec_moe.evaluation import (  # noqa: E402
     _fit_gate,
     _gate_training_block,
+    _heartbeat,
+    _restore_gate,
     _save_predictions,
 )
+from nec_moe.utils import atomic_torch_save  # noqa: E402
 
 # =========================================================================== #
 #  SETTINGS — this is the only part you edit
@@ -232,10 +240,16 @@ class Experiment:
     gate_registry_tag: str = "markov_gate_starts"
 
     # ---------------- checkpointing / resume ----------------
-    checkpoint_every: int = 0       # save training state every N steps (0 = off);
-                                    #   set for any run you might interrupt
-    resume: bool = False            # continue a run's checkpoints (CLI: --resume [run_id])
-    resume_run_id: str | None = None  # which run; None = the latest of this tag
+    checkpoint_every: int = 0       # save training state every N steps (0 = only at the
+                                    #   end of each fit and on Ctrl+C); set for long runs
+    checkpoint_keep: int = 2        # checkpoints kept per fit (survives a torn write)
+    heartbeat_every: int = 50       # steps between status.json heartbeats
+    stale_after: float = 1800.0     # s without a heartbeat before "running" = "crashed"
+    resume: bool = False            # continue a run (CLI: --resume [run_id])
+    resume_run_id: str | None = None  # which run; None = the latest interrupted/crashed
+                                      #   run of this tag
+    force: bool = False             # resume despite changed settings/data (CLI: --force;
+                                    #   recorded in run.json)
 
     # ---------------- evaluation (mode="evaluate") ----------------
     n_folds: int = 3
@@ -406,6 +420,8 @@ def _nec_config(exp: Experiment, panel: Panel, sigma_init: float) -> NECConfig:
                           sigma_freeze_steps=exp.sigma_freeze_steps,
                           sequence_ordered=(exp.prior == "hmm"),
                           checkpoint_every=exp.checkpoint_every,
+                          checkpoint_keep=exp.checkpoint_keep,
+                          heartbeat_every=exp.heartbeat_every,
                           freeze_gate=exp.freeze_gate,
                           aux_correction_penalty=exp.aux_correction_penalty,
                           correction_penalty_weight=exp.correction_penalty_weight),
@@ -466,11 +482,11 @@ def _quick(exp: Experiment, panel: Panel, purge: int, run: Run) -> dict:
     cfg = _nec_config(exp, panel, sigma)
     registry = TrialRegistry(run.trials)
     out = run.figures_dir
-    ckpt = (run.checkpoints_dir / "trainer.pt"
-            if (exp.checkpoint_every or exp.resume) else None)
-    resumed = exp.resume and ckpt is not None and ckpt.exists()
+    ckpt = run.checkpoints_dir / "trainer.pt"
+    gate_file = run.checkpoints_dir / "gate.pt"
+    resumed = exp.resume and Trainer.checkpoint_exists(ckpt)
     if resumed:
-        trainer = Trainer.load(ckpt)  # type: ignore[arg-type]
+        trainer = Trainer.load_latest(ckpt)
         remaining = max(exp.steps - trainer.step_count, 0)
         print(f"[resume] {ckpt} at step {trainer.step_count:,} — "
               f"{remaining:,} steps remaining")
@@ -481,9 +497,12 @@ def _quick(exp: Experiment, panel: Panel, purge: int, run: Run) -> dict:
     # a precomputed (fitted-and-frozen) gate: fit on the purged training
     # split, then extend causally to the test split with the frozen
     # parameters, exactly as the walk-forward harness does
-    if getattr(trainer.model.prior, "precomputed", False) and not resumed:
+    if resumed:  # the fitted gate comes back from its own file (G-3)
+        _restore_gate(trainer, panel, train, fold, gate_file)
+    elif getattr(trainer.model.prior, "precomputed", False):
         gate: Any = trainer.model.prior
         _fit_gate(trainer, panel, train, fold)
+        atomic_torch_save(gate.gate_state(), gate_file)
         gf = getattr(gate, "fit_result", None)
         if gf is not None:
             print(f"[gate] markov: llf {gf.llf:.2f}, durations "
@@ -514,6 +533,7 @@ def _quick(exp: Experiment, panel: Panel, purge: int, run: Run) -> dict:
     ):
         trainer.warmstart_experts(expert_train.full_batch(), sort_key=key(expert_train))
 
+    trainer.on_heartbeat = _heartbeat(run, fold.fold)
     if exp.prior == "hmm":
         trainer.fit_sequence(expert_train.time_sequence(), steps=remaining,
                              chunk_len=exp.chunk_len, checkpoint_path=ckpt)
@@ -649,8 +669,7 @@ def _evaluate(exp: Experiment, panel: Panel, purge: int, run: Run) -> dict:
 
     registry = TrialRegistry(run.trials)
     out = run.figures_dir
-    resume_dir = (run.checkpoints_dir
-                  if (exp.checkpoint_every or exp.resume) else None)
+    resume_dir = run.checkpoints_dir  # always: a Ctrl+C leaves resumable state
     report = run_sweep(panel, arms, seeds=exp.seeds, registry=registry, tag=exp.tag,
                        steps=exp.steps, n_folds=exp.n_folds,
                        test_dates_per_fold=exp.test_dates_per_fold, purge_dates=purge,
@@ -682,7 +701,7 @@ def _touches_test(panel: Panel) -> bool:
 
 
 def _open_run(exp: Experiment, store: RunStore, panel: Panel) -> Run:
-    """A new run, or with ``resume`` the run to continue."""
+    """A new run, or with ``resume`` the run to continue (brief 07 C.6, C.7)."""
     if not exp.resume:
         return store.create(
             campaign=exp.campaign, tag=exp.tag, mode=exp.mode,
@@ -690,13 +709,60 @@ def _open_run(exp: Experiment, store: RunStore, panel: Panel) -> Run:
             data_source=panel.data_source, fingerprint=data_fingerprint(panel),
             touches_test=_touches_test(panel), default_settings=_snapshot(Experiment()),
         )
-    run_id = exp.resume_run_id or store.latest(tag=exp.tag, campaign=exp.campaign)
+    run_id = exp.resume_run_id or store.latest(
+        tag=exp.tag, campaign=exp.campaign, status=RESUMABLE_STATES
+    )
     if run_id is None:
-        raise ValueError(f"nothing to resume: no run of tag {exp.tag!r} in {store.index_path}")
+        raise ValueError(
+            f"nothing to resume: no interrupted or crashed run of tag {exp.tag!r} "
+            f"(campaign {exp.campaign!r}) in {store.index_path}"
+        )
     run = store.open(run_id)
+    problems = _resume_problems(run, exp, panel)
+    if problems:
+        detail = "; ".join(problems)
+        if not exp.force:
+            raise ResumeRefused(
+                f"refusing to resume {run_id}: {detail}. Resuming would mix two "
+                "different runs; start a new run, or pass --force to override"
+            )
+        print(f"[resume] WARNING — FORCED RESUME of {run_id} despite: {detail}. "
+              "The run's results now mix settings/data; recorded in run.json.")
+        forced = run.info().get("forced_resumes", [])
+        run.record(forced_resumes=[*forced, {"at": pd.Timestamp.now().isoformat(),
+                                              "changes": problems}])
     run.status(state="running", exit_reason="")
     store.update_index(run_id, status="running", finished="", exit_reason="")
     return run
+
+
+def _resume_problems(run: Run, exp: Experiment, panel: Panel) -> list[str]:
+    """What differs between a stored run and this launch: settings (by hash,
+    then key by key) and data (by fingerprint)."""
+    problems = []
+    stored, current = run.settings(), _snapshot(exp)
+    if settings_hash(stored) != settings_hash(current):
+        changed = sorted(
+            k for k in set(stored) | set(current)
+            if k not in ("resume", "resume_run_id", "force") and stored.get(k) != current.get(k)
+        )
+        problems.append("settings changed: " + ", ".join(
+            f"{k}: {stored.get(k)!r} -> {current.get(k)!r}" for k in changed
+        ))
+    before, now = run.info().get("data_fingerprint"), data_fingerprint(panel)
+    if before != now:
+        problems.append(f"data changed (fingerprint {before} -> {now})")
+    return problems
+
+
+def resume_run(run_id: str, *, root: str | None = None, force: bool = False) -> dict:
+    """Resume run ``run_id`` with its own stored settings (``runs.py resume``)."""
+    store = RunStore(root if root is not None else _repo_path(Experiment().out_dir))
+    settings = store.open(run_id).settings()
+    exp = Experiment(**settings)
+    exp = dataclasses.replace(exp, resume=True, resume_run_id=run_id, force=force,
+                              out_dir=str(store.root))
+    return main(exp)
 
 
 def main(exp: Experiment) -> dict:
@@ -708,7 +774,7 @@ def main(exp: Experiment) -> dict:
     )
     panel, purge = _build_panel(exp)
     run = _open_run(exp, store, panel)
-    with run.logging():
+    with run.logging(), graceful_interrupts():
         n_dates = len(torch.unique(panel.date))
         print(f"[run] {run.run_id} (campaign {run.campaign!r}) -> {run.dir}")
         print(f"[data] {exp.data}: {len(panel):,} rows, {n_dates} dates, purge={purge}")
@@ -719,8 +785,8 @@ def main(exp: Experiment) -> dict:
             else:
                 results = _evaluate(exp, panel, purge, run)
                 metrics = results["report"].to_frame().round(4)
-        except KeyboardInterrupt:
-            run.finish("interrupted", "KeyboardInterrupt")
+        except KeyboardInterrupt as exc:  # RunInterrupted: checkpointed first
+            run.finish("interrupted", f"{type(exc).__name__}: {exc}")
             raise
         except Exception as exc:
             run.finish("failed", f"{type(exc).__name__}: {exc}")
@@ -730,8 +796,11 @@ def main(exp: Experiment) -> dict:
 
 
 def _parse_cli(exp: Experiment, argv: list[str]) -> Experiment:
-    """``--resume [run_id]``: continue the latest run of the EXPERIMENT block's
-    tag, or the named run."""
+    """``--resume [run_id]``: continue the latest interrupted or crashed run of
+    the EXPERIMENT block's tag, or the named run. ``--force`` resumes despite
+    changed settings or data (recorded)."""
+    if "--force" in argv:
+        exp = dataclasses.replace(exp, force=True)
     if "--resume" not in argv:
         return exp
     exp = dataclasses.replace(exp, resume=True)
@@ -742,4 +811,9 @@ def _parse_cli(exp: Experiment, argv: list[str]) -> Experiment:
 
 
 if __name__ == "__main__":
-    main(_parse_cli(EXPERIMENT, sys.argv[1:]))
+    try:
+        main(_parse_cli(EXPERIMENT, sys.argv[1:]))
+    except KeyboardInterrupt:
+        print("[run] interrupted: resume with  python3.14 run_experiment.py --resume",
+              file=sys.stderr)
+        sys.exit(130)

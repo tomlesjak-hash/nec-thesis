@@ -28,6 +28,7 @@ scripts, notebooks, and headless CI (set ``MPLBACKEND=Agg`` there).
 from __future__ import annotations
 
 import math
+import os
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -66,10 +67,14 @@ def _plt():
 
 
 def _save(fig: Figure, path: str | Path | None) -> Figure:
+    """Save through a temporary file and a rename (brief 07 C.4): a crash
+    mid-write never leaves a truncated figure in place."""
     if path is not None:
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(p, dpi=150, bbox_inches="tight")
+        tmp = p.with_name(f".{p.stem}.tmp{p.suffix}")  # keeps the format suffix
+        fig.savefig(tmp, dpi=150, bbox_inches="tight")
+        os.replace(tmp, p)
     return fig
 
 

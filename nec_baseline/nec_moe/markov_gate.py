@@ -697,6 +697,14 @@ class MarkovSwitchingRegimePrior(PrecomputedRegimePrior):
         probs = probs / probs.sum(axis=1, keepdims=True)
         return torch.log(torch.from_numpy(probs).to(torch.float32))
 
+    def _extra_state(self) -> dict:
+        """The frozen fit (parameters, canonical permutation, multi-start
+        trace), so a resumed fold reuses exactly this gate (brief 07 C.1)."""
+        return {"fit_result": self.fit_result}
+
+    def _load_extra_state(self, extra: dict) -> None:
+        self.fit_result = extra.get("fit_result")
+
     # -------------------------------------------------- causal application
     def apply_causal(self, panel: Panel) -> None:
         """Extend the table to ``panel``'s later dates with frozen parameters.

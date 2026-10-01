@@ -129,9 +129,17 @@ class TrialRegistry:
             seed=seed,
             notes=notes,
         )
-        with self.path.open("a") as f:
-            f.write(json.dumps(asdict(rec)) + "\n")
+        self._append(rec)
         return rec
+
+    def _append(self, rec: TrialRecord) -> None:
+        """Append one row by rewriting the file through a temporary file and a
+        rename, so a crash mid-write never leaves a half-written row (brief 07
+        C.4); the registry is small enough for that to be cheap."""
+        from .runstore import atomic_write_text
+
+        existing = self.path.read_text() if self.path.exists() else ""
+        atomic_write_text(self.path, existing + json.dumps(asdict(rec)) + "\n")
 
     # --------------------------------------------------------------- queries
     def trials(self, tag: str | None = None) -> list[TrialRecord]:
@@ -186,8 +194,7 @@ class TrialRegistry:
             },
             notes=f"selection event: best {metric!r} of {len(candidates)}",
         )
-        with self.path.open("a") as f:
-            f.write(json.dumps(asdict(rec)) + "\n")
+        self._append(rec)
         return pick
 
     def selection_events(self, tag: str) -> list[TrialRecord]:

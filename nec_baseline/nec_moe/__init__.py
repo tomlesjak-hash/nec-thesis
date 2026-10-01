@@ -101,6 +101,7 @@ from .features import (
     rolling_beta,
     stock_features,
 )
+from .interrupt import RunInterrupted, graceful_interrupts, request_stop, stop_requested
 from .likelihood import expert_log_likelihood
 from .losses import (
     OBJECTIVE_REGISTRY,
@@ -161,6 +162,8 @@ from .runstore import (
     INDEX_COLUMNS,
     PER_SECURITY_DIR,
     RESULTS_DIR,
+    RESUMABLE_STATES,
+    ResumeRefused,
     Run,
     RunStore,
     atomic_write_text,
@@ -312,6 +315,12 @@ __all__ = [
     "trial_provenance",
     "RunStore",
     "Run",
+    "RESUMABLE_STATES",
+    "ResumeRefused",
+    "RunInterrupted",
+    "graceful_interrupts",
+    "request_stop",
+    "stop_requested",
     "RESULTS_DIR",
     "PER_SECURITY_DIR",
     "INDEX_COLUMNS",

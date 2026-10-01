@@ -12,6 +12,7 @@ completed (arm, seed) runs are skipped via the registry with no duplicate rows.
 from __future__ import annotations
 
 import dataclasses
+import json
 import os
 from pathlib import Path
 
@@ -279,11 +280,18 @@ def test_run_experiment_quick_checkpoint_resume(tmp_path: Path):
     assert ck.exists()
     assert Trainer.load(ck).step_count == 40
 
-    # relaunch with --resume and a raised budget: continues from 40, not 0
-    resumed = rx._parse_cli(dataclasses.replace(exp, steps=60), ["--resume"])
-    assert resumed.resume
-    rx.main(resumed)
+    # a raised budget is a changed setting: resuming refuses without --force
+    # (brief 07 C.6) ...
+    raised = dataclasses.replace(exp, steps=60)
+    with pytest.raises(rx.ResumeRefused, match="steps: 40 -> 60"):
+        rx.main(rx._parse_cli(raised, ["--resume", first["run_id"]]))
+    # ... and with it continues from 40, not 0, recording the override
+    forced = rx._parse_cli(raised, ["--resume", first["run_id"], "--force"])
+    assert forced.resume and forced.force
+    rx.main(forced)
     assert Trainer.load(ck).step_count == 60
+    info = json.loads((first["run_dir"] / "run.json").read_text())
+    assert "steps: 40 -> 60" in info["forced_resumes"][0]["changes"][0]
 
 
 def test_parse_cli_resume_run_id():

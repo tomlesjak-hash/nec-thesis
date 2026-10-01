@@ -6,11 +6,16 @@ Usage (from ``nec_baseline/``)::
     python3.14 scripts/runs.py show <run_id>
     python3.14 scripts/runs.py diff <run_id> <run_id>
     python3.14 scripts/runs.py latest [--campaign C] [--status S] [--tag T]
+    python3.14 scripts/runs.py resume <run_id> [--force]
 
-``list`` prints ``results/INDEX.csv`` as a table; ``show`` prints a run's
-``SUMMARY.md`` and ``status.json``; ``diff`` the settings that differ between
-two runs; ``latest`` the most recent matching run id. No command deletes
-anything.
+``list`` prints ``results/INDEX.csv`` as a table; a run whose status is
+``running`` but whose heartbeat is older than ``--stale-after`` seconds is
+shown as ``crashed`` (resumable like an interrupted one). ``show`` prints a
+run's ``SUMMARY.md`` and ``status.json``; ``diff`` the settings that differ
+between two runs; ``latest`` the most recent matching run id (``--status
+interrupted`` finds the one to resume); ``resume`` continues a run with its
+own stored settings, refusing if the data changed unless ``--force`` (see
+RUNBOOK.md). No command deletes anything.
 
 ``--root`` points at another run store (default ``results/``).
 """
@@ -25,15 +30,16 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from nec_moe import RunStore  # noqa: E402
+from nec_moe.runstore import DEFAULT_STALE_AFTER  # noqa: E402
 
 
 def _store(args: argparse.Namespace) -> RunStore:
-    return RunStore(args.root) if args.root else RunStore()
+    return RunStore(args.root, stale_after=args.stale_after)
 
 
 def cmd_list(args: argparse.Namespace) -> int:
     store = _store(args)
-    rows = store.index()
+    rows = store.index_with_status()
     rows = [r for r in rows
             if (args.campaign is None or r["campaign"] == args.campaign)
             and (args.status is None or r["status"] == args.status)]
@@ -80,9 +86,18 @@ def cmd_latest(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_resume(args: argparse.Namespace) -> int:
+    import run_experiment as rx
+
+    rx.resume_run(args.run_id, root=args.root, force=args.force)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="runs.py", description=__doc__.split("\n")[0])
     parser.add_argument("--root", default=None, help="run store root (default results/)")
+    parser.add_argument("--stale-after", type=float, default=DEFAULT_STALE_AFTER,
+                        help="seconds without a heartbeat before a running run is 'crashed'")
     sub = parser.add_subparsers(dest="command", required=True)
     p = sub.add_parser("list")
     p.add_argument("--campaign")
@@ -100,6 +115,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--status")
     p.add_argument("--tag")
     p.set_defaults(func=cmd_latest)
+    p = sub.add_parser("resume")
+    p.add_argument("run_id")
+    p.add_argument("--force", action="store_true",
+                   help="resume despite changed data (loud warning, recorded in run.json)")
+    p.set_defaults(func=cmd_resume)
     args = parser.parse_args(argv)
     return int(args.func(args))
 

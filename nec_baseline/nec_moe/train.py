@@ -42,8 +42,9 @@ Checkpointing (resume-exact):
 from __future__ import annotations
 
 import dataclasses
+import os
 import warnings
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -60,6 +61,7 @@ from .diagnostics import (
     sharpness,
     utilization,
 )
+from .interrupt import RunInterrupted, stop_requested
 from .likelihood import expert_log_likelihood
 from .losses import (
     OBJECTIVE_REGISTRY,
@@ -251,6 +253,9 @@ class Trainer:
         self._fit_gen: torch.Generator | None = None
         self._fit_perm: Tensor | None = None
         self._fit_pos: int = 0
+        #: called with the step count every TrainConfig.heartbeat_every steps
+        #: (the run store's status heartbeat, brief 07 C.5); not checkpointed
+        self.on_heartbeat: Callable[[int], None] | None = None
         # fit_sequence()'s cursor: which chunk is next + the carried
         # (detached) filter state, plus the chunking it was built under
         self._seq_ci: int = 0
@@ -627,7 +632,25 @@ class Trainer:
             and self.cfg.train.checkpoint_every > 0
             and self.step_count % self.cfg.train.checkpoint_every == 0
         ):
-            self.save(path)
+            self.save_checkpoint(path)
+
+    def _after_step(self, path: Path | None) -> None:
+        """After every optimizer step: periodic checkpoint, heartbeat, and a
+        requested stop (brief 07 C.3), which checkpoints first and then raises
+        :class:`~nec_moe.interrupt.RunInterrupted`."""
+        self._maybe_checkpoint(path)
+        if (
+            self.on_heartbeat is not None
+            and self.step_count % self.cfg.train.heartbeat_every == 0
+        ):
+            self.on_heartbeat(self.step_count)
+        if stop_requested():
+            if path is not None:
+                self.save_checkpoint(path)
+            raise RunInterrupted(
+                f"stop requested: checkpointed at step {self.step_count}"
+                + (f" to {path}" if path is not None else " (no checkpoint path)")
+            )
 
     def fit(
         self,
@@ -651,9 +674,9 @@ class Trainer:
         metrics: list[dict[str, float]] = []
         for _ in range(steps):
             metrics.append(self.train_step(self._next_fit_batch(data)))
-            self._maybe_checkpoint(ckpt)
+            self._after_step(ckpt)
         if ckpt is not None:
-            self.save(ckpt)
+            self.save_checkpoint(ckpt)
         return metrics
 
     # ---------------------------------------------- stateful (time-threaded)
@@ -735,9 +758,9 @@ class Trainer:
             metrics.append(m)
             self._seq_state = state
             self._seq_ci = (self._seq_ci + 1) % len(chunks)
-            self._maybe_checkpoint(ckpt)
+            self._after_step(ckpt)
         if ckpt is not None:
-            self.save(ckpt)
+            self.save_checkpoint(ckpt)
         return metrics
 
     # ------------------------------------------------------- checkpointing
@@ -778,6 +801,72 @@ class Trainer:
             "grad_audit": self.grad_audit,
         }
         atomic_torch_save(payload, path)
+
+    @staticmethod
+    def checkpoint_paths(path: str | Path, keep: int | None = None) -> list[Path]:
+        """``path`` and its rotated older copies ``<path>.1``, ``<path>.2``, ...,
+        newest first (all that exist when ``keep`` is None)."""
+        path = Path(path)
+        older = sorted(
+            (p for p in path.parent.glob(path.name + ".*") if p.suffix[1:].isdigit()),
+            key=lambda p: int(p.suffix[1:]),
+        )
+        found = ([path] if path.exists() else []) + older
+        return found if keep is None else found[:keep]
+
+    @classmethod
+    def checkpoint_exists(cls, path: str | Path) -> bool:
+        return bool(cls.checkpoint_paths(path))
+
+    @classmethod
+    def remove_checkpoints(cls, path: str | Path) -> None:
+        for p in cls.checkpoint_paths(path):
+            p.unlink(missing_ok=True)
+
+    def save_checkpoint(self, path: str | Path) -> None:
+        """:meth:`save` with rotation: the newest checkpoint is at ``path``, the
+        ``checkpoint_keep - 1`` before it at ``<path>.1``, ... (brief 07 C.4).
+
+        The new state is written to a temporary file first, the older copies
+        are shifted, and only then is it renamed into place, so a crash at any
+        point leaves at least one complete checkpoint.
+        """
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        keep = self.cfg.train.checkpoint_keep
+        tmp = path.with_name(path.name + ".new")
+        self.save(tmp)
+        for i in range(keep - 1, 0, -1):
+            src = path if i == 1 else path.with_name(f"{path.name}.{i - 1}")
+            if src.exists():
+                os.replace(src, path.with_name(f"{path.name}.{i}"))
+        for stale in self.checkpoint_paths(path)[keep:]:
+            stale.unlink(missing_ok=True)
+        os.replace(tmp, path)
+
+    @classmethod
+    def load_latest(cls, path: str | Path) -> Trainer:
+        """Load the newest checkpoint of ``path`` that loads cleanly.
+
+        Reports when an older one had to be used (the newest was truncated or
+        corrupt, e.g. by a crash during the write); raises if none loads.
+        """
+        candidates = cls.checkpoint_paths(path)
+        if not candidates:
+            raise FileNotFoundError(f"no checkpoint at {path} or its rotated copies")
+        errors = []
+        for candidate in candidates:
+            try:
+                trainer = cls.load(candidate)
+            except Exception as exc:  # a truncated file: try the previous one
+                errors.append(f"{candidate.name}: {type(exc).__name__}")
+                continue
+            if errors:
+                print(f"[resume] newest checkpoint(s) unreadable ({'; '.join(errors)}); "
+                      f"resumed from the older {candidate.name} at step "
+                      f"{trainer.step_count}")
+            return trainer
+        raise RuntimeError(f"no checkpoint of {path} loads: {'; '.join(errors)}")
 
     @classmethod
     def load(cls, path: str | Path) -> Trainer:

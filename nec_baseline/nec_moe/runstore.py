@@ -54,6 +54,9 @@ __all__ = [
     "INDEX_COLUMNS",
     "RunStore",
     "Run",
+    "DEFAULT_STALE_AFTER",
+    "ResumeRefused",
+    "RESUMABLE_STATES",
     "settings_hash",
     "data_fingerprint",
     "atomic_write_text",
@@ -71,7 +74,17 @@ INDEX_COLUMNS: tuple[str, ...] = (
 )
 #: settings that do not change what a run computes, so they are left out of
 #: the hash (asking to resume must not look like a different run)
-VOLATILE_SETTINGS: frozenset[str] = frozenset({"resume", "force"})
+VOLATILE_SETTINGS: frozenset[str] = frozenset({"resume", "resume_run_id", "force"})
+#: seconds without a heartbeat after which a ``running`` run is reported as
+#: ``crashed`` (brief 07 C.5); generous, because a long gate or base fit
+#: runs without optimizer steps
+DEFAULT_STALE_AFTER = 1800.0
+#: run states a resume without a run id picks from
+RESUMABLE_STATES: tuple[str, ...] = ("interrupted", "crashed")
+
+
+class ResumeRefused(RuntimeError):
+    """A resume on changed settings or data, refused without ``force``."""
 
 
 def atomic_write_text(path: Path, text: str) -> None:
@@ -160,13 +173,23 @@ def _now() -> dt.datetime:
 
 
 class _Tee(io.TextIOBase):
-    """Write to the original stream and to the run log, each line timestamped."""
+    """Write to the original stream and to the run log, each line timestamped.
+
+    The log is closed when :meth:`Run.logging` exits, but a reference to the
+    tee can outlive it (anything that cached ``sys.stdout``, and the
+    ``io.IOBase`` finalizer, which flushes on garbage collection). So both
+    targets are touched only while open: a late write still reaches the
+    console, and finalization never raises on the closed log.
+    """
 
     def __init__(self, stream: TextIO, log: TextIO) -> None:
         self.stream, self.log, self._at_line_start = stream, log, True
 
     def write(self, text: str) -> int:
-        self.stream.write(text)
+        if not self.stream.closed:
+            self.stream.write(text)
+        if self.log.closed:
+            return len(text)
         for chunk in text.splitlines(keepends=True):
             if self._at_line_start:
                 self.log.write(_now().strftime("%Y-%m-%d %H:%M:%S "))
@@ -176,8 +199,10 @@ class _Tee(io.TextIOBase):
         return len(text)
 
     def flush(self) -> None:
-        self.stream.flush()
-        self.log.flush()
+        if not self.stream.closed:
+            self.stream.flush()
+        if not self.log.closed:
+            self.log.flush()
 
 
 @dataclasses.dataclass
@@ -318,8 +343,10 @@ class RunStore:
     """Creates, finds and indexes runs under ``root`` (default ``results/``)."""
 
     def __init__(
-        self, root: str | Path | None = None, per_security_root: str | Path | None = None
+        self, root: str | Path | None = None, per_security_root: str | Path | None = None,
+        *, stale_after: float = DEFAULT_STALE_AFTER,
     ) -> None:
+        self.stale_after = stale_after
         # defaults resolved at call time, so tests can redirect the module's
         # constants and never touch the real results/ or Data/
         self.root = Path(root) if root is not None else RESULTS_DIR
@@ -411,16 +438,36 @@ class RunStore:
                            self.per_security_root / run_id, self)
         raise KeyError(f"no run {run_id!r} in {self.index_path}")
 
+    def effective_status(self, row: Mapping[str, str]) -> str:
+        """The index status, except that a ``running`` run whose heartbeat is
+        older than ``stale_after`` seconds is ``crashed`` (brief 07 C.5)."""
+        if row.get("status") != "running":
+            return row.get("status", "")
+        status_file = self.root / row["path"] / "status.json"
+        try:
+            beat = json.loads(status_file.read_text())["heartbeat"]
+            age = (_now() - dt.datetime.fromisoformat(beat)).total_seconds()
+        except (OSError, KeyError, ValueError):
+            return "crashed"  # no readable heartbeat at all
+        return "crashed" if age > self.stale_after else "running"
+
+    def index_with_status(self) -> list[dict[str, str]]:
+        """:meth:`index` with each row's :meth:`effective_status`."""
+        return [row | {"status": self.effective_status(row)} for row in self.index()]
+
     def latest(
-        self, *, campaign: str | None = None, status: str | None = None,
+        self, *, campaign: str | None = None, status: str | tuple[str, ...] | None = None,
         tag: str | None = None,
     ) -> str | None:
         """The most recent run id matching the filters: by creation time, ties
-        (one-second resolution) broken by index order, which is launch order."""
-        rows = [(i, r) for i, r in enumerate(self.index())
+        (one-second resolution) broken by index order, which is launch order.
+        ``status`` is matched against the effective status (``crashed`` for a
+        stale ``running`` run)."""
+        wanted = (status,) if isinstance(status, str) else status
+        rows = [(i, r) for i, r in enumerate(self.index_with_status())
                 if (campaign is None or r["campaign"] == campaign)
                 and (tag is None or r["tag"] == tag)
-                and (status is None or r["status"] == status)]
+                and (wanted is None or r["status"] in wanted)]
         if not rows:
             return None
         return max(rows, key=lambda ir: (ir[1]["created"], ir[0]))[1]["run_id"]

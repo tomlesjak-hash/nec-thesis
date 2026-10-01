@@ -22,6 +22,7 @@ os.environ.setdefault("MPLBACKEND", "Agg")
 
 import run_experiment as rx  # noqa: E402
 from nec_moe import RunStore, settings_hash  # noqa: E402
+from nec_moe.runstore import VOLATILE_SETTINGS  # noqa: E402
 from nec_moe.train import DeadParameterWarning  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -125,7 +126,7 @@ def test_settings_hash_is_stable_across_processes_and_tracks_every_setting():
     assert other == here and len(here) == 8
     for key in snap:
         changed = dict(snap) | {key: "__changed__"}
-        if key in ("resume", "force"):
+        if key in VOLATILE_SETTINGS:
             assert settings_hash(changed) == here  # volatile: asking to resume
         else:
             assert settings_hash(changed) != here, key
@@ -158,3 +159,25 @@ def test_runs_cli_lists_shows_diffs_and_finds_the_latest(tmp_path: Path, capsys)
     assert capsys.readouterr().out.strip() == "steps: 10 -> 12"
     assert runs.main([*root, "latest", "--campaign", "unit"]) == 0
     assert capsys.readouterr().out.strip() == b["run_id"]
+
+
+def test_the_log_tee_survives_its_closed_log(tmp_path: Path, capsys):
+    """A reference to the log tee can outlive Run.logging (anything that
+    cached sys.stdout, and the io finalizer, which flushes at garbage
+    collection). Writing, flushing and finalizing it after the log closed
+    must not raise, and a late write goes to the console only."""
+    import gc
+
+    run = RunStore(tmp_path / "results").create(
+        campaign="unit", tag="tee", mode="quick", settings={"a": 1}
+    )
+    with run.logging():
+        tee = sys.stdout
+        print("inside")
+    tee.write("late\n")
+    tee.flush()
+    del tee
+    gc.collect()  # the finalizer used to raise "I/O operation on closed file"
+    log = run.log_path.read_text()
+    assert "inside" in log and "late" not in log
+    assert "late" in capsys.readouterr().out

@@ -398,8 +398,17 @@ class TrainConfig:
     log_every: int = 50
     # Checkpoint cadence for Trainer.fit/fit_sequence when a checkpoint_path is
     # given: save every N optimizer steps (plus always once at the end of the
-    # call). 0 = periodic saves off (final save still happens).
+    # call, and on a requested stop). 0 = periodic saves off (final save still
+    # happens).
     checkpoint_every: int = 0
+    # How many checkpoints of one fit are kept (the newest at the path itself,
+    # older ones at <path>.1, <path>.2, ...). Resume loads the newest one that
+    # loads cleanly, so 2 survives a crash in the middle of a checkpoint write
+    # (brief 07 C.4).
+    checkpoint_keep: int = 2
+    # Steps between heartbeats: the trainer calls Trainer.on_heartbeat (the run
+    # store stamps status.json with it, brief 07 C.5).
+    heartbeat_every: int = 50
 
 
 @dataclass(frozen=True)
@@ -558,6 +567,10 @@ class NECConfig:
             )
         if t.checkpoint_every < 0:
             raise bad(f"checkpoint_every must be >= 0, got {t.checkpoint_every}")
+        if t.checkpoint_keep < 1:
+            raise bad(f"checkpoint_keep must be >= 1, got {t.checkpoint_keep}")
+        if t.heartbeat_every < 1:
+            raise bad(f"heartbeat_every must be >= 1, got {t.heartbeat_every}")
         if t.correction_penalty_weight < 0:
             raise bad(
                 f"correction_penalty_weight must be >= 0, got "

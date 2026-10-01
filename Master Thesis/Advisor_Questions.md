@@ -1395,6 +1395,43 @@ Whichever is not chosen can stay registered as a robustness check.
 **Ask the advisor:** (a), (b) or (c)? Is consistency with the pipeline's market definition worth
 departing from the literature's standard excess-return series?
 
+---
+
+### Q24. Is the regime latent per date or per observation in the likelihood?
+
+**Status:** open, raised 2026-10-01 while deriving the model from Bishop 14.5. Nothing decided; the
+code keeps its current behaviour. Closely tied to Q20.
+
+**The two likelihoods.** The thesis story is that a single regime holds for the whole market on a
+date. Taken literally, all stocks on date t share one latent regime, so the product over stocks sits
+**inside** the sum over regimes:
+
+$$p(y_{1,t}, \dots, y_{N,t}) = \sum_{k=1}^{K} \pi_k(t) \prod_{i=1}^{N} \mathcal{N}\big(y_{i,t};\, \mu_k(x_{i,t}),\, \sigma_k^2\big)$$
+
+The code (`losses.mixture_nll`, a log-sum-exp per row) uses the per-observation version instead,
+where each stock-date draws its own regime independently and the sum sits inside the product:
+
+$$\prod_{i=1}^{N} \sum_{k=1}^{K} \pi_k(t)\, \mathcal{N}\big(y_{i,t};\, \mu_k(x_{i,t}),\, \sigma_k^2\big)$$
+
+**What differs in practice.**
+
+- **Responsibilities.** Date-level: the posterior over regimes pools the evidence of all ~500 stocks
+  on the date, so it becomes nearly 0 or 1 and each date is effectively assigned to one expert.
+  Per-observation: each stock gets its own posterior, so two stocks on the same date can be
+  attributed to different regimes.
+- **Fidelity to the story.** The date-level form matches "one market regime per day" literally. The
+  per-observation form is a softer approximation that typically trains more smoothly.
+- **Interaction with Q20.** Under a point-prediction loss (squared error, Huber), the experts are
+  weighted by the prior pi_k(t) alone and the distinction disappears. It only matters if the mixture
+  likelihood is kept.
+- **Interaction with the frozen gate (Q19).** With a date-level likelihood, the realised returns of
+  the whole cross-section re-weight the experts on each date, which strengthens the posterior-versus-
+  prior concern already raised in Q20.
+
+**Ask the advisor:** if the mixture likelihood is kept, should the regime be latent per date (as the
+regime story implies) or per observation (as implemented)? Is the per-observation form defensible as
+an approximation, and should the other be reported as a robustness check?
+
 ## RESOLVED
 
 ### Q3. Data access, CRSP and Compustat through the university? [RESOLVED 2026-09-19]

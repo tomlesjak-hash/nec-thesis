@@ -136,7 +136,7 @@ detail stays in the source documents; this file points to them.
 
 ## 3. Open, in one place
 
-- **Advisor questions open:** Q1, Q2, Q4, Q5, Q6 (design half), Q8, Q9, Q10, Q12 to Q18, Q20, Q21, Q22, Q23.
+- **Advisor questions open:** Q1, Q2, Q4, Q5, Q6 (design half), Q8, Q9, Q10, Q12 to Q18, Q20, Q21, Q22, Q23, Q24.
 - **Audit findings still open:** B-2 (the base withholds its validation tail with early stopping
   off; interacts with Q16); the majors S-2 (the superseded 2026-09-25 smoke report's NLL columns)
   and X-1 (the `hidden_init` choice); and the minors and notes listed in audit section 12.

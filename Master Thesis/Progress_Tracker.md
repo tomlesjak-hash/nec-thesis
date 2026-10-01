@@ -12,7 +12,7 @@ detail stays in the source documents; this file points to them.
 
 ---
 
-## 1. Current state (2026-09-26)
+## 1. Current state (2026-10-01)
 
 | Component | What it is | Status | Where |
 |---|---|---|---|
@@ -20,18 +20,37 @@ detail stays in the source documents; this file points to them.
 | Universe | S&P 500 point-in-time from CRSP membership spells, INDNO 1000500 (not 1000502, which has no constituents), bounds inclusive, 502-508 members per day; dual-class companies kept as two PERMNOs. Delisting returns already in `DlyRet` (rule a); forward windows past a delisting completed by `post_delisting_return` (`"cash"` default, not a decision) | Implemented (brief 06 A) | `crsp.py`, `universe.py` |
 | Frequency and horizon | Code runs daily with a 5-day forward target | **Open** | Q21 |
 | Base | MLP, trained on the training block, then frozen | Decided, implemented | Q7; brief 02 |
-| Gate | Regime model fitted separately, then frozen; output is the filtered probability, never the smoothed one | Decided. Hamilton implemented; jump, Wasserstein and TVTP to come | Q19; briefs 03, 04 B |
-| Experts | MLP corrections to the base, $\hat y = f_0 + \sum_k \pi_k r_k$, zero-initialised heads | Implemented. Initialisation of the hidden layers becomes a switch in brief 06 (X-1) | brief 02; audit X-1 |
+| Gate | Regime model fitted separately, then frozen; output is the filtered probability, never the smoothed one | Decided. Hamilton implemented, the autoregressive variant too (brief 07, G-2); jump, Wasserstein and TVTP to come. The backprop-HMM baseline now runs on the point-in-time panel (state keyed by stock, M-5) | Q19; briefs 03, 04 B, 07 |
+| Experts | MLP corrections to the base, $\hat y = f_0 + \sum_k \pi_k r_k$, zero-initialised heads | Implemented. Hidden-layer initialisation is a switch, `hidden_init` (brief 06 D); which one is used is **open** (X-1) | brief 02; audit X-1 |
 | Number of regimes K | | **Open** | Q18 |
 | Error function | Only the mixture NLL is registered, behind a seam | **Open** | Q20 |
 | Depth grid | Mechanism by depth, depths set by the compute budget | Decided | Q11 |
-| Evaluation | Walk-forward with purge; rank IC with Hansen-Hodrick t-stats for overlapping targets; NLL reported three ways: `NLL_single`, `NLL_base`, `NLL_full`, giving the variance gain, the correction improvement and their total. Every trial row carries `data_source`, `post_delisting_return` and `hidden_init` | Implemented and audited (brief 06 C; A.6) | audit E-1, E-2; `evaluation.py`, `registry.py` |
+| Evaluation | Walk-forward with the purge read from the target's horizon (quick mode purged too); rank IC with Hansen-Hodrick t-stats for overlapping targets; NLL reported three ways (`NLL_single`, `NLL_base`, `NLL_full`); a horizon-consistent long-short book, `portfolio_scheme` "nonoverlapping" or "staggered" (default **not decided**). Every trial row carries `data_source`, `post_delisting_return`, `hidden_init` and `portfolio_scheme` | Implemented and audited (briefs 06 C, 07 A) | audit E-1, E-2, E-3, O-1, O-3; `evaluation.py`, `registry.py` |
+| Runs and resume | Every run in `results/<campaign>/<run_id>/` with settings, status, registry, metrics, figures, log and `SUMMARY.md`, one row in `results/INDEX.csv`; per-stock outputs only in `Data/derived/runs/`. Ctrl+C checkpoints and stops; resume is exact and refuses changed settings or data unless forced | Implemented (brief 07 B, C); how-to in `nec_baseline/RUNBOOK.md` | `runstore.py`, `scripts/runs.py` |
 | Gate through the purge gap | Whether the filter sees the gap's market returns | **Open** | Q22 |
 | Sample weighting | Time decay; crash-preserving weights | **Parked**, not in code | Q16 (d), (e) |
 
 ---
 
 ## 2. Log (newest first)
+
+### 2026-10-01 (brief 07 implemented)
+- **Commits** (not pushed): A, the open audit bugs (ccf8378); B, the run store (1b29f84); C, resume
+  (8715328); D, documentation (RUNBOOK, HANDBOOK, this tracker, audit section 12, the brief).
+  351 tests pass, 1 skipped, **0 xfailed**: the last three pinned audit bugs (B-1, G-2, G-3) are fixed.
+- **Fixed.** O-1 (quick mode purged), O-3 (purge = the target's horizon; a contradicting `horizon`
+  raises), E-3 (horizon-consistent long-short book), B-1 (the base no longer disturbs the random
+  stream), G-2 (autoregressive Hamilton gate), M-5 (HMM baseline keyed by stock), S-3 (the current
+  design end to end through the control panel), G-3 (resume under a fitted gate).
+- **Built.** The run store and `scripts/runs.py`; exact resume after Ctrl+C, a crash between folds,
+  mid-sweep, or a torn checkpoint, with refusal on changed settings or data. `RUNBOOK.md` explains
+  starting, watching, stopping and resuming runs (including `caffeinate -i`).
+- **Not decided** (scope fence): `portfolio_scheme` default ("nonoverlapping"), Q16, Q18, Q20, Q21,
+  Q22, Q23, X-1, B-2, the post-delisting fill. For G-2 the test-block filter keeps the harness's span
+  (purge gap skipped), so Q22 stays open.
+- **Found.** A resume was close but not exact until the reloaded base was built outside the restored
+  random stream; the exact-equality test caught it. Some synthetic test runs had written prediction
+  files into `Data/derived/runs/` through a test-isolation gap; fixed and removed (no real data).
 
 ### 2026-09-26 (brief 06 implemented)
 - **Question added.** Q23, which market series the Hamilton gate is fitted on (French Mkt-RF or a
@@ -119,7 +138,8 @@ detail stays in the source documents; this file points to them.
 
 - **Advisor questions open:** Q1, Q2, Q4, Q5, Q6 (design half), Q8, Q9, Q10, Q12 to Q18, Q20, Q21, Q22, Q23.
 - **Audit findings still open:** B-2 (the base withholds its validation tail with early stopping
-  off; interacts with Q16), and the majors B-1, E-3, O-1, O-3, S-2, S-3, M-5, G-2, G-3.
+  off; interacts with Q16); the majors S-2 (the superseded 2026-09-25 smoke report's NLL columns)
+  and X-1 (the `hidden_init` choice); and the minors and notes listed in audit section 12.
 - **Next in `WORK_QUEUE.md`:** documentation drift and `DECISIONS.md`, diagnostics (ICC, gate
   permutation test), the remaining gates, pre-registration.
 

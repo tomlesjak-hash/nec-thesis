@@ -1,6 +1,6 @@
 # Work queue
 
-Last updated 2026-09-26 (brief 06: CRSP replaces the free data; items 3 and 7 done). Everything still to be coded, in priority order. Each item names the brief
+Last updated 2026-10-01 (brief 07: open audit bugs fixed, run store, resume). Everything still to be coded, in priority order. Each item names the brief
 that specifies it. Start a session by reading this file, then the brief for the item being worked.
 
 **Standing rules for every item.** Every numeric quantity is a config field with a documented
@@ -46,6 +46,16 @@ out-of-sample data until the pre-registration is written and Q20 is answered.
   (log-likelihood spread 0.000, so "best of N" selects from a population of one) while 0.5 reaches
   distinct optima (spread ~600 nats) at the cost of most starts failing. `gate_llf_spread` is
   logged per fit so this is visible rather than assumed; the value is not chosen.
+- **Brief 07, open bugs, a run store and resume** (2026-10-01; commits ccf8378, 1b29f84,
+  8715328 and the documentation commit). A: the open audit bugs O-1 (quick mode purged), O-3
+  (purge = the target's horizon), E-3 (horizon-consistent long-short book,
+  `portfolio_scheme`, default not decided), B-1 (base RNG isolated), G-2 (autoregressive
+  Hamilton gate), M-5 (HMM baseline keyed by entity, so it runs on the point-in-time panel)
+  and S-3 (the current design end to end through the control panel). B: every run lands in
+  `results/<campaign>/<run_id>/` with an index row; per-security outputs in
+  `Data/derived/runs/`; `scripts/runs.py`. C: resume is exact and refuses changed settings
+  or data (G-3 fixed; gate and base persisted per fold; Ctrl+C checkpoints; rotating
+  checkpoints; crash detection). How to use it: `nec_baseline/RUNBOOK.md`.
 
 ---
 

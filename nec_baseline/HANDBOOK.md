@@ -444,6 +444,12 @@ The predict step, per entity `b`:
 log π_t[b,k] = logsumexp_j ( log r_{t−1}[b,j] + log A[j,k] )
 ```
 
+The state `r` is carried **by entity**, not by row position (audit M-5): the trainer
+keeps each date's posteriors with their entity codes (`FilterState`), looks every row's
+previous posterior up by its entity, starts a new entrant from `π₀` and drops an exit.
+So a point-in-time panel whose membership changes runs, and the row order within a
+date does not matter. (A date-level regime would be a different model; not decided.)
+
 **A worked numeric pass** (K=2, `A = [[0.9, 0.1], [0.1, 0.9]]`, start `π₀ = [0.5, 0.5]`,
 expert densities at t=1: `N₁ = 0.05` (calm expert, poor fit), `N₂ = 0.30` (stress
 expert, good fit)):
@@ -681,6 +687,22 @@ fully reversed ranks ⇒ every weight flips by 1 ⇒ Σ|Δw| = 4 ⇒ turnover 2.
 `portfolio_summary`: `net_t = gross_t − cost_rate·(2·turnover_t)` (cost per unit
 *traded notional*), per-period IRs, **no annualization** — synthetic date codes carry no
 calendar, and pretending otherwise manufactures Sharpe ratios.
+
+That daily book is right only for a one-period target. With an `h`-day target its gross
+is an `h`-day return while turnover is charged daily, and the overlapping holdings
+autocorrelate the series (audit E-3). The harness therefore uses
+`long_short_book(..., horizon=h, scheme=...)`, `portfolio_scheme` in the harness, sweep
+and settings block (the default `"nonoverlapping"` is **not a decision**; every registry
+row records it):
+
+- `"nonoverlapping"`: form a portfolio every `h` dates, hold it `h` dates, charge
+  turnover once per rebalance; each period is `h` dates (`PortfolioSummary.period_dates`).
+- `"staggered"` (Jegadeesh-Titman 1993): a cohort formed every date, `h` cohorts live at
+  weight `1/h`, each date's return the cohorts' **daily** returns, turnover charged
+  daily on the combined book. It reads `Panel.y_daily`, each row's `h` daily forward
+  returns built under the target's timing rule (they sum to the target).
+
+With `h = 1` both equal the daily book exactly.
 
 ### The two harnesses, one grader
 
@@ -973,23 +995,88 @@ python3.14 run_experiment.py
 diagnostic picture (dashboard, utilization, IC/L-S curves, calibration, optional VIX
 alignment) — the iterate-fast loop. `mode="evaluate"` runs the honest protocol
 (multi-seed purged walk-forward, baseline rows, BH-corrected claims) — the
-show-to-someone loop. Outputs land in `results/<tag>/` with a `settings.json`
-provenance snapshot and the registry. It is a thin driver over everything below — the
-rest of Part II documents the pieces it drives, for when you outgrow the panel.
+show-to-someone loop. Every run lands in the run store, `results/<campaign>/<run_id>/`
+(II.0a). It is a thin driver over everything below — the rest of Part II documents the
+pieces it drives, for when you outgrow the panel.
 
-**Long runs are interruptible.** Set `checkpoint_every=<N steps>` in the settings
-block, kill the process whenever, and continue with
+**Long runs are interruptible.** Ctrl+C once checkpoints and stops; continue with
 
 ```bash
-python3.14 run_experiment.py --resume                        # the block's tag
-python3.14 run_experiment.py --resume results/my_experiment  # a specific run
+python3.14 run_experiment.py --resume            # latest interrupted/crashed run of the tag
+python3.14 run_experiment.py --resume <run_id>   # a specific run
 ```
 
 Completed work is skipped (sweep runs via the registry, folds via persisted fold
 files), an interrupted fit continues from its last checkpoint on the *exact* same
-trajectory, and checkpoint writes are atomic. Keep the settings and data unchanged
-between launch and resume — a drifted `settings.json` prints a loud warning. Details
-and the underlying `Trainer.save/load` API: II.6.
+trajectory, and every write is atomic. A resume on changed settings or data is
+refused (`--force` overrides and records it). **RUNBOOK.md** is the day-to-day guide;
+II.0a below is the reference, and II.6 the underlying `Trainer.save/load` API.
+
+## II.0a The run store and resume (brief 07)
+
+**Layout.** `nec_moe/runstore.py` gives every run, from any entry point
+(`run_experiment.main`, `run_sweep(run=...)`, `walk_forward_evaluate(run=...)`, the
+smoke script), one folder and one index row:
+
+```
+results/
+  INDEX.csv                 one row per run: appended at launch, updated at exit
+  <campaign>/<run_id>/      run_id = YYYYMMDD-HHMMSS_<tag>_<8-char settings hash>
+    run.json                identity: campaign, tag, purpose, mode, created, git commit +
+                            dirty flag, data source, data fingerprint, versions, device,
+                            touches_test, forced resumes
+    settings.json           the full Experiment snapshot
+    status.json             state, current arm/seed/fold/step, heartbeat, exit reason
+    trials.jsonl            the trial registry
+    metrics/                aggregate results: quick.json | report.csv,
+                            <arm>_seed<s>_folds.csv, <arm>_seed<s>_pooled.json
+    figures/
+    logs/run.log            everything printed, timestamped      (gitignored)
+    checkpoints/            resume state                         (gitignored)
+    SUMMARY.md              at exit: settings diff against defaults, status, metrics
+Data/derived/runs/<run_id>/ per-security outputs (fold predictions; licensed, gitignored)
+```
+
+`results/` holds aggregate outputs only; anything per security goes to the
+`Data/derived/runs/` folder (licence rules, brief 06). `purpose` is a free-text label.
+`touches_test` is true for a run that scored a test block on a real panel (Q15's
+accounting); it is recorded, never enforced. The settings hash ignores `resume`,
+`resume_run_id` and `force`; the data fingerprint hashes the panel's shape, date
+range, entity set, target checksum, data source and CRSP release.
+`scripts/runs.py` lists, shows, diffs, finds and resumes runs; nothing deletes.
+
+**Resume** composes four levels, all under `checkpoints/`:
+
+| level | file | restored on resume |
+|---|---|---|
+| sweep | the registry row of each finished (arm, seed) | the run is skipped, its metrics reused |
+| fold | `<arm>_seed<s>/fold_<i>.pt` | the fold is skipped, its scored payload reused |
+| fit | `fold_<i>_trainer.pt` (+ `.1`, ...) | model, optimizer, sampler, RNG: the fit continues exactly |
+| fold inputs | `fold_<i>_gate.pt`, `fold_<i>_base.pt` | the fitted gate table (G-3) and the frozen base, not refitted |
+
+Quick mode keeps `trainer.pt` and `gate.pt` at the top of `checkpoints/`.
+
+- **Clean interruption** (`nec_moe/interrupt.py`): the first SIGINT/SIGTERM requests a
+  stop; the trainer finishes the current optimizer step, checkpoints, raises
+  `RunInterrupted`, and the run is recorded `interrupted`. A second signal exits at
+  once.
+- **Safe writes**: checkpoints, registry rows, metrics, figures and reports go through a
+  temporary file and a rename. `TrainConfig.checkpoint_keep` (default 2) checkpoints
+  are kept per fit; `Trainer.load_latest` loads the newest that loads cleanly and says
+  when it fell back.
+- **Crash detection**: `status.json` carries a heartbeat every
+  `TrainConfig.heartbeat_every` steps (default 50); `runs.py list` shows a `running` run
+  whose heartbeat is older than `stale_after` seconds (default 1800) as `crashed`, which
+  resumes like `interrupted`.
+- **Refusal**: resume compares the stored settings hash and data fingerprint with the
+  current ones and refuses on any difference, listing it (`ResumeRefused`); `--force`
+  overrides with a loud warning and appends the change to `run.json`'s
+  `forced_resumes`.
+
+The property that matters, pinned by `tests/test_resume.py` with expert dropout on: an
+interrupted and resumed run equals an uninterrupted one **exactly**, interrupted mid-fit
+inside a fold, between folds, in the middle of a sweep, or with its newest checkpoint
+torn by a crash during the write.
 
 Under the hood, every experiment is the same seven moves:
 
@@ -1304,8 +1391,9 @@ trainer.fit(train, steps=100_000 - trainer.step_count)             # same trajec
 ```
 
 - `TrainConfig(checkpoint_every=N)` sets the save cadence when a `checkpoint_path` is
-  given (plus always one final save at the end of the call); writes are atomic
-  (tmp + rename), so a crash mid-write cannot corrupt the last good checkpoint.
+  given (plus always one final save at the end of the call, and one on a requested
+  stop); writes are atomic (tmp + rename), so a crash mid-write cannot corrupt the
+  last good checkpoint.
 - `steps` means *additional steps for this call* — `fit(60)` then `fit(40)` equals one
   `fit(100)`; compute the remainder from `trainer.step_count` as above.
 - `fit_sequence` resumes mid-pass too, and validates that the resumed call uses the
@@ -1314,10 +1402,13 @@ trainer.fit(train, steps=100_000 - trainer.step_count)             # same trajec
 The layers above compose with this: `walk_forward_evaluate(..., resume_dir=...)`
 persists each completed fold (scored payload + trained model state) as `fold_<i>.pt`
 and skips it on restart, while a fold interrupted mid-fit resumes from its
-`fold_<i>_trainer.pt`; `run_sweep(..., resume_dir=...)` additionally skips every
-(arm, seed) pair that already has a registry row, reusing its logged metrics. From
-the control panel: set `checkpoint_every`, and relaunch with
-`python3.14 run_experiment.py --resume` (II.0).
+`fold_<i>_trainer.pt` (rotated copies `.1`, ... per `checkpoint_keep`) with its gate
+and base restored from `fold_<i>_gate.pt` and `fold_<i>_base.pt`;
+`run_sweep(..., resume_dir=...)` additionally skips every (arm, seed) pair that
+already has a registry row, reusing its logged metrics. `Trainer.save_checkpoint`
+rotates and `Trainer.load_latest` falls back past a torn file. From the control panel,
+checkpoints are always on and Ctrl+C stops cleanly; relaunch with
+`python3.14 run_experiment.py --resume` (II.0a, RUNBOOK.md).
 
 For **inference-only** artifacts (shipping a fitted model, no optimizer), the plain
 recipe still works and is smaller:
@@ -1355,6 +1446,7 @@ result = walk_forward_evaluate(
     min_train_dates=1,        # guard for degenerate requests
     backtest_quantiles=5,     # None disables the long-short backtest
     cost_rate=0.001,          # cost per unit traded notional (10 bps)
+    portfolio_scheme="nonoverlapping",  # | "staggered": the h-day book (I.13, audit E-3)
     resume_dir="runs/wf_soft",  # None = off; fold-level resume (II.6)
 )
 ```
@@ -1691,9 +1783,10 @@ fig.savefig("figs/ic_series.png", dpi=150)
 **5. Net long-short equity curve**:
 
 ```python
-from nec_moe import long_short_by_date
-_, gross, tno = long_short_by_date(pred, test.y, test.date, test.entity, n_quantiles=5)
-net = gross - 0.001 * 2.0 * tno
+from nec_moe import long_short_book
+_, gross, tno = long_short_book(pred, test.y, test.date, test.entity, n_quantiles=5,
+                                horizon=test.horizon, scheme="nonoverlapping")
+net = gross - 0.001 * 2.0 * tno   # per period: h dates under "nonoverlapping"
 fig, ax = plt.subplots(figsize=(11, 2.8), tight_layout=True)
 ax.plot(net.cumsum(0).numpy()); ax.set_ylabel("cum. net L/S return (per-period)")
 fig.savefig("figs/ls_curve.png", dpi=150)

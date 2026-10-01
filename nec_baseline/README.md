@@ -18,14 +18,16 @@ python3.14 run_experiment.py
 ```
 
 `mode="quick"` = one model + full diagnostics (figures, calibration); `mode="evaluate"`
-= multi-seed purged walk-forward with baselines and corrected claims. Outputs +
-provenance land in `results/<tag>/`. Everything below is the machinery it drives.
+= multi-seed purged walk-forward with baselines and corrected claims. Every run lands in
+the run store, `results/<campaign>/<run_id>/` (settings, status, registry, metrics,
+figures, log, `SUMMARY.md`; one row in `results/INDEX.csv`), with per-security outputs in
+`Data/derived/runs/<run_id>/`. Everything below is the machinery it drives.
 
-Long runs are interruptible: set `checkpoint_every=<N>` in the settings block, kill the
-process whenever, continue with `python3.14 run_experiment.py --resume` — completed
-sweep runs and folds are skipped, an interrupted fit resumes from its last (atomically
-written) checkpoint on the bit-exact same trajectory (`Trainer.save/load`; handbook
-II.6).
+Long runs are interruptible: Ctrl+C once checkpoints and stops, and
+`python3.14 run_experiment.py --resume` continues on the bit-exact same trajectory —
+completed sweep runs and folds are skipped, a resume on changed settings or data is
+refused unless `--force`. `scripts/runs.py` lists, shows, diffs and resumes runs.
+**[RUNBOOK.md](RUNBOOK.md)** is the how-to; handbook II.0a the reference.
 
 ## Quickstart (smoke: train on synthetic regime data)
 

@@ -283,6 +283,9 @@ def resolve_hac_lags(panel: Panel, hac_lags: int | None) -> int:
 
 
 def ic_summary(ics: Tensor, hac_lags: int = 0, hac_kernel: str = "uniform") -> IcSummary:
+    # float64 like long_run_variance: a float32 sum depends on the CPU's
+    # summation order, so Intel and Apple disagreed in the 8th digit.
+    ics = ics.detach().double()
     t = int(ics.numel())
     if t < 2:
         raise ValueError(f"need >= 2 daily ICs to summarize, got {t}")

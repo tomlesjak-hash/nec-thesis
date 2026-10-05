@@ -36,6 +36,7 @@ __all__ = [
     "BaseConfig",
     "TrainConfig",
     "NECConfig",
+    "GATE_WEIGHTS",
     "pyramid_dims",
     "target_horizon",
 ]
@@ -67,6 +68,9 @@ def pyramid_dims(first_width: int, depth: int) -> tuple[int, ...]:
 
 
 _HORIZON_IN_TARGET = re.compile(r"_(\d+)d$")
+
+#: The gate weights a fitted gate with a transition matrix can serve (Q27).
+GATE_WEIGHTS: tuple[str, ...] = ("filtered", "predicted", "window")
 
 
 def target_horizon(target: str) -> int | None:
@@ -252,6 +256,15 @@ class MarkovGateConfig:
       a logged trial, because best-of-N is a selection event.
     - ``order_by``: the declared canonical ordering of the fitted regimes
       (§4) — a rule, not an assumption.
+    - ``gate_weight`` (decision Q27, 2026-10-05; default ``"window"``): which
+      row of regime probabilities the gate serves at date t, built from the
+      filtered probability ``xi_t`` and the canonically ordered transition
+      matrix ``A``: ``"filtered"`` is ``xi_t``; ``"predicted"`` is
+      ``xi_t A``; ``"window"`` is ``(1/h) sum_{j=1..h} xi_t A^j``, the
+      expected share of the target window ``(t, t+h]`` spent in each regime.
+      ``h`` is the panel target's horizon (``DataConfig.horizon_periods``),
+      never a field here, so it cannot disagree with the target. The same
+      rule applies on training and on test dates.
     """
 
     series: str = "market_excess_return"  # registry key
@@ -312,6 +325,8 @@ class MarkovGateConfig:
     distinct_optima_tol: float = 1.0
     prob_floor: float = 1e-12  # clamp before log: keeps rows normalizable
     order_by: str = "variance"  # "variance" | "mean" — ascending (§4)
+    # Q27: "filtered" | "predicted" | "window" (decided); see the docstring
+    gate_weight: Literal["filtered", "predicted", "window"] = "window"
     registry_tag: str = "markov_gate_starts"  # TrialRegistry tag for §5
 
 
@@ -410,6 +425,10 @@ class TrainConfig:
     # Steps between heartbeats: the trainer calls Trainer.on_heartbeat (the run
     # store stamps status.json with it, brief 07 C.5).
     heartbeat_every: int = 50
+    # Interior quantile edges of each expert's gate probability for the Q24
+    # expert-weight diagnostic (nec_moe.diagnostics.expert_weight_diagnostics):
+    # the mean responsibility is reported within each bin. Quintiles by default.
+    expert_weight_quantiles: tuple[float, ...] = (0.2, 0.4, 0.6, 0.8)
 
 
 @dataclass(frozen=True)
@@ -572,6 +591,14 @@ class NECConfig:
             raise bad(f"checkpoint_keep must be >= 1, got {t.checkpoint_keep}")
         if t.heartbeat_every < 1:
             raise bad(f"heartbeat_every must be >= 1, got {t.heartbeat_every}")
+        q = t.expert_weight_quantiles
+        if not q or any(not 0.0 < v < 1.0 for v in q) or any(
+            b <= a for a, b in zip(q, q[1:], strict=False)
+        ):
+            raise bad(
+                "expert_weight_quantiles must be strictly increasing values in "
+                f"(0, 1), got {q}"
+            )
         if t.correction_penalty_weight < 0:
             raise bad(
                 f"correction_penalty_weight must be >= 0, got "
@@ -675,6 +702,11 @@ class NECConfig:
             raise bad(
                 f"distinct_optima_tol must be > 0, got {mg.distinct_optima_tol}"
             )
+        if mg.gate_weight not in GATE_WEIGHTS:
+            raise bad(
+                f"unknown markov_gate.gate_weight {mg.gate_weight!r}; use one of "
+                f"{GATE_WEIGHTS}"
+            )
         from .markov_gate import (
             ORDERING_REGISTRY,
             SERIES_REGISTRY,
@@ -753,5 +785,5 @@ class NECConfig:
                 )
             ),
             base=BaseConfig(**_tupled(d.get("base", {}), ("hidden_dims",))),
-            train=TrainConfig(**d.get("train", {})),
+            train=TrainConfig(**_tupled(d.get("train", {}), ("expert_weight_quantiles",))),
         )

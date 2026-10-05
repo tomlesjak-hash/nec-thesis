@@ -222,7 +222,7 @@ def test_registry_records_target_kind(tmp_path: Path):
     with pytest.raises(ValueError, match="target_kind"):
         reg.log("t", {"x": 1.0}, config={
             "data_source": "s", "post_delisting_return": None, "hidden_init": None,
-            "portfolio_scheme": None,
+            "portfolio_scheme": None, "gate_weight": None,
         })
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeadParameterWarning)

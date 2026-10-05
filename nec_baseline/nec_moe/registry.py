@@ -34,7 +34,8 @@ from pathlib import Path
 from typing import Any
 
 __all__ = [
-    "PROVENANCE_KEYS", "TrialRecord", "TrialRegistry", "panel_target_kind", "trial_provenance",
+    "PROVENANCE_KEYS", "TrialRecord", "TrialRegistry", "gate_weight_of", "panel_target_kind",
+    "trial_provenance",
 ]
 
 _SELECTION_SUFFIX = "#selection"
@@ -42,7 +43,7 @@ _SELECTION_SUFFIX = "#selection"
 #: Config keys every logged trial must carry (see the module docstring).
 PROVENANCE_KEYS: tuple[str, ...] = (
     "data_source", "post_delisting_return", "hidden_init", "portfolio_scheme",
-    "target_kind",
+    "target_kind", "gate_weight",
 )
 
 #: Target-name prefixes of the Stage B target kinds (``StageBSpec.target``),
@@ -68,6 +69,15 @@ def panel_target_kind(panel: Any) -> str | None:
     return None
 
 
+def gate_weight_of(cfg: Any) -> str | None:
+    """The fitted gate's ``gate_weight`` (Q27) for a model config, or ``None``
+    when the model has no Hamilton gate (other priors, baselines)."""
+    prior = getattr(cfg, "prior", None)
+    if getattr(prior, "kind", None) != "markov":
+        return None
+    return str(cfg.markov_gate.gate_weight)
+
+
 def trial_provenance(
     panel: Any, cfg: Any = None, portfolio_scheme: str | None = None
 ) -> dict[str, Any]:
@@ -77,8 +87,9 @@ def trial_provenance(
     fill (``None`` on panels without one, such as synthetic panels); the
     experts' ``hidden_init`` from ``cfg`` (``None`` without a config, e.g. for
     a baseline model, which has no experts); the long-short book's
-    ``portfolio_scheme`` the run was configured with (audit E-3); and the
-    panel's ``target_kind`` (:func:`panel_target_kind`, brief 08 A).
+    ``portfolio_scheme`` the run was configured with (audit E-3); the
+    panel's ``target_kind`` (:func:`panel_target_kind`, brief 08 A); and the
+    gate's ``gate_weight`` from ``cfg`` (:func:`gate_weight_of`, brief 08 B).
     """
     metadata = getattr(panel, "metadata", None) or {}
     experts = getattr(cfg, "experts", None)
@@ -88,6 +99,7 @@ def trial_provenance(
         "hidden_init": getattr(experts, "hidden_init", None),
         "portfolio_scheme": portfolio_scheme,
         "target_kind": panel_target_kind(panel),
+        "gate_weight": gate_weight_of(cfg),
     }
 
 

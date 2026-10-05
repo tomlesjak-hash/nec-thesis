@@ -53,7 +53,7 @@ from .evaluation import (
 )
 from .model import NECModel
 from .multiple_testing import benjamini_hochberg, ic_pvalue
-from .registry import TrialRegistry, trial_provenance
+from .registry import TrialRegistry, gate_weight_of, trial_provenance
 from .runstore import Run
 from .train import Trainer
 
@@ -127,6 +127,8 @@ def nec_arm(
             "correction_penalty_weight": cfg.train.correction_penalty_weight,
             # how the experts started (brief 06 D): not decided, so on record
             "hidden_init": cfg.experts.hidden_init,
+            # the Hamilton gate's weight (Q27); None for every other prior
+            "gate_weight": gate_weight_of(cfg),
             "nec_config": cfg.to_dict(),
         },
     )
@@ -255,6 +257,14 @@ def _metrics_from_result(res: WalkForwardResult) -> dict[str, float]:
         for key, value in fold.correction:
             per_corr.setdefault(key, []).append(value)
     for key, values in per_corr.items():
+        m[key] = statistics.fmean(values)
+    # Q24 expert-weight diagnostic, averaged over the folds that report each
+    # key (canonical expert order, like the persistence keys below)
+    per_ew: dict[str, list[float]] = {}
+    for fold in res.folds:
+        for key, value in fold.expert_weights:
+            per_ew.setdefault(key, []).append(value)
+    for key, values in per_ew.items():
         m[key] = statistics.fmean(values)
     # Chain persistence, averaged over folds in canonical state order (each
     # fold is an independent refit, so this is a mean of per-window estimates).

@@ -19,6 +19,13 @@ degenerate regime process and must be visible immediately rather than inferred
 from returns. :func:`persistence_metrics` packs both into flat, registry-safe
 keys so the trainer's history and the trial registry use one spelling.
 
+Expert training weights against the gate (Q24): :func:`expert_weight_diagnostics`
+compares, on the training rows, each expert's responsibility (its weight in the
+per-row objective) with the gate's probability and with the size of the
+residual. Under the per-row (composite) likelihood one stock's evidence is
+small, so responsibilities should stay near the gate's weight; an expert whose
+weight tracks the residual instead is absorbing outlying stock-days.
+
 Regime identity across fits (Decision D): :func:`canonical_expert_order` is the
 declared scalar sort (ascending ``sigma_k``) applied after each fit before any
 cross-fit aggregation. :func:`wasserstein_template_tracking` is the documented
@@ -45,6 +52,7 @@ __all__ = [
     "expected_durations",
     "stationary_distribution",
     "persistence_metrics",
+    "expert_weight_diagnostics",
     "wasserstein_template_tracking",
 ]
 
@@ -245,6 +253,80 @@ def persistence_metrics(
         d = float(durations[k])
         if math.isfinite(d):
             out[f"expected_duration_{k}"] = d
+    return out
+
+
+def _pearson(a: Tensor, b: Tensor) -> float | None:
+    """Pearson correlation in float64, or ``None`` when either side is constant."""
+    x, y = a.double() - a.double().mean(), b.double() - b.double().mean()
+    den = float(x.norm() * y.norm())
+    if den == 0.0 or not math.isfinite(den):
+        return None
+    return float((x * y).sum()) / den
+
+
+def expert_weight_diagnostics(
+    responsibilities: Tensor,
+    gate_prob: Tensor,
+    abs_residual: Tensor,
+    quantiles: tuple[float, ...] = (0.2, 0.4, 0.6, 0.8),
+    order: Tensor | None = None,
+) -> dict[str, float]:
+    """Each expert's training weight against the gate and the residual (Q24).
+
+    Aggregate only. Over the training rows, ``responsibilities`` and
+    ``gate_prob`` are ``(N, K)`` and ``abs_residual`` is ``(N,)``. For each
+    expert ``k``:
+
+    - ``ew_corr_resp_gate_k``: correlation of responsibility_k with
+      gate_prob_k (1 when the responsibilities equal the gate's weights);
+    - ``ew_corr_resp_absres_k``: correlation of responsibility_k with the
+      absolute residual;
+    - ``ew_resp_gate_bin{j}_k``: the mean responsibility_k within bin ``j``
+      of gate_prob_k, the bins cut at the ``quantiles`` of gate_prob_k
+      (``TrainConfig.expert_weight_quantiles``, quintiles by default; bin 0
+      is ``<=`` the first edge, the last ``>`` the last edge).
+
+    A correlation with a constant side (a uniform gate) is undefined and its
+    key is **omitted**, as is the mean of an empty bin: the trial registry
+    refuses non-finite metrics, and a 0 would read as a finding. ``order``
+    (Decision D's canonical permutation) relabels the experts first, so a key
+    means the same expert across refits.
+    """
+    r, g = responsibilities.detach(), gate_prob.detach()
+    res = abs_residual.detach().reshape(-1)
+    if r.ndim != 2 or g.shape != r.shape or res.shape != (r.shape[0],):
+        raise ValueError(
+            f"responsibilities and gate_prob must be (N, K) and abs_residual (N,); got "
+            f"{tuple(r.shape)}, {tuple(g.shape)}, {tuple(abs_residual.shape)}"
+        )
+    if r.shape[0] < 2:
+        raise ValueError(f"need >= 2 training rows, got {r.shape[0]}")
+    if not quantiles or any(not 0.0 < q < 1.0 for q in quantiles) or any(
+        b <= a for a, b in zip(quantiles, quantiles[1:], strict=False)
+    ):
+        raise ValueError(f"quantiles must be strictly increasing in (0, 1), got {quantiles}")
+    if order is not None:
+        idx = order.detach().to(torch.long)
+        if idx.shape != (r.shape[1],):
+            raise ValueError(f"order must have shape ({r.shape[1]},), got {tuple(idx.shape)}")
+        r, g = r[:, idx], g[:, idx]
+    qs = torch.tensor(quantiles, dtype=torch.float64)
+    out: dict[str, float] = {}
+    for k in range(r.shape[1]):
+        rk, gk = r[:, k].double(), g[:, k].double()
+        for key, value in (
+            (f"ew_corr_resp_gate_{k}", _pearson(rk, gk)),
+            (f"ew_corr_resp_absres_{k}", _pearson(rk, res)),
+        ):
+            if value is not None:
+                out[key] = value
+        edges = torch.quantile(gk, qs)
+        bins = torch.bucketize(gk, edges)  # 0..len(quantiles)
+        for j in range(len(quantiles) + 1):
+            in_bin = bins == j
+            if bool(in_bin.any()):
+                out[f"ew_resp_gate_bin{j}_{k}"] = float(rk[in_bin].mean())
     return out
 
 

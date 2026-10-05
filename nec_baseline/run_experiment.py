@@ -84,6 +84,7 @@ from nec_moe import (  # noqa: E402
     data_config_from_panel,
     data_fingerprint,
     expert_stage_seed,
+    expert_weight_report,
     fit_temperature,
     gate_regime_alignment,
     gate_reliability,
@@ -185,6 +186,8 @@ class Experiment:
     warmstart: bool = True          # expert warm-start (keep on; handbook I.11)
     warmstart_channel: int | None = None  # seq channel of the vol proxy; None = auto
     chunk_len: int = 50             # HMM truncated-BPTT chunk (dates per step)
+    # Q24 diagnostic: bins of each expert's gate probability (interior edges)
+    expert_weight_quantiles: tuple[float, ...] = (0.2, 0.4, 0.6, 0.8)
 
     # ---------------- residual mode: frozen base + corrections (brief 02) ----
     # y_hat = f0(x) + sum_k pi_k r_k(x). All defaults off, so existing
@@ -239,6 +242,9 @@ class Experiment:
     gate_start_jitter: float = 0.5             # default_jitter only (the diagnosed scheme)
     gate_prob_floor: float = 1e-12             # clamp before log of filtered probs
     gate_order_by: str = "variance"            # canonical regime order, ascending
+    # Q27 (decided): "window" = the average over the target window of the
+    # 1..h-step-ahead regime probabilities | "predicted" | "filtered"
+    gate_weight: str = "window"
     gate_registry_tag: str = "markov_gate_starts"
 
     # ---------------- checkpointing / resume ----------------
@@ -404,6 +410,7 @@ def _nec_config(exp: Experiment, panel: Panel, sigma_init: float) -> NECConfig:
                                      distinct_optima_tol=exp.gate_distinct_optima_tol,
                                      prob_floor=exp.gate_prob_floor,
                                      order_by=exp.gate_order_by,
+                                     gate_weight=exp.gate_weight,  # type: ignore[arg-type]
                                      registry_tag=exp.gate_registry_tag),
         base=BaseConfig(enabled=exp.base_enabled,
                         hidden_dims=tuple(exp.base_hidden_dims),
@@ -426,7 +433,8 @@ def _nec_config(exp: Experiment, panel: Panel, sigma_init: float) -> NECConfig:
                           heartbeat_every=exp.heartbeat_every,
                           freeze_gate=exp.freeze_gate,
                           aux_correction_penalty=exp.aux_correction_penalty,
-                          correction_penalty_weight=exp.correction_penalty_weight),
+                          correction_penalty_weight=exp.correction_penalty_weight,
+                          expert_weight_quantiles=tuple(exp.expert_weight_quantiles)),
     )
 
 
@@ -624,6 +632,12 @@ def _quick(exp: Experiment, panel: Panel, purge: int, run: Run) -> dict:
               f"{trial.get('correction_mean_abs', float('nan')):.4f}")
     if trainer.live_param_count is not None:
         trial["live_param_count"] = float(trainer.live_param_count)
+    # Q24: each expert's training weight against the gate and the residual,
+    # on the rows the experts trained on (aggregate only)
+    from nec_moe.diagnostics import canonical_expert_order
+    trial |= expert_weight_report(
+        trainer, expert_train, order=canonical_expert_order(trainer.model.experts.log_sigma)
+    )
     transition = getattr(trainer.model.prior, "transition_matrix", None)
     if transition is not None:
         from nec_moe.diagnostics import canonical_expert_order, persistence_metrics

@@ -182,6 +182,20 @@ class PrecomputedRegimePrior(RegimePrior):
 
     ``stateful`` is False: any recursion has already been run at fit/apply
     time, so the trainer does not need to thread state.
+
+    **Gate weight (Q27): a requirement on every gate with regime dynamics.**
+    The gate serves ``MarkovGateConfig.gate_weight`` rows: the filtered
+    probability, the one-step prediction ``xi_t A``, or (the decision) the
+    window average ``(1/h) sum_{j=1..h} xi_t A^j`` over the target's
+    horizon ``h`` (:func:`nec_moe.markov_gate.gate_weight_probs`). The last two
+    need a row-stochastic transition matrix ``A`` in the gate's canonical
+    state order. The Hamilton gate has one by construction. The gates still
+    to come (the statistical jump model, the Wasserstein gate, a TVTP
+    variant) must supply one before they can serve ``"predicted"`` or
+    ``"window"``: estimated from their decoded state sequence on the
+    training block (or, for TVTP, the date's own matrices), frozen with the
+    rest of the fit, and applied by the same rule on training and test
+    dates.
     """
 
     stateful: ClassVar[bool] = False
@@ -529,6 +543,12 @@ class HMMRegimePrior(RegimePrior):
       steps: ``pi_t = r_{t-h} A^h``. The trainer supplies ``r_{t-h}`` and
       ``ctx.predict_steps = h``; for ``h = 1`` this is the one-step
       recursion above, unchanged.
+    - **Not the window-average gate weight (Q27).** This model's latent is
+      attached to each date's whole target window (one latent per ``h``-day
+      target, not a daily market regime), so its ``h``-step prediction from
+      the last fully realised posterior is already the consistent weight for
+      it, and ``MarkovGateConfig.gate_weight`` does not apply here (see Q27
+      in ``Master Thesis/Advisor_Questions.md``).
 
     ``gate_logits`` is used only for batch-size/shape inference: with a static
     transition matrix the encoder/gate path is dormant in this variant (their
@@ -613,9 +633,9 @@ PRIOR_REGISTRY: dict[str, Callable[[NECConfig], RegimePrior]] = {
 
 
 def _build_markov(cfg: NECConfig) -> RegimePrior:
-    from .markov_gate import MarkovSwitchingRegimePrior
+    from .markov_gate import build_markov_gate
 
-    return MarkovSwitchingRegimePrior(cfg.experts.n_experts, cfg.markov_gate)
+    return build_markov_gate(cfg)
 
 
 def build_prior(cfg: NECConfig) -> RegimePrior:

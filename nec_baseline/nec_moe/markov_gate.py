@@ -43,6 +43,15 @@ random start's converged log-likelihood is logged as a trial, so the
 multiplicity of "best of N" reaches the deflated Sharpe like any other
 selection in this project, and convergence failures are reported rather than
 silently absorbed.
+
+**The gate weight (Q27).** The served row at date t is built from the
+filtered probability ``xi_t`` and the frozen, canonically ordered transition
+matrix ``A`` by :func:`gate_weight_probs`: by default the average over the
+target window of the ``j``-step-ahead probabilities,
+``(1/h) sum_{j=1..h} xi_t A^j``, which makes the gate-weighted forecast the
+conditional expected ``h``-day return. ``h`` comes from the panel's target.
+Training and test dates get the same kind of weight, and every one is
+``F_t``-measurable: it uses the series through t and the frozen ``A`` only.
 """
 
 from __future__ import annotations
@@ -71,6 +80,7 @@ __all__ = [
     "MarkovFit",
     "MarkovSwitchingRegimePrior",
     "date_level_series",
+    "gate_weight_probs",
 ]
 
 # --------------------------------------------------------------------------- #
@@ -532,6 +542,53 @@ class MarkovFit:
 
 
 # --------------------------------------------------------------------------- #
+# The gate weight (Q27)
+# --------------------------------------------------------------------------- #
+
+
+def gate_weight_probs(
+    filtered: np.ndarray, transition: np.ndarray, kind: str, horizon: int | None
+) -> np.ndarray:
+    """The gate's probability rows from filtered probabilities (Q27).
+
+    ``filtered`` is ``(T, K)``, row t the filtered probability ``xi_t``;
+    ``transition`` is the ``(K, K)`` row-stochastic ``A`` in the same state
+    order. ``kind``:
+
+    - ``"filtered"``: ``xi_t`` (today's regime);
+    - ``"predicted"``: ``xi_t A`` (tomorrow's regime);
+    - ``"window"``: ``(1/h) sum_{j=1..h} xi_t A^j``, the expected share of
+      the target window ``(t, t+h]`` spent in each regime. With ``h = 1`` it
+      is ``"predicted"``; with ``A = I`` it is ``"filtered"``.
+
+    ``horizon`` is the target's ``h``; the window weight raises without it
+    rather than assume one. Rows stay on the simplex: ``A`` is row-stochastic.
+    """
+    xi = np.asarray(filtered, dtype=float)
+    a = np.asarray(transition, dtype=float)
+    if xi.ndim != 2 or a.shape != (xi.shape[1], xi.shape[1]):
+        raise ValueError(
+            f"filtered must be (T, K) and transition (K, K); got {xi.shape} and {a.shape}"
+        )
+    if kind == "filtered":
+        return xi.copy()
+    if kind == "predicted":
+        return xi @ a
+    if kind == "window":
+        if horizon is None or horizon < 1:
+            raise ValueError(
+                f"gate_weight='window' needs the target's horizon h >= 1, got {horizon}: "
+                "the gate reads it from the panel it is fitted on"
+            )
+        step, acc = xi, np.zeros_like(xi)
+        for _ in range(horizon):
+            step = step @ a
+            acc += step
+        return acc / horizon
+    raise ValueError(f"unknown gate_weight {kind!r}; use 'filtered', 'predicted' or 'window'")
+
+
+# --------------------------------------------------------------------------- #
 # The prior
 # --------------------------------------------------------------------------- #
 
@@ -543,9 +600,17 @@ class MarkovSwitchingRegimePrior(PrecomputedRegimePrior):
     :class:`~nec_moe.priors.HMMRegimePrior`, which is a jointly fitted latent
     Markov mixture estimated by gradient descent through the forward
     recursion; that one is a baseline (see its docstring).
+
+    The table holds ``cfg.gate_weight`` rows (:func:`gate_weight_probs`,
+    Q27). ``horizon`` is the target horizon the model was configured for
+    (``DataConfig.horizon_periods``, passed by :func:`build_markov_gate`);
+    :meth:`fit` reads ``h`` from the training panel's target and raises if
+    the two disagree, so there is one horizon, the target's.
     """
 
-    def __init__(self, n_experts: int, cfg: MarkovGateConfig) -> None:
+    def __init__(
+        self, n_experts: int, cfg: MarkovGateConfig, horizon: int | None = None
+    ) -> None:
         super().__init__(n_experts)
         if cfg.k_regimes != n_experts:
             raise ValueError(
@@ -561,6 +626,19 @@ class MarkovSwitchingRegimePrior(PrecomputedRegimePrior):
         self.cfg = cfg
         self.fit_result: MarkovFit | None = None
         self._model_kwargs: dict | None = None
+        #: the target horizon the gate weight is built for; set from the
+        #: training panel by fit()
+        self.horizon: int | None = horizon
+
+    def _panel_horizon(self, panel: Panel) -> int:
+        """The panel target's horizon, checked against the configured one."""
+        h = panel.horizon
+        if self.horizon is not None and self.horizon != h:
+            raise ValueError(
+                f"the gate was built for a {self.horizon}-period target, but this "
+                f"panel's target {panel.schema.target!r} has horizon {h}"
+            )
+        return h
 
     # ------------------------------------------------------------- fitting
     def _build_model(self, series: np.ndarray):
@@ -591,13 +669,15 @@ class MarkovSwitchingRegimePrior(PrecomputedRegimePrior):
         training dates have no gate row; the harness leaves them out of expert
         training and reports how many (``FoldResult.gate_excluded_dates``).
         """
+        self.horizon = self._panel_horizon(train_panel)
         dates, series = date_level_series(train_panel, self.cfg)
         model = self._build_model(series)
         result, trace = self._multi_start_fit(model, series)
         perm = self._canonical_order(result)
         self.fit_result = self._summarize(result, perm, trace)
-        # the fitted table: filtered probabilities over the training dates
-        log_prior = self._filtered_log_prior(result, perm)
+        # the fitted table: gate weights from the filtered probabilities over
+        # the training dates (Q27), the same rule apply_causal uses
+        log_prior = self._gate_log_prior(result, perm)
         self.set_fitted_table(dates[self.cfg.order :], log_prior)
 
     def _multi_start_fit(self, model, series: np.ndarray):
@@ -680,30 +760,39 @@ class MarkovSwitchingRegimePrior(PrecomputedRegimePrior):
             distinct_optima_tol=self.cfg.distinct_optima_tol,
         )
 
-    def _filtered_log_prior(self, result, perm: np.ndarray) -> Tensor:
-        """Log of the **filtered** marginal probabilities, canonically ordered.
+    def _gate_log_prior(self, result, perm: np.ndarray) -> Tensor:
+        """Log of the gate weights, canonically ordered (Q27).
 
-        `filtered_marginal_probabilities`, never the smoothed attribute: the
-        filtered quantity at date t conditions on the series through t, which
-        is what a gate applied at t is allowed to know (Kim & Nelson ch. 4).
+        Built from `filtered_marginal_probabilities`, never the smoothed
+        attribute: the filtered quantity at date t conditions on the series
+        through t, which is what a gate applied at t is allowed to know (Kim &
+        Nelson ch. 4). :func:`gate_weight_probs` then moves it forward with
+        the frozen canonical ``A`` (``fit_result.transition``) for
+        ``cfg.gate_weight``; ``prob_floor`` and renormalisation come after.
         """
+        assert self.fit_result is not None
         probs = np.asarray(result.filtered_marginal_probabilities, dtype=float)
         if probs.ndim != 2:  # pragma: no cover - shape contract of statsmodels
             raise ValueError(f"unexpected filtered probability shape {probs.shape}")
         if probs.shape[0] < probs.shape[1]:  # (K, T) in some versions
             probs = probs.T
         probs = probs[:, perm]
+        probs = gate_weight_probs(
+            probs, self.fit_result.transition, self.cfg.gate_weight, self.horizon
+        )
         probs = np.clip(probs, self.cfg.prob_floor, None)
         probs = probs / probs.sum(axis=1, keepdims=True)
         return torch.log(torch.from_numpy(probs).to(torch.float32))
 
     def _extra_state(self) -> dict:
         """The frozen fit (parameters, canonical permutation, multi-start
-        trace), so a resumed fold reuses exactly this gate (brief 07 C.1)."""
-        return {"fit_result": self.fit_result}
+        trace) and the horizon its gate weight was built for, so a resumed
+        fold reuses exactly this gate (brief 07 C.1)."""
+        return {"fit_result": self.fit_result, "horizon": self.horizon}
 
     def _load_extra_state(self, extra: dict) -> None:
         self.fit_result = extra.get("fit_result")
+        self.horizon = extra.get("horizon", self.horizon)
 
     # -------------------------------------------------- causal application
     def apply_causal(self, panel: Panel) -> None:
@@ -719,6 +808,7 @@ class MarkovSwitchingRegimePrior(PrecomputedRegimePrior):
         """
         if self.fit_result is None:
             raise ValueError("apply_causal before fit: nothing is frozen yet")
+        self._panel_horizon(panel)  # the same target horizon as the fit's
         dates, series = date_level_series(panel, self.cfg)
         model = self._build_model(series)
         frozen = self.fit_result.params
@@ -732,7 +822,7 @@ class MarkovSwitchingRegimePrior(PrecomputedRegimePrior):
             )
         perm = np.asarray(self.fit_result.permutation, dtype=int)
         self.extend_causal_table(
-            dates[self.cfg.order :], self._filtered_log_prior(applied, perm)
+            dates[self.cfg.order :], self._gate_log_prior(applied, perm)
         )
 
     # ------------------------------------------------------------ forward
@@ -788,4 +878,6 @@ def _row_stochastic_transition(result) -> np.ndarray:
 
 
 def build_markov_gate(cfg: NECConfig) -> MarkovSwitchingRegimePrior:
-    return MarkovSwitchingRegimePrior(cfg.experts.n_experts, cfg.markov_gate)
+    return MarkovSwitchingRegimePrior(
+        cfg.experts.n_experts, cfg.markov_gate, horizon=cfg.data.horizon_periods
+    )

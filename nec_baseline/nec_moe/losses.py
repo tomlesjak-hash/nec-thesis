@@ -77,6 +77,26 @@ def mixture_nll(log_prior: Tensor, log_lik: Tensor) -> MixtureNLLOutput:
 
     ``log_prior`` may contain ``-inf`` (sparse priors): those components drop
     out of the ``logsumexp`` naturally and get exactly zero responsibility.
+
+    **Per row, and why that is the per-date model's likelihood (Q24).** The
+    model has one regime per date, shared by every stock. Integrating out the
+    other stocks on the date leaves each stock's own distribution,
+    ``sum_k pi_k(t) N(y_i; mu_k(x_i), s_k^2)``, which is exactly one row's term
+    here. So each per-row term is the exact one-stock marginal of the per-date
+    model, and the mean over rows is that model's independence (composite)
+    likelihood (Lindsay 1988; Varin, Reid & Firth 2011): it drops only the
+    dependence between stocks on a date. Each term is a true log-density, so
+    the estimating equation is unbiased and the estimator consistent whether
+    or not the stocks are dependent; it stays correctly specified when
+    stocks co-move beyond the regime, where the full per-date likelihood
+    would not; and one stock's small evidence keeps the responsibilities near
+    the frozen gate's weights. The costs: efficiency (Godambe information)
+    and no Hessian standard errors, neither of which the walk-forward
+    inference uses. Decided 2026-10-05 (Q24 in
+    ``Master Thesis/Advisor_Questions.md``; Appendix D of
+    ``Master Thesis/MoE_HMM_Gate_Formulation.pdf``). The objective is
+    unchanged; :func:`nec_moe.diagnostics.expert_weight_diagnostics` checks the
+    softer specialisation it allows.
     """
     if log_prior.shape != log_lik.shape:
         raise ValueError(

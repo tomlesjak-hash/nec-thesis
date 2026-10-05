@@ -148,6 +148,7 @@ def tune(
                 "correction_penalty_weight": rec.get("correction_penalty_weight"),
                 **trial_provenance(train_panel, None, portfolio_scheme),
                 "hidden_init": rec.get("hidden_init"),
+                "gate_weight": rec.get("gate_weight"),
             },
             notes=f"tuning aggregate over {a.n_seeds} seeds",
         )

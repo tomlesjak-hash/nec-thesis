@@ -223,8 +223,9 @@ def test_applied_parameters_are_identical_to_the_training_fit():
 
 
 def test_frozen_apply_matches_a_manual_filter_run():
-    """Test 7: the filtered probabilities the gate serves for a test date are
-    exactly those of a filter run by hand with the same frozen parameters."""
+    """Test 7: the probabilities the gate serves for a test date are exactly
+    those of a filter run by hand with the same frozen parameters, moved to
+    the configured gate weight (Q27; the default window average)."""
     from statsmodels.tsa.regime_switching.markov_regression import MarkovRegression
 
     panel = _sticky_panel(n_dates=220, n_entities=6)
@@ -249,6 +250,10 @@ def test_frozen_apply_matches_a_manual_filter_run():
         ).filter(prior.fit_result.params)
     probs = np.asarray(manual.filtered_marginal_probabilities, dtype=float)
     probs = probs[:, np.asarray(prior.fit_result.permutation, dtype=int)]
+    assert cfg.markov_gate.gate_weight == "window"
+    probs = markov_gate_module.gate_weight_probs(
+        probs, prior.fit_result.transition, "window", panel.horizon
+    )
 
     test = panel.subset_dates(folds[0].test_dates)
     served = prior(
@@ -449,7 +454,14 @@ def test_canonical_reordering_relabels_turbulent_first_raw_output(monkeypatch):
             switching_variance=cfg.markov_gate.switching_variance,
         ).filter(fit.params)
     raw_probs = np.asarray(raw.filtered_marginal_probabilities, dtype=float)
-    expected = torch.from_numpy(raw_probs[:, list(fit.permutation)]).to(torch.float32)
+    # the served rows are the permuted filter moved to the gate weight with
+    # the permuted transition matrix (Q27): both must use the same order
+    expected = torch.from_numpy(
+        markov_gate_module.gate_weight_probs(
+            raw_probs[:, list(fit.permutation)], fit.transition,
+            cfg.markov_gate.gate_weight, panel.horizon,
+        )
+    ).to(torch.float32)
     assert torch.allclose(served, expected, atol=1e-5)
     # ... and column 0 really is the calm regime on the true path
     calm = torch.from_numpy(truth == 0)

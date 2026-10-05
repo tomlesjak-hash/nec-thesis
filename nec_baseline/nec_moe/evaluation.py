@@ -44,13 +44,14 @@ from torch import Tensor
 
 from .base import BaseCache, BaseFit, base_cache_key, load_base_fit, save_base_fit
 from .data import Panel
-from .registry import TrialRegistry, trial_provenance
+from .registry import TrialRegistry, gate_weight_of, trial_provenance
 from .runstore import Run
 
 if TYPE_CHECKING:  # pragma: no cover
     from .baselines import BaselineModel
 from .diagnostics import (
     canonical_expert_order,
+    expert_weight_diagnostics,
     pairwise_expert_distance,
     persistence_metrics,
 )
@@ -77,6 +78,7 @@ __all__ = [
     "walk_forward_evaluate",
     "walk_forward_evaluate_baseline",
     "base_and_correction",
+    "expert_weight_report",
     "base_single_gaussian_nll",
     "expert_stage_seed",
     "fold_metrics_frame",
@@ -618,6 +620,10 @@ class FoldResult:
     # order; empty for priors with no transition matrix. Pairs, not a dict,
     # to match the file's frozen/hashable convention — read with ``dict(...)``.
     persistence: tuple[tuple[str, float], ...] = ()
+    # Q24: each expert's training weight (responsibility) against the gate's
+    # probability and the residual size, on the training rows, in canonical
+    # expert order (nec_moe.diagnostics.expert_weight_diagnostics)
+    expert_weights: tuple[tuple[str, float], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -683,6 +689,7 @@ class _FoldAccumulator:
         gate_metrics: tuple[tuple[str, float], ...] = (),
         timing: tuple[tuple[str, float], ...] = (),
         gate_excluded_dates: int = 0,
+        expert_weights: tuple[tuple[str, float], ...] = (),
     ) -> dict[str, Any]:
         """Score a freshly-evaluated fold. Returns the picklable payload that
         fold-level resume persists and :meth:`add_completed` re-ingests."""
@@ -724,6 +731,7 @@ class _FoldAccumulator:
                 gate_metrics=gate_metrics,
                 timing=timing,
                 gate_excluded_dates=gate_excluded_dates,
+                expert_weights=expert_weights,
             ),
             "ics": ics,
             "base_ics": base_ics,
@@ -1005,6 +1013,45 @@ def _attach_base(
 
 
 @torch.no_grad()
+@torch.no_grad()
+def expert_weight_report(
+    trainer: Trainer, train: Panel, order: Tensor | None = None
+) -> dict[str, float]:
+    """The Q24 expert-weight diagnostic on a fitted model's training rows.
+
+    Runs the fitted model over ``train`` in evaluation mode (dropout off):
+    the responsibilities are the posterior weights of the training objective
+    (``log_train_weights`` where a prior has them), the gate probability is
+    the prior's predictive weight, and the residual is ``|y - y_hat|`` with
+    ``y_hat`` the gate-weighted forecast. A stateful prior is run through its
+    causal filtering pass. Aggregate numbers only
+    (:func:`~nec_moe.diagnostics.expert_weight_diagnostics`), with the
+    quantile edges from ``TrainConfig.expert_weight_quantiles``.
+    """
+    model = trainer.model
+    was_training = model.training
+    model.eval()
+    try:
+        if model.prior.stateful:
+            ev = trainer.evaluate_sequence(train.time_sequence())
+            resp = torch.cat(list(ev.log_filtered)).exp()
+            gate = torch.cat(list(ev.log_prior)).exp()
+            y_hat = torch.cat(list(ev.y_hat))
+            y = torch.cat([b.y for b in train.time_sequence()])
+        else:
+            batch = train.full_batch()
+            out, nll_out = trainer._forward_nll(batch, train_objective=True)
+            resp = nll_out.responsibilities
+            gate = out.prior.log_prior.exp()
+            y_hat, y = out.y_hat, batch.y
+    finally:
+        model.train(was_training)
+    return expert_weight_diagnostics(
+        resp, gate, (y - y_hat).abs(),
+        quantiles=tuple(trainer.cfg.train.expert_weight_quantiles), order=order,
+    )
+
+
 def base_and_correction(
     trainer: Trainer,
     test: Panel,
@@ -1141,6 +1188,7 @@ def fold_metrics_frame(result: WalkForwardResult) -> pd.DataFrame:
             row |= {"mean_net": f.portfolio.mean_net, "ir_net": f.portfolio.ir_net,
                     "mean_turnover": f.portfolio.mean_turnover,
                     "portfolio_scheme": f.portfolio.scheme}
+        row |= dict(f.expert_weights)
         row |= dict(f.timing)
         rows.append(row)
     return pd.DataFrame(rows).set_index("fold")
@@ -1310,8 +1358,13 @@ def walk_forward_evaluate(
             trainer.fit(expert_train, steps=remaining, checkpoint_path=fit_ckpt)
         t_train = time.perf_counter() - t0
 
-        pred, nll = _fold_predictions(trainer, train, test)
         canonical = canonical_expert_order(trainer.model.experts.log_sigma)
+        # Q24: at the end of training, each expert's training weight against
+        # the gate and the residual, on the rows the experts trained on
+        expert_weights = tuple(
+            expert_weight_report(trainer, expert_train, order=canonical).items()
+        )
+        pred, nll = _fold_predictions(trainer, train, test)
         order = tuple(int(i) for i in canonical)
         # Persistence of this window's chain, relabelled into canonical order
         # so the same key means the same regime across independently refitted
@@ -1330,7 +1383,8 @@ def walk_forward_evaluate(
         )
         gate_perm, gate_metrics = _gate_report(
             trainer, fold, registry, registry_tag, seed,
-            {**provenance, "hidden_init": trainer.cfg.experts.hidden_init},
+            {**provenance, "hidden_init": trainer.cfg.experts.hidden_init,
+             "gate_weight": gate_weight_of(trainer.cfg)},
         )
         payload = acc.add(
             fold, pred, train, test, nll,
@@ -1349,6 +1403,7 @@ def walk_forward_evaluate(
                 ("expert_train_s", t_train),
             ),
             gate_excluded_dates=excluded,
+            expert_weights=expert_weights,
         )
         if done_file is not None:
             payload = dict(

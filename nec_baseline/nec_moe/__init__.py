@@ -93,6 +93,7 @@ from .features import (
     DAILY_COLUMNS,
     SEQUENCE_FEATURES,
     SNAPSHOT_FEATURES,
+    TARGET_KINDS,
     StageBSpec,
     assemble_panel,
     data_config_from_panel,
@@ -157,7 +158,13 @@ from .priors import (
     UniformRegimePrior,
     build_prior,
 )
-from .registry import PROVENANCE_KEYS, TrialRecord, TrialRegistry, trial_provenance
+from .registry import (
+    PROVENANCE_KEYS,
+    TrialRecord,
+    TrialRegistry,
+    panel_target_kind,
+    trial_provenance,
+)
 from .runstore import (
     INDEX_COLUMNS,
     PER_SECURITY_DIR,
@@ -281,6 +288,7 @@ __all__ = [
     "StageBSpec",
     "SEQUENCE_FEATURES",
     "SNAPSHOT_FEATURES",
+    "TARGET_KINDS",
     "rolling_beta",
     "data_config_from_panel",
     "DAILY_COLUMNS",
@@ -312,6 +320,7 @@ __all__ = [
     "TrialRecord",
     "TrialRegistry",
     "PROVENANCE_KEYS",
+    "panel_target_kind",
     "trial_provenance",
     "RunStore",
     "Run",

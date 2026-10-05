@@ -33,14 +33,39 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-__all__ = ["PROVENANCE_KEYS", "TrialRecord", "TrialRegistry", "trial_provenance"]
+__all__ = [
+    "PROVENANCE_KEYS", "TrialRecord", "TrialRegistry", "panel_target_kind", "trial_provenance",
+]
 
 _SELECTION_SUFFIX = "#selection"
 
 #: Config keys every logged trial must carry (see the module docstring).
 PROVENANCE_KEYS: tuple[str, ...] = (
     "data_source", "post_delisting_return", "hidden_init", "portfolio_scheme",
+    "target_kind",
 )
+
+#: Target-name prefixes of the Stage B target kinds (``StageBSpec.target``),
+#: longest first so ``fwd_ret_`` cannot shadow the others.
+_TARGET_PREFIXES: tuple[tuple[str, str], ...] = (
+    ("fwd_resid_ret_", "residual"),
+    ("fwd_mn_ret_", "market_neutral"),
+    ("fwd_ret_", "raw"),
+)
+
+
+def panel_target_kind(panel: Any) -> str | None:
+    """The panel's ``target_kind`` (Q25): from its build metadata, else from
+    its target's name; ``None`` for a target that is neither (synthetic)."""
+    metadata = getattr(panel, "metadata", None) or {}
+    if metadata.get("target_kind") is not None:
+        return str(metadata["target_kind"])
+    schema = getattr(panel, "schema", None)
+    target = str(getattr(schema, "target", ""))
+    for prefix, kind in _TARGET_PREFIXES:
+        if target.startswith(prefix):
+            return kind
+    return None
 
 
 def trial_provenance(
@@ -51,8 +76,9 @@ def trial_provenance(
     ``data_source`` and, from the panel's build metadata, the post-delisting
     fill (``None`` on panels without one, such as synthetic panels); the
     experts' ``hidden_init`` from ``cfg`` (``None`` without a config, e.g. for
-    a baseline model, which has no experts); and the long-short book's
-    ``portfolio_scheme`` the run was configured with (audit E-3).
+    a baseline model, which has no experts); the long-short book's
+    ``portfolio_scheme`` the run was configured with (audit E-3); and the
+    panel's ``target_kind`` (:func:`panel_target_kind`, brief 08 A).
     """
     metadata = getattr(panel, "metadata", None) or {}
     experts = getattr(cfg, "experts", None)
@@ -61,6 +87,7 @@ def trial_provenance(
         "post_delisting_return": metadata.get("post_delisting_return"),
         "hidden_init": getattr(experts, "hidden_init", None),
         "portfolio_scheme": portfolio_scheme,
+        "target_kind": panel_target_kind(panel),
     }
 
 

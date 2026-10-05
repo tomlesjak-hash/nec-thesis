@@ -100,11 +100,27 @@ def filter_point_in_time(panel: Panel, universe: Universe) -> Panel:
     survivors are re-ranked per date among themselves. Ranks are distinct and
     re-ranking preserves their order, so the result equals ranking the raw
     features over the members alone, exactly.
+
+    **Refuses a market-neutral target demeaned over the candidates** (Q25).
+    That target's per-date mean must run over the date's members; it cannot
+    be recomputed here, because the rows a panel drops for a missing feature
+    still belong in it. Build such a panel with
+    ``assemble_panel(..., universe=universe)``.
     """
     if panel.date_labels is None or panel.entity_labels is None:
         raise ValueError(
             "filter_point_in_time needs date_labels and entity_labels "
             "(synthetic panels have no calendar to be point-in-time about)"
+        )
+    meta = panel.metadata or {}
+    if (
+        meta.get("target_kind") == "market_neutral"
+        and meta.get("target_demeaned_over") != "universe"
+    ):
+        raise ValueError(
+            "this panel's market-neutral target was demeaned over every candidate "
+            "entity, not over each date's members: build it with "
+            "assemble_panel(..., universe=universe) before filtering"
         )
     # member[d, e]: entity e was in the index on date code d
     ent_code = {label: i for i, label in enumerate(panel.entity_labels)}

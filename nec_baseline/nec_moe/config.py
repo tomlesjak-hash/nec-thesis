@@ -72,9 +72,10 @@ _HORIZON_IN_TARGET = re.compile(r"_(\d+)d$")
 def target_horizon(target: str) -> int | None:
     """The forward horizon a target's name declares, in periods, or ``None``.
 
-    The real panels name their targets ``fwd_ret_{h}d`` and
-    ``fwd_resid_ret_{h}d`` (:class:`nec_moe.features.StageBSpec`), so the
-    horizon travels with the target. A target over ``(t, t+h]`` is realised
+    The real panels name their targets ``fwd_mn_ret_{h}d`` (the default,
+    market-neutral), ``fwd_ret_{h}d`` and ``fwd_resid_ret_{h}d``
+    (:class:`nec_moe.features.StageBSpec`), so the horizon travels with the
+    target. A target over ``(t, t+h]`` is realised
     only at ``t+h``, which decides what may condition on it (audit M-1), and
     consecutive targets overlap by ``h-1`` periods, which decides how its
     daily statistics must be tested (audit E-2).

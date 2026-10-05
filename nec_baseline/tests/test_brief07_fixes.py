@@ -200,10 +200,10 @@ def _returns_panel(kind: str):
     return assemble_panel(daily, market_frame(mkt, spec), spec)
 
 
-@pytest.mark.parametrize("kind", ["raw", "residual"])
+@pytest.mark.parametrize("kind", ["raw", "residual", "market_neutral"])
 def test_daily_forward_returns_sum_to_the_target(kind: str):
     """``Panel.y_daily`` is built under the target's timing rule: its h daily
-    pieces add up to the target, for the raw and the residual target."""
+    pieces add up to the target, for every target kind."""
     panel = _returns_panel(kind)
     assert panel.y_daily is not None and panel.y_daily.shape == (len(panel), 3)
     assert torch.allclose(panel.y_daily.sum(dim=1), panel.y, atol=1e-5)

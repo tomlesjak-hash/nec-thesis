@@ -76,14 +76,14 @@ def test_D1_point_in_time_ranks_use_only_that_dates_members():
     spec = StageBSpec(seq_len=10, min_names_per_date=5)
     mkt = market_frame(pd.Series(np.random.default_rng(99).normal(0, 0.01, len(dates)),
                                  index=dates), spec)
-    panel = assemble_panel(daily, mkt, spec)
-
     # the last PERMNO joins the index late: before 2020-01-02 it is not a member
     universe = SpellUniverse(pd.DataFrame({
         "entity": permnos,
         "start": pd.to_datetime(["2010-01-04"] * 6 + ["2020-01-02"]),
         "end": pd.to_datetime(["2030-12-31"] * 7),
     }))
+    # the market-neutral target's mean runs over each date's members (Q25)
+    panel = assemble_panel(daily, mkt, spec, universe=universe)
     pit = filter_point_in_time(panel, universe)
 
     # on every date, each snapshot column must be the rank WITHIN that date's

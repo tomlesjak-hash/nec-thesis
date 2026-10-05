@@ -54,7 +54,10 @@ from nec_moe.features import (  # noqa: E402
 )
 from nec_moe.train import DeadParameterWarning  # noqa: E402
 
-STAGE_B = StageBSpec(seq_len=10, horizon=5, min_names_per_date=4)
+# the raw target: the delisting and fill rules below are rules about the raw
+# forward return; the market-neutral target built on it (Q25) is tested on
+# its own, as builds["cash_mn"]
+STAGE_B = StageBSpec(seq_len=10, horizon=5, min_names_per_date=4, target_kind="raw")
 H = STAGE_B.horizon
 
 
@@ -80,13 +83,18 @@ def extract(fixture: fx.Fixture) -> crsp.CRSPExtract:
 
 @pytest.fixture(scope="module")
 def builds(fixture: fx.Fixture, extract: crsp.CRSPExtract) -> dict[str, crsp.CRSPBuild]:
-    """The fixture panel under both post-delisting fills, raw and residual target."""
+    """The fixture panel under both post-delisting fills, raw and residual
+    target, and the market-neutral target under the cash fill."""
     out = {}
     res = dataclasses.replace(STAGE_B, target_kind="residual", beta_window=60)
+    mn = dataclasses.replace(STAGE_B, target_kind="market_neutral")
     for fill in ("cash", "market"):
         spec = _spec(fixture.root, post_delisting_return=fill)
         out[fill] = build_crsp_panel(spec, STAGE_B, extract=extract, verbose=False)
         out[f"{fill}_residual"] = build_crsp_panel(spec, res, extract=extract, verbose=False)
+    out["cash_mn"] = build_crsp_panel(
+        _spec(fixture.root, post_delisting_return="cash"), mn, extract=extract, verbose=False
+    )
     return out
 
 

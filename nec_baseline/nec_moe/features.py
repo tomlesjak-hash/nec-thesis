@@ -17,13 +17,18 @@ A row (date t, entity i) represents a prediction made **at the close of t**:
   share volumes are put on one share basis with split factors dated inside
   the window (brief 06 A.4.4 and A.4.6);
 - the target is the *forward* return — the only column allowed to touch the
-  future. Two kinds (``StageBSpec.target_kind``):
+  future. Three kinds (``StageBSpec.target_kind``):
+  ``"market_neutral"`` (the default; decision Q25): ``fwd_mn_ret_{h}d`` =
+  ``fwd_ret_{h}d`` minus the equal-weighted mean of ``fwd_ret_{h}d`` over the
+  date's universe rows with a valid target. The mean is cross-sectional, so
+  it is taken in :func:`assemble_panel`, never per stock; it transforms the
+  label only, never a feature;
   ``"raw"``: ``fwd_ret_{h}d`` = the sum of the next ``h`` daily log returns;
-  ``"residual"``: ``fwd_resid_ret_{h}d = fwd_ret − β_t · mkt_fwd_ret`` — the
-  market-neutralized target the syllabus prescribes so the model cannot score
-  by just learning market direction. ``β_t`` is a **trailing** rolling OLS
+  ``"residual"``: ``fwd_resid_ret_{h}d = fwd_ret − β_t · mkt_fwd_ret``, a
+  trailing-beta (CAPM-style) residual. ``β_t`` is a **trailing** rolling OLS
   beta (:func:`rolling_beta`, window ``beta_window``) — estimated from past
-  data only, so the residualization itself introduces no lookahead;
+  data only, so the residualization itself introduces no lookahead. It is
+  *not* the Q25 decision and is kept as an option;
 - cross-sectional rank normalization uses only date-t's own cross-section.
 
 ``test_no_lookahead`` verifies this mechanically: features at t computed from
@@ -46,7 +51,7 @@ The result is a plain :class:`~nec_moe.data.Panel` — everything downstream
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 
 import numpy as np
 import pandas as pd
@@ -58,6 +63,7 @@ from .data import FeatureSchema, Panel
 
 __all__ = [
     "DAILY_COLUMNS",
+    "TARGET_KINDS",
     "SEQUENCE_FEATURES",
     "SNAPSHOT_FEATURES",
     "StageBSpec",
@@ -116,23 +122,34 @@ SNAPSHOT_FEATURES: tuple[str, ...] = (
 )
 
 
+#: The target kinds :class:`StageBSpec` accepts; ``"market_neutral"`` is the
+#: decision (Q25), the other two are kept as options.
+TARGET_KINDS: tuple[str, ...] = ("market_neutral", "raw", "residual")
+
+
 @dataclass(frozen=True)
 class StageBSpec:
     """Knobs of the real-data panel build.
 
-    ``target_kind="residual"`` switches the target to the market-neutralized
-    forward return ``fwd − β_t·mkt_fwd`` with ``β_t`` a trailing
-    ``beta_window``-day rolling OLS beta (syllabus: "later, use residual
-    returns … this prevents the model from just learning market direction").
-    The beta warm-up consumes ``beta_window`` leading days per ticker — rows
-    without a converged beta have a NaN target and are dropped by validity.
+    ``target_kind`` (Q25, decided 2026-10-01; default ``"market_neutral"``):
+
+    - ``"market_neutral"``: ``fwd_mn_ret_{h}d``, the raw forward return minus
+      the date's equal-weighted mean of it over the universe rows with a
+      valid target (:func:`assemble_panel`). It sums to zero on every date
+      over those rows, and a return common to every stock cancels from it;
+    - ``"raw"``: ``fwd_ret_{h}d``, the sum of the next ``h`` daily log
+      returns, completed by the post-delisting fill;
+    - ``"residual"``: ``fwd − β_t·mkt_fwd`` with ``β_t`` a trailing
+      ``beta_window``-day rolling OLS beta. The beta warm-up consumes
+      ``beta_window`` leading days per ticker — rows without a converged beta
+      have a NaN target and are dropped by validity. Not the decision.
     """
 
     seq_len: int = 20
     horizon: int = 5  # forward-return target horizon in trading days
     cs_rank: bool = True  # cross-sectional rank-normalize snapshot features
     min_names_per_date: int = 5  # drop dates with too thin a cross-section
-    target_kind: Literal["raw", "residual"] = "raw"
+    target_kind: Literal["market_neutral", "raw", "residual"] = "market_neutral"
     beta_window: int = 250  # trailing window for the market beta (residual only)
 
     def validate(self) -> StageBSpec:
@@ -141,8 +158,10 @@ class StageBSpec:
                 f"invalid StageBSpec: seq_len={self.seq_len}, "
                 f"horizon={self.horizon}, min_names={self.min_names_per_date}"
             )
-        if self.target_kind not in ("raw", "residual"):
-            raise ValueError(f"unknown target_kind {self.target_kind!r}")
+        if self.target_kind not in TARGET_KINDS:
+            raise ValueError(
+                f"unknown target_kind {self.target_kind!r}; use one of {TARGET_KINDS}"
+            )
         if self.target_kind == "residual" and self.beta_window < 20:
             raise ValueError(
                 f"beta_window={self.beta_window} is too short to estimate a "
@@ -152,8 +171,27 @@ class StageBSpec:
 
     @property
     def target(self) -> str:
-        prefix = "fwd_resid_ret" if self.target_kind == "residual" else "fwd_ret"
+        """The panel's target column: ``fwd_mn_ret_{h}d``, ``fwd_ret_{h}d`` or
+        ``fwd_resid_ret_{h}d``; :func:`nec_moe.config.target_horizon` reads
+        ``h`` back from every one of them."""
+        prefix = {
+            "market_neutral": "fwd_mn_ret", "raw": "fwd_ret", "residual": "fwd_resid_ret",
+        }[self.target_kind]
         return f"{prefix}_{self.horizon}d"
+
+    @property
+    def raw_target(self) -> str:
+        """The raw forward return's column, ``fwd_ret_{h}d``."""
+        return f"fwd_ret_{self.horizon}d"
+
+    @property
+    def stock_target(self) -> str:
+        """The target column :func:`stock_features` writes for one stock.
+
+        The market-neutral target needs the whole date's cross-section, so a
+        single stock's frame carries the raw forward return it is built from;
+        the other kinds are complete per stock."""
+        return self.raw_target if self.target_kind == "market_neutral" else self.target
 
 
 # --------------------------------------------------------------------------- #
@@ -291,7 +329,10 @@ def forward_daily_returns(
     Column ``k`` is the return on the ``k+1``-th day after the row, from the
     same series as the target (the post-delisting fill included). For the
     residual target each day's market part is removed with the row's
-    trailing beta, so the columns sum to the target for both kinds. Forward
+    trailing beta, so the columns sum to the per-stock target. For the
+    market-neutral target they are the raw daily returns; :func:`assemble_panel`
+    removes each day's cross-sectional mean over the same rows as the
+    target's, so on the panel they sum to the target for every kind. Forward
     by construction, like the target; never a feature.
     """
     tr = _target_returns(daily).to_numpy(dtype=float)
@@ -350,11 +391,12 @@ def stock_features(
     f["rel_ret_20d"] = f["ret_20d"] - f["mkt_ret_20d"]
     f["rel_vol_20d"] = f["vol_20d"] / f["mkt_vol_20d"]
 
-    # the target — the ONLY forward-looking column(s)
+    # the target — the ONLY forward-looking column(s). The market-neutral
+    # target is the raw one here; assemble_panel demeans it per date
     fwd = _forward_sum(_target_returns(daily), spec.horizon)
-    if spec.target_kind == "raw":
-        f[spec.target] = fwd
-    else:  # residual: market-neutralized forward return
+    if spec.target_kind in ("raw", "market_neutral"):
+        f[spec.stock_target] = fwd
+    else:  # residual: trailing-beta residual forward return
         if "mkt_fwd_ret" not in f.columns:
             raise ValueError(
                 "residual target needs the market's forward return: call "
@@ -376,7 +418,7 @@ def _valid_rows(
     """Rows usable as samples: a tradable day with snapshot + target + a full
     trailing seq window."""
     snap_ok = f[list(SNAPSHOT_FEATURES)].notna().all(axis=1)
-    target_ok = f[spec.target].notna()
+    target_ok = f[spec.stock_target].notna()
     seq_ok_today = f[list(SEQUENCE_FEATURES)].notna().all(axis=1)
     window_ok = (
         seq_ok_today.astype(float).rolling(spec.seq_len).sum() == spec.seq_len
@@ -384,6 +426,36 @@ def _valid_rows(
     ok = snap_ok & target_ok & window_ok
     if tradable is not None:
         ok &= tradable.reindex(f.index, fill_value=False).astype(bool)
+    return ok
+
+
+class _MemberSource(Protocol):
+    """Anything that says which entities were index members on a date
+    (:class:`nec_moe.universe.Universe`; not imported, to keep the modules
+    acyclic)."""
+
+    def members_asof(self, date: str | pd.Timestamp) -> frozenset[str]: ...
+
+
+def _target_eligible(
+    f: pd.DataFrame,
+    spec: StageBSpec,
+    tradable: pd.Series | None,
+    calendar: pd.DatetimeIndex,
+    member: np.ndarray | None,
+) -> np.ndarray:
+    """On the calendar: a tradable row with a valid raw forward target, and a
+    member of the universe that day when ``member`` is given.
+
+    These are the rows the market-neutral target's per-date mean runs over
+    (Q25): taken before any row is dropped for a missing characteristic or an
+    incomplete sequence window, so one stock's target never depends on
+    whether another stock's features are complete."""
+    ok = f[spec.raw_target].reindex(calendar).notna().to_numpy().copy()
+    if tradable is not None:
+        ok &= tradable.reindex(calendar, fill_value=False).astype(bool).to_numpy()
+    if member is not None:
+        ok &= member
     return ok
 
 
@@ -395,6 +467,7 @@ def assemble_panel(
     data_source: str = "unspecified",
     metadata: dict[str, Any] | None = None,
     window: tuple[str, str] | None = None,
+    universe: _MemberSource | None = None,
 ) -> Panel:
     """Assemble the contract-shaped :class:`Panel` from per-entity daily frames.
 
@@ -403,8 +476,23 @@ def assemble_panel(
     keys of ``daily`` (PERMNOs on the CRSP panel), sorted. ``window`` keeps
     only rows dated inside ``[start, end]``; history before it still feeds
     the features, and returns after it still feed the targets.
+
+    **The market-neutral target** (``spec.target_kind="market_neutral"``,
+    Q25). On each date t,
+    ``y[i,t] = fwd_ret_h[i,t] - mean_j fwd_ret_h[j,t]``, equal-weighted over
+    the date's rows with a valid raw target on a tradable day
+    (:func:`_target_eligible`). With ``universe`` given, only that date's
+    members count (the point-in-time universe; the caller then keeps only
+    member rows, as :func:`nec_moe.crsp.build_crsp_panel` does with
+    :func:`nec_moe.universe.filter_point_in_time`); without it, every entity
+    in ``daily`` counts, so ``daily`` must then be the universe itself. The
+    daily forward returns ``y_daily`` are demeaned the same way, day by day
+    over the same rows, so they still sum to the target. The panel's
+    metadata records ``target_kind`` and, for this kind,
+    ``target_demeaned_over`` (``"universe"`` or ``"entities"``).
     """
     spec = (spec if spec is not None else StageBSpec()).validate()
+    calendar = pd.DatetimeIndex(mkt.index)
 
     frames: dict[str, pd.DataFrame] = {}
     valid: dict[str, pd.Series] = {}
@@ -412,6 +500,36 @@ def assemble_panel(
         f = stock_features(d, mkt, spec)
         frames[t] = f
         valid[t] = _valid_rows(f, spec, d["tradable"] if "tradable" in d.columns else None)
+
+    # every entity's forward daily returns, aligned to its own rows
+    fwd_daily_all = {t: forward_daily_returns(daily[t], frames[t], spec) for t in frames}
+
+    # market-neutral target: per-date equal-weighted means over eligible rows
+    mean_y = mean_daily = None
+    if spec.target_kind == "market_neutral":
+        member_sets = (
+            [universe.members_asof(d) for d in calendar] if universe is not None else None
+        )
+        sum_y = np.zeros(len(calendar))
+        sum_d = np.zeros((len(calendar), spec.horizon))
+        cnt = np.zeros(len(calendar))
+        for t, f in frames.items():
+            member = (
+                np.fromiter((t in m for m in member_sets), dtype=bool, count=len(calendar))
+                if member_sets is not None else None
+            )
+            d = daily[t]
+            ok = _target_eligible(
+                f, spec, d["tradable"] if "tradable" in d.columns else None, calendar, member
+            )
+            raw = f[spec.raw_target].reindex(calendar).to_numpy(dtype=float)
+            fd = pd.DataFrame(fwd_daily_all[t], index=f.index).reindex(calendar).to_numpy()
+            sum_y[ok] += raw[ok]
+            sum_d[ok] += fd[ok]
+            cnt[ok] += 1
+        with np.errstate(invalid="ignore", divide="ignore"):
+            mean_y = pd.Series(sum_y / cnt, index=calendar)
+            mean_daily = pd.DataFrame(sum_d / cnt[:, None], index=calendar)
 
     # dates with a thick enough valid cross-section
     counts: pd.Series = sum(
@@ -438,8 +556,13 @@ def assemble_panel(
         keep = valid[t] & f.index.isin(kept_dates)
         if not keep.any():
             continue
-        fwd_daily = forward_daily_returns(daily[t], f, spec)
-        rows_daily.append(fwd_daily[keep.to_numpy()].astype(np.float32))
+        fwd_daily = fwd_daily_all[t][keep.to_numpy()]
+        y_rows = f.loc[keep, spec.stock_target].to_numpy(dtype=float)
+        if mean_y is not None and mean_daily is not None:
+            days = f.index[keep]
+            y_rows = y_rows - mean_y.reindex(days).to_numpy()
+            fwd_daily = fwd_daily - mean_daily.reindex(days).to_numpy()
+        rows_daily.append(fwd_daily.astype(np.float32))
         # trailing windows over the entity's own rows (positions, not calendar)
         seq_mat = f[list(SEQUENCE_FEATURES)].to_numpy(dtype=np.float32)
         windows = sliding_window_view(seq_mat, spec.seq_len, axis=0)  # (P, d, T)
@@ -448,7 +571,7 @@ def assemble_panel(
         assert (win_idx >= 0).all()  # guaranteed by _valid_rows' window check
         rows_seq.append(np.swapaxes(windows[win_idx], 1, 2))  # (n, T, d_seq)
         rows_snap.append(f.loc[keep, list(SNAPSHOT_FEATURES)].to_numpy(np.float32))
-        rows_y.append(f.loc[keep, spec.target].to_numpy(np.float32))
+        rows_y.append(y_rows.astype(np.float32))
         rows_date.append(np.array([date_codes[d] for d in f.index[keep]]))
         rows_ent.append(np.full(int(keep.sum()), ent_code))
 
@@ -469,6 +592,10 @@ def assemble_panel(
         target=spec.target,
         rank_normalized=spec.cs_rank,
     )
+    meta = dict(metadata or {})
+    meta["target_kind"] = spec.target_kind
+    if spec.target_kind == "market_neutral":
+        meta["target_demeaned_over"] = "universe" if universe is not None else "entities"
     return Panel(
         x_seq=x_seq[order],
         x_snap=x_snap[order],
@@ -479,7 +606,7 @@ def assemble_panel(
         date_labels=tuple(str(d.date()) for d in kept_dates),
         entity_labels=tuple(tickers),
         data_source=data_source,
-        metadata=dict(metadata or {}),
+        metadata=meta,
         y_daily=y_daily[order],
     )
 

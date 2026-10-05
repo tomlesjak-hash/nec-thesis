@@ -33,7 +33,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from nec_moe import CRSPSpec, StageBSpec, build_crsp_panel, load_extract  # noqa: E402
 
-#: the panel's feature/target settings, unchanged from the free-data panel
+#: the panel's feature/target settings: the 5-day horizon (Q21) and the
+#: default market-neutral target (Q25, brief 08 A)
 STAGE_B = StageBSpec(seq_len=20, horizon=5)
 
 

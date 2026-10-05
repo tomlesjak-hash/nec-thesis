@@ -828,7 +828,8 @@ def build_crsp_panel(
     window's, for a sub-window build), builds every member's daily frame,
     assembles the panel over all PERMNOs that were ever members in the window,
     then keeps a row only on dates its PERMNO was a member, re-ranking the
-    snapshot features among the members (audit D-1). Raises if the extract
+    snapshot features among the members (audit D-1). The market-neutral
+    target's per-date mean runs over that date's members only (Q25). Raises if the extract
     does not reach back far enough for the features' warm-up or forward far
     enough for the horizon, or if the member count leaves the configured band.
     """
@@ -880,6 +881,7 @@ def build_crsp_panel(
     candidates = assemble_panel(
         frames, mkt, stage_b,
         data_source=spec.data_source, metadata=metadata, window=(spec.start, spec.end),
+        universe=universe,
     )
     panel = filter_point_in_time(candidates, universe)
 

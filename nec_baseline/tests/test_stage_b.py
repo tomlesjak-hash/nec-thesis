@@ -73,9 +73,14 @@ def test_feature_values_hand_checked():
     assert f.loc[d, "vol_20d"] == pytest.approx(float(r.iloc[t - 19 : t + 1].std()))
     v = daily["volume"].iloc[t - 19 : t + 1]
     assert f.loc[d, "volume_z_20d"] == pytest.approx(float((v.iloc[-1] - v.mean()) / v.std()))
-    # target: forward h-day log return, the only forward-looking column
-    assert f.loc[d, spec.target] == pytest.approx(logc.iloc[t + spec.horizon] - logc.iloc[t])
-    assert f[spec.target].iloc[-spec.horizon :].isna().all()
+    # target: forward h-day log return, the only forward-looking column; one
+    # stock's frame carries the raw return the market-neutral target is built
+    # from (the cross-sectional mean is taken in assemble_panel)
+    assert spec.stock_target == spec.raw_target == "fwd_ret_5d"
+    assert f.loc[d, spec.stock_target] == pytest.approx(
+        logc.iloc[t + spec.horizon] - logc.iloc[t]
+    )
+    assert f[spec.stock_target].iloc[-spec.horizon :].isna().all()
 
 
 def test_dollar_volume_is_raw_price_times_raw_volume():
@@ -111,7 +116,7 @@ def test_no_lookahead():
     spec = StageBSpec()
     daily, mkt_ret = _daily(13), _market()
     full = stock_features(daily, market_frame(mkt_ret), spec)
-    cols = [c for c in full.columns if c != spec.target]
+    cols = [c for c in full.columns if c != spec.stock_target]
     for t in (250, 340):
         cut = IDX[t]
         trunc = stock_features(daily.loc[:cut], market_frame(mkt_ret.loc[:cut]), spec)

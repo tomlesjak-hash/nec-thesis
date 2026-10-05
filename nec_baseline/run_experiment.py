@@ -149,7 +149,9 @@ class Experiment:
     # uses StageBSpec's 5). The purge is always the TARGET's horizon; a value
     # set here that contradicts the panel's target raises (audit O-3).
     horizon: int | None = None
-    target_kind: str = "raw"        # "raw" | "residual" (market-neutral target)
+    # the target (Q25): "market_neutral" (decided; the forward return minus the
+    # date's cross-sectional mean) | "raw" | "residual" (trailing-beta residual)
+    target_kind: str = "market_neutral"
     # synthetic data (data="synthetic"):
     synth_dates: int = 300
     synth_entities: int = 8

@@ -1,0 +1,134 @@
+\section{The likelihood (base case)}
+
+\subsection{What is maximised, and in what order}
+
+The full model's likelihood is \eqref{eq:joint} with every regime summed out. The base case does not maximise this in one go. It maximises two pieces in sequence:
+\begin{center}
+\renewcommand{\arraystretch}{1.25}
+\begin{tabularx}{\textwidth}{@{}lXllX@{}}
+\toprule
+Stage & Maximises & Parameters & Algorithm & Afterwards \\
+\midrule
+1 & $\log p(m_{1:T};\theta_g)$ & $\rho,A,\nu,\sigma$ & Baum--Welch (\S5.5) & frozen \\
+2 & log-likelihood of the returns, gate fixed & $\psi_k,s_k$ & gradient ascent (\S7.3) & --- \\
+\bottomrule
+\end{tabularx}
+\end{center}
+The Stage 1 objective is computed by the scaled forward pass:
+\begin{equation}
+\ell_{\text{gate}}(\theta_g)=\log p(m_{1:T};\theta_g)=\sum_{t=1}^T\log c_t.
+\end{equation}
+
+\subsection{The Stage 2 likelihood: summing out the regime date by date}
+
+Fix a date $t$. Tomorrow's cross-section depends on the unknown $z_{t+1}$. Apply the sum rule over $z_{t+1}$ and then A3, which makes the stocks independent given the regime:
+\begin{align}
+p\big(r_{\cdot,t+1}\mid x_{\cdot,t},\F_t\big)&=\sum_{k=1}^K\mathbb P(z_{t+1}=k\mid\F_t)\;p\big(r_{\cdot,t+1}\mid x_{\cdot,t},z_{t+1}=k\big)\nonumber\\
+&=\sum_{k=1}^K\pi_k(t)\prod_{i\in\mathcal S_t}\N\big(r_{i,t+1};\mu_k(x_{i,t}),s_k^2\big).
+\end{align}
+Taking logs and adding over dates gives the \textbf{per-date likelihood}:
+\begin{equation}\label{eq:ldate}
+\boxed{\;\ell_{\text{date}}(\psi,s)=\sum_{t=1}^{T-1}\log\sum_{k=1}^K\pi_k(t)\prod_{i\in\mathcal S_t}\N\big(r_{i,t+1};\mu_k(x_{i,t}),s_k^2\big)\;}
+\end{equation}
+
+\paragraph{Why adding over dates is allowed.} The gate is frozen and $\F_t$-measurable, i.e.\ built from the market alone. So the returns on one date never change the regime belief used on another date, and each date's term stands alone. Formally, \eqref{eq:ldate} is a \emph{cut} (composite) likelihood: the flow of information from returns back into the regime belief is deliberately removed. This is also why Stage 2 needs no forward--backward recursion.
+
+\paragraph{What the full joint fit would do instead (not used).} Treat
+\begin{equation*}
+e_{t+1}(k)=\eta_{t+1}(k)\prod_{i\in\mathcal S_t}\N(r_{i,t+1};\mu_k,s_k^2)
+\end{equation*}
+as the emission and run forward--backward over everything. In log terms, the product over roughly 500 stocks outweighs the single market term by a factor of hundreds. The cross-section would then decide what the regimes are, and their meaning as \emph{market} regimes would be lost. The base case avoids this by design.
+
+\paragraph{Numerics.} Compute
+\[
+\log\sum_k\exp\Big(\log\pi_k(t)+\sum_{i\in\mathcal S_t}\log\N_{ik}\Big)
+\]
+with a single \texttt{logsumexp}. Never multiply densities directly.
+
+\subsection{The objective used: the per-row composite likelihood (Q24, decided)}
+
+The study does \emph{not} maximise $\ell_{\text{date}}$. It maximises
+\begin{equation}\label{eq:lrow}
+\boxed{\;\ell_{\text{row}}(\psi,s)=\sum_{t=1}^{T-1}\sum_{i\in\mathcal S_t}\log\sum_{k=1}^K\pi_k(t)\,\N\big(r_{i,t+1};\mu_k(x_{i,t}),s_k^2\big)\;}
+\end{equation}
+(decided 2026-10-05, Q24). This section gives the short version; Appendix~\ref{app:perrow} gives the full theory, step by step. There are two ways to read this objective.
+
+\paragraph{Reading 1: the likelihood of a different model.} If every stock-day drew its own regime from the day's prior, \eqref{eq:lrow} would be that model's exact likelihood. In the graph of Section 6 the latent node would move inside the stock plate.
+
+\paragraph{Reading 2: a composite likelihood of \emph{our} model.} Keep the model of Section 6, with one regime per day, and ask for the distribution of a single stock's return on its own. Integrating out all other stocks (each integrates to one given $z_{t+1}$) and then $z_{t+1}$ gives
+\begin{equation}
+p\big(r_{i,t+1}\mid x_{i,t},\F_t\big)=\sum_{k=1}^K\pi_k(t)\,\N\big(r_{i,t+1};\mu_k(x_{i,t}),s_k^2\big).
+\end{equation}
+This is exactly the term inside \eqref{eq:lrow}. So $\ell_{\text{row}}$ is the sum of the \emph{correct} marginal log-likelihoods of the per-date model: it keeps every stock's own distribution and discards only the dependence between stocks on the same date. Such an objective is a \emph{composite likelihood}, in this case the \emph{independence likelihood} (Lindsay 1988; Varin, Reid \& Firth 2011).
+
+\paragraph{Why it is a valid estimator.} Each term is a true log-density, so its score has expectation zero at the true parameters. A sum of unbiased score terms is an unbiased estimating equation, and under the usual regularity conditions its maximiser is consistent. The cost is efficiency, because the joint information carried by the co-movement of stocks on a date is not used, and its curvature does not give valid standard errors. Neither matters here: inference in the study comes from walk-forward rank ICs, not from the likelihood. Composite likelihood is used in finance for exactly this kind of large cross-section, where the full likelihood is unreliable (Pakel, Shephard, Sheppard \& Engle 2021).
+
+\paragraph{Why it is preferred to $\ell_{\text{date}}$.}
+\begin{enumerate}
+  \item \textbf{Robustness to A3.} $\ell_{\text{date}}$ uses its extra information only through A3(a): given the regime, the stocks are independent. That assumption is false, because industry peers share shocks after the market is removed, and the market-neutral target leaves residual beta exposure (Q25). $\ell_{\text{date}}$ then counts correlated stocks as independent evidence about the regime. With $m$ stocks per cluster correlated at $\rho$, the cross-section carries the information of only
+  \begin{equation*}
+  N_{\text{eff}}\approx\frac{N}{1+(m-1)\rho}
+  \end{equation*}
+  independent stocks (Kish's design effect). For example, $N=500$, $m=45$ and $\rho=0.1$ give $N_{\text{eff}}\approx93$, so the per-date posterior would be overconfident by a factor of about five. $\ell_{\text{row}}$ needs only the marginals to be right, so this violation does not bias it (Liang \& Zeger 1986).
+  \item \textbf{The gate stays in charge.} Under $\ell_{\text{date}}$ the responsibility $\gamma_t(k)$ is almost always $0$ or $1$ and is set by the day's returns (see the sharpness calculation below), so the cross-section re-decides the regime every day. Under $\ell_{\text{row}}$ one stock carries little evidence, so $\gamma_{i,t}(k)$ stays close to $\pi_k(t)$, and each expert learns mainly from the days that the \emph{gate} assigns to its regime. That is the point of freezing the gate (Q19): the regimes remain \emph{market} regimes.
+  \item \textbf{Practicalities.} It is what the code already implements (\texttt{losses.mixture\_nll}, a log-sum-exp per row); mini-batches may be any rows; training is smoother.
+\end{enumerate}
+
+\paragraph{Its weakness, and the diagnostic.} The experts specialise less sharply, and the expert with the larger $s_k$ can drift into absorbing outlying stock-days instead of representing a regime. After training, check whether each expert's share of the training weight follows the gate's $\pi_k(t)$ or the size of the residuals.
+
+\subsection{How Stage 2 is maximised}
+
+\paragraph{The EM view.} The E-step gives each stock-day's posterior over the regime after seeing its own return:
+\begin{equation}
+\gamma_{i,t}(k)=\frac{\pi_k(t)\,\N\big(r_{i,t+1};\mu_k(x_{i,t}),s_k^2\big)}{\sum_j\pi_j(t)\,\N\big(r_{i,t+1};\mu_j(x_{i,t}),s_j^2\big)}.
+\end{equation}
+In the M-step each expert solves a weighted least-squares problem, with weight $\gamma_{i,t}(k)$ on row $(i,t)$, and the noise has a closed form:
+\begin{equation}
+\min_{\psi_k}\sum_t\sum_{i\in\mathcal S_t}\gamma_{i,t}(k)\big(r_{i,t+1}-\mu_k(x_{i,t};\psi_k)\big)^2,\qquad s_k^2=\frac{\sum_t\sum_i\gamma_{i,t}(k)\big(r_{i,t+1}-\mu_k(x_{i,t})\big)^2}{\sum_t\sum_i\gamma_{i,t}(k)}.
+\end{equation}
+With linear experts the first problem has a closed form (Appendix A(i)); with MLPs it does not.
+
+\paragraph{What is actually done: gradient ascent on $\ell_{\text{row}}$.} By Fisher's identity (Section 4.5) the gradients carry the same weights:
+\begin{equation}
+\frac{\partial\ell_{\text{row}}}{\partial\mu_k(x_{i,t})}=\gamma_{i,t}(k)\,\frac{r_{i,t+1}-\mu_k(x_{i,t})}{s_k^2},\qquad\frac{\partial\ell_{\text{row}}}{\partial\log s_k}=\sum_t\sum_i\gamma_{i,t}(k)\Big[\frac{(r_{i,t+1}-\mu_k)^2}{s_k^2}-1\Big].
+\end{equation}
+Each step recomputes $\gamma$ with the current parameters and moves a little on the weighted problem. Backpropagation (Section 4.6) carries the first gradient into every expert's weights. Mini-batches may contain any rows.
+
+\paragraph{Numerics.} For each row compute $\log\sum_k\exp\big(\log\pi_k(t)+\log\N_{ik}\big)$ with a single \texttt{logsumexp}.
+
+\subsection{For comparison: how sharp the per-date posterior is}
+Under $\ell_{\text{date}}$ the E-step pools the whole cross-section:
+\begin{equation}
+\log\frac{\gamma_t(k)}{\gamma_t(j)}=\log\frac{\pi_k(t)}{\pi_j(t)}+\sum_{i\in\mathcal S_t}\log\frac{\N(r_{i,t+1};\mu_k,s_k^2)}{\N(r_{i,t+1};\mu_j,s_j^2)}.
+\end{equation}
+If regime $k$ is true, each term of the sum has expectation equal to a Kullback--Leibler divergence, which is positive, so the sum grows roughly in proportion to $N_t$. For example, two experts that differ only in noise level ($1.5\%$ against $1\%$) give
+\begin{equation}
+\mathrm{KL}\big(\N(0,1.5^2)\,\|\,\N(0,1^2)\big)=\log\tfrac{1}{1.5}+\tfrac{1.5^2}{2}-\tfrac12\approx0.22\text{ nats per stock},
+\end{equation}
+so about 110 nats on a day with 500 stocks. The per-date $\gamma$ is therefore nearly always $0$ or $1$, whereas the per-row $\gamma$ stays close to the prior.
+
+\begin{center}
+\renewcommand{\arraystretch}{1.25}
+\begin{tabularx}{\textwidth}{@{}lXX@{}}
+\toprule
+ & Per date $\ell_{\text{date}}$ & Per row $\ell_{\text{row}}$ (\textbf{used}) \\
+\midrule
+Relation to Section 6 & exact likelihood & composite (independence) likelihood \\
+Needs A3(a) & yes & no, only correct marginals \\
+Responsibilities & near $0/1$, set by the day's returns & soft, close to the gate's $\pi$ \\
+Experts specialise by & days whose cross-section fits & the gate's regimes (risk: tail rows) \\
+Mini-batches & whole dates & any rows \\
+Forecast formula & $\sum_k\pi_k\mu_k$ & identical \\
+\bottomrule
+\end{tabularx}
+\end{center}
+The forecast formula is the same under both, because forecasts use $\pi$ and never $\gamma$; only the training of the experts differs.
+
+\subsection{What freezing the gate changes}
+\begin{itemize}
+  \item No gradient reaches the gate. The $\pi_k(t)$ are fixed numbers, and the experts adapt to them.
+  \item The HMM fixes the labels: expert $k$ is the expert for HMM state $k$, in the order chosen in Section 5.6.
+  \item On a given day the experts can still ``disagree'' with the gate, because $\gamma$ uses the returns and $\pi$ does not. A scatter of $\pi$ against $\gamma$ (Weigend et al.\ 1995) shows how informative the gate is.
+  \item Freezing causes no look-ahead: Baum--Welch runs on the training block only, and only the forward pass runs after it.
+\end{itemize}
+\newpage

@@ -1,0 +1,154 @@
+\section{The experts: from $w\T\phi(x)$ to an MLP}
+
+\subsection{What $w\T\phi(x)$ stands for: linear basis-function regression}
+
+Bishop's experts (and the experts in Exercise A1) are \emph{linear basis-function models} (Bishop \S3.1):
+\begin{equation}\label{eq:basis}
+y = w\T\phi(x) + \varepsilon = \sum_{j=0}^{M-1} w_j\,\phi_j(x) + \varepsilon,\qquad \phi_0(x)\equiv 1,\qquad \varepsilon\sim\N(0,s^2).
+\end{equation}
+\begin{itemize}
+  \item $x\in\R^d$ is the raw input.
+  \item $\phi(x)=(\phi_0(x),\dots,\phi_{M-1}(x))\T$ is a vector of $M$ \emph{fixed} functions of $x$, the \emph{basis functions} or \emph{features}.
+  \item $w\in\R^M$ is the vector of weights, one per basis function. $w_0$ is the intercept, because $\phi_0\equiv1$.
+\end{itemize}
+The model is called \emph{linear} because it is linear in the \emph{weights} $w$. It need not be linear in $x$. Common choices of $\phi$:
+
+\begin{center}
+\renewcommand{\arraystretch}{1.25}
+\begin{tabular}{@{}ll@{}}
+\toprule
+Basis & $\phi_j(x)$ \\
+\midrule
+identity (plain linear regression) & $\phi_j(x)=x_j$, so $w\T\phi(x)=w_0+\sum_{j=1}^d w_jx_j$ \\
+polynomial (one input) & $\phi_j(x)=x^j$ \\
+Gaussian radial basis & $\phi_j(x)=\exp\!\big(-\|x-c_j\|^2/(2\ell^2)\big)$, fixed centres $c_j$ \\
+sigmoidal & $\phi_j(x)=\sigma\big((x-c_j)/\ell\big)$, fixed $c_j,\ell$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\paragraph{Why it is convenient.} Stack the data as the $N\times M$ \emph{design matrix} $\Phi$, whose row $n$ is $\phi(x_n)\T$. The log-likelihood under \eqref{eq:basis},
+\begin{equation}
+\log p(y\mid X;w,s^2)= -\frac N2\log(2\pi s^2) - \frac{1}{2s^2}\sum_{n=1}^N\big(y_n-w\T\phi(x_n)\big)^2,
+\end{equation}
+is a \emph{concave quadratic} in $w$. Setting its gradient to zero gives the normal equations and a closed form:
+\begin{equation}
+\Phi\T\Phi\,\hat w = \Phi\T y\quad\Longrightarrow\quad \hat w=(\Phi\T\Phi)^{-1}\Phi\T y.
+\end{equation}
+With weights $\tau_n$ on the observations, the same derivation gives \emph{weighted} least squares, $\hat w=(\Phi\T W\Phi)^{-1}\Phi\T W y$ with $W=\diag(\tau_1,\dots,\tau_N)$. This is the expert M-step of Exercise A1.
+
+\paragraph{Why it is not enough.} The basis is chosen \emph{before} seeing the data. To approximate an arbitrary smooth function of $d$ inputs with fixed local bases, the number of basis functions must grow exponentially in $d$ (Bishop \S1.4, the curse of dimensionality). With dozens of firm characteristics, interactions and thresholds, we cannot guess the right $\phi$. The MLP solves this by \emph{learning} $\phi$.
+
+\subsection{The MLP: linear regression on learned basis functions}
+
+\paragraph{One hidden layer.} Make each basis function a parametrised ``ridge'' function of $x$ and learn its parameters:
+\begin{equation}
+\phi_j(x;W,b)=g\Big(\sum_{l=1}^d W_{jl}\,x_l + b_j\Big),\qquad j=1,\dots,H.
+\end{equation}
+\begin{itemize}
+  \item $g$ is a fixed scalar nonlinearity, the \emph{activation}.
+  \item $W_{jl}$ and $b_j$ are learned.
+  \item $H$ is the number of hidden units.
+\end{itemize}
+The output is linear regression on these learned features:
+\begin{equation}\label{eq:mlp1}
+f(x)=b^{(2)}+\sum_{j=1}^{H} w^{(2)}_j\,g\Big(b^{(1)}_j+\sum_{l=1}^d W^{(1)}_{jl}x_l\Big)=w^{(2)\top}\phi(x;W^{(1)},b^{(1)})+b^{(2)}.
+\end{equation}
+Compare with \eqref{eq:basis}: the last layer of an MLP is exactly $w\T\phi(x)$. The hidden layers \emph{are} $\phi$, and they are fitted to the data instead of being chosen in advance.
+
+\paragraph{$L$ hidden layers, in general form.} Write $h^{(0)}=x$ and $H_0=d$. For $\ell=1,\dots,L$,
+\begin{align}
+a^{(\ell)} &= W^{(\ell)}h^{(\ell-1)}+b^{(\ell)}, & W^{(\ell)}&\in\R^{H_\ell\times H_{\ell-1}},\ b^{(\ell)}\in\R^{H_\ell},\label{eq:pre}\\
+h^{(\ell)} &= g\big(a^{(\ell)}\big)\quad\text{(applied elementwise)},\label{eq:post}\\
+f(x) &= w^{(L+1)\top}h^{(L)}+b^{(L+1)}.\label{eq:out}
+\end{align}
+\begin{itemize}
+  \item $a^{(\ell)}$ is the \emph{pre-activation} of layer $\ell$ and $h^{(\ell)}$ its \emph{activation}.
+  \item $h^{(L)}$ is the learned basis vector $\phi(x;W^{(1:L)},b^{(1:L)})$.
+\end{itemize}
+
+\paragraph{Fully expanded for two hidden layers.}
+\begin{equation}\label{eq:mlp2}
+f(x)=b^{(3)}+\sum_{j=1}^{H_2}w^{(3)}_j\;g\!\left(b^{(2)}_j+\sum_{m=1}^{H_1}W^{(2)}_{jm}\;g\!\left(b^{(1)}_m+\sum_{l=1}^{d}W^{(1)}_{ml}\,x_l\right)\right).
+\end{equation}
+
+\paragraph{Gu--Kelly--Xiu NN3.} NN3 has three hidden layers of widths $32,16,8$ and ReLU activations:
+\begin{equation}
+f(x)=b^{(4)}+\sum_{a=1}^{8}w^{(4)}_a\,g\!\left(b^{(3)}_a+\sum_{b=1}^{16}W^{(3)}_{ab}\,g\!\left(b^{(2)}_b+\sum_{c=1}^{32}W^{(2)}_{bc}\,g\!\left(b^{(1)}_c+\sum_{l=1}^{d}W^{(1)}_{cl}x_l\right)\right)\right).
+\end{equation}
+
+\paragraph{Activations.}
+\begin{center}
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{@{}lll@{}}
+\toprule
+Name & $g(a)$ & $g'(a)$ \\
+\midrule
+tanh & $\tanh a$ & $1-\tanh^2 a$ \\
+ReLU & $\max(0,a)$ & $\mathbf 1\{a>0\}$ \\
+GELU & $a\,\Phi_{\N}(a)$ ($\Phi_{\N}$ the standard normal cdf) & $\Phi_{\N}(a)+a\,\varphi_{\N}(a)$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\paragraph{Why the nonlinearity is essential.} If $g(a)=a$, composing the layers collapses to a single linear map:
+\begin{equation}
+W^{(3)}\big(W^{(2)}(W^{(1)}x+b^{(1)})+b^{(2)}\big)+b^{(3)}=\tilde W x+\tilde b,\qquad \tilde W=W^{(3)}W^{(2)}W^{(1)}.
+\end{equation}
+Depth then buys nothing. With a ReLU, each hidden unit is a hinge, flat on one side of the hyperplane $W_{j\cdot}x+b_j=0$ and linear on the other. A weighted sum of hinges is a piecewise-linear function whose kinks the network places where the data need them. More units give finer pieces, and deeper layers recombine the pieces. This is the intuition behind the universal approximation theorems (Cybenko 1989; Hornik, Stinchcombe \& White 1989): a single hidden layer with enough units can approximate any continuous function on a compact set arbitrarily well.
+
+\paragraph{Parameter count.}
+\begin{equation}
+\#\text{params}=\sum_{\ell=1}^{L+1}(H_{\ell-1}+1)\,H_\ell,\qquad H_{L+1}=1.
+\end{equation}
+Example: NN3 with $d=20$ inputs has $21\cdot32+33\cdot16+17\cdot8+9\cdot1=672+528+136+9=1345$ parameters.
+
+\paragraph{What is lost compared with linear experts.} The log-likelihood is no longer concave in the parameters, because $W^{(1:L)}$ sit inside $g$. Three consequences:
+\begin{enumerate}
+  \item There is no closed form, so the parameters must be fitted iteratively by gradient methods (Section 4).
+  \item There are many local optima, so the result depends on the initial values and on the random seed.
+  \item The parameters are not identifiable: permuting the hidden units of a layer leaves $f$ unchanged, and for tanh so does flipping the signs of a unit's incoming and outgoing weights. Each layer therefore has $H_\ell!\,2^{H_\ell}$ equivalent weight settings (Bishop \S5.1.1). This is harmless for prediction, but it means individual weights cannot be interpreted.
+\end{enumerate}
+
+\paragraph{Our experts.} Expert $k$ has mean
+\begin{equation}
+\mu_k(x;\theta_k)=f_0(x;\phi)+c_k(x;\psi_k),
+\end{equation}
+\begin{itemize}
+  \item $f_0$ is the frozen base MLP;
+  \item $c_k$ is an MLP correction whose final layer is initialised to zero, so the model starts exactly at the base;
+  \item $\theta_k=(\phi,\psi_k)$, with $\phi$ frozen.
+\end{itemize}
+
+\subsection{Why $s_k$ is the noise: what the MLP models and what it does not}
+
+Write expert $k$ as a regression with additive Gaussian noise:
+\begin{equation}
+r_{i,t+1}=\mu_k(x_{i,t})+s_k\,\varepsilon_{i,t+1},\qquad \varepsilon_{i,t+1}\sim\N(0,1)\ \text{i.i.d.}
+\end{equation}
+Equivalently $r_{i,t+1}\mid x_{i,t},z_{t+1}=k\sim\N(\mu_k(x_{i,t}),s_k^2)$, so that
+\begin{equation}
+\mu_k(x)=\E[r\mid x,z=k],\qquad s_k^2=\Var(r\mid x,z=k)=\E\big[(r-\mu_k(x))^2\mid x,z=k\big].
+\end{equation}
+
+\begin{itemize}
+  \item \textbf{The MLP models only the conditional mean:} the part of tomorrow's return that the characteristics predict in regime $k$.
+  \item \textbf{$s_k$ models everything the characteristics cannot explain:} firm news, liquidity shocks, the unpredictable part of returns. It is the scatter of realised returns around the expert's prediction.
+  \item \textbf{$s_k$ does not depend on $x$.} The model assumes the noise has the same size for every stock in regime $k$ (homoskedasticity within a regime). The MLP produces one number, the mean, so the scale must be a separate parameter. A version in which the network also outputs $s_k(x)$ exists (Nix \& Weigend 1995) but is not used here.
+\end{itemize}
+
+\paragraph{Why it behaves like a volatility.} In a calm regime, returns cluster tightly around what characteristics predict, so $s_k$ is small. In a stressed regime, cross-sectional dispersion rises and the residuals become large, so $s_k$ is large. In finance language, $s_k$ is the regime-$k$ \emph{residual (idiosyncratic) volatility of the cross-section around the model}.
+
+It is \emph{not} the gate's $\sigma_k$, which is the time-series volatility of the market return in regime $k$. The two will tend to move together, but they measure different things.
+
+\paragraph{What $s_k$ does in the likelihood.} The log-density of one observation is
+\begin{equation}\label{eq:lognormal}
+\log\N(r;\mu_k,s_k^2)=-\tfrac12\log 2\pi-\log s_k-\frac{(r-\mu_k)^2}{2s_k^2}.
+\end{equation}
+\begin{enumerate}
+  \item \emph{With $s_k$ fixed}, maximising \eqref{eq:lognormal} over $\mu_k$ is exactly least squares: $s_k$ only rescales the squared error. This is why ``Gaussian NLL $=$ MSE when $\sigma$ is fixed''.
+  \item \emph{With $\mu_k$ fixed}, setting the derivative with respect to $s_k^2$ to zero shows that $s_k^2$ equals the mean squared residual. In a mixture this becomes a responsibility-weighted mean: Exercise A1(f), and Weigend et al.\ eq.~22.
+  \item \emph{In a mixture, $s_k$ decides who owns a data point.} A large residual is far more plausible under a wide expert than under a narrow one, so a crash-day return is claimed by the high-$s_k$ expert even if both means are similar. Weigend et al.\ (footnote 12) report that with all variances clamped equal, accuracy was similar but the regimes were no longer discovered reliably.
+  \item \emph{The term $-\log s_k$ penalises width.} Without it, the likelihood could be improved simply by making every $s_k$ huge. The opposite failure also exists: an expert that wins only a few points can drive $s_k\to0$ and the likelihood to $+\infty$. Weigend et al.\ guard against this with a prior that shrinks $s_k^2$ towards a reference value (eq.~23). The code currently has only a 100-step freeze of $s_k$ (\texttt{sigma\_freeze\_steps}).
+\end{enumerate}
+\newpage

@@ -1,0 +1,90 @@
+\section{Prediction and posteriors (base case)}
+
+\subsection{The information at forecast time}
+At the close of day $t$ the forecast may use $\mathcal G_t$: the market history (through the forward pass only), today's characteristics $x_{i,t}$, and the frozen parameters. The gate is the $\F_t$-measurable probability
+\begin{equation}
+\pi_k(t)=\mathbb P(z_{t+1}=k\mid\F_t)=\sum_jA_{jk}\,\xi_{t\mid t}(j).
+\end{equation}
+
+\subsection{The predictive distribution of one stock}
+Apply the sum rule over $z_{t+1}$:
+\begin{equation}\label{eq:pred}
+p\big(r_{i,t+1}\mid x_{i,t},\F_t\big)=\sum_{k=1}^K\pi_k(t)\,\N\big(r_{i,t+1};\mu_k(x_{i,t}),s_k^2\big).
+\end{equation}
+This is a Gaussian mixture, so it can be skewed and fat-tailed even though every expert is Gaussian. It is the full forecast; everything below summarises it.
+
+\subsection{The point forecast}
+By the law of total expectation,
+\begin{equation}
+\hat r_{i,t+1}=\E\big[r_{i,t+1}\mid x_{i,t},\F_t\big]=\sum_k\pi_k(t)\,\mu_k(x_{i,t})=f_0(x_{i,t})+\sum_k\pi_k(t)\,c_k(x_{i,t}).
+\end{equation}
+The last step uses $\sum_k\pi_k(t)=1$: the base comes out of the sum, so the forecast is the base plus the gate-weighted corrections. The rank IC is computed from $\hat r_{i,t+1}$.
+
+\subsection{The predictive variance}
+The second moment is $\E[r^2\mid\cdot]=\sum_k\pi_k(s_k^2+\mu_k^2)$. Subtracting $\hat r^{\,2}$ and rearranging gives the law of total variance:
+\begin{equation}
+\Var\big(r_{i,t+1}\mid x_{i,t},\F_t\big)=\underbrace{\sum_k\pi_k(t)\,s_k^2}_{\text{noise within a regime}}+\underbrace{\sum_k\pi_k(t)\big(\mu_k(x_{i,t})-\hat r_{i,t+1}\big)^2}_{\text{experts disagree, regime uncertain}}.
+\end{equation}
+The first term remains even if tomorrow's regime were known. The second exists only because the regime is unknown and the experts predict different things; it vanishes if the gate is certain or if the experts agree for this stock.
+
+\subsection{Covariance between stocks (per-date model)}
+Two stocks share $z_{t+1}$ and are independent given it, so uncertainty about the regime makes them co-move:
+\begin{equation}
+\Cov\big(r_{i,t+1},r_{j,t+1}\mid\cdot\big)=\sum_k\pi_k\,\mu_k(x_{i,t})\,\mu_k(x_{j,t})-\hat r_{i,t+1}\hat r_{j,t+1}=\sum_k\pi_k(t)\big(\mu_k(x_{i,t})-\hat r_{i,t+1}\big)\big(\mu_k(x_{j,t})-\hat r_{j,t+1}\big).
+\end{equation}
+This covariance is a property of the model; it is not affected by training with the per-row objective (Q24), which only discards it from the estimation. Under the alternative per-row \emph{model} it would be zero. It matters only for portfolios built from the predictive distribution; ranking uses $\hat r$ alone.
+
+\subsection{The study's horizon: $h=5$}
+The study uses a daily gate, a daily cross-section and a 5-day target (Q21, decided 2026-10-05). The derivations in these notes are written for one step, with $r_{i,t+1}$; in the study that step is the 5-day window $(t,t+5]$, and $r_{i,t+1}$ stands for the market-neutral return over it. The regime can change inside the window, and the regime forecast $j$ days ahead is $\mathbb P(z_{t+j}=k\mid\F_t)=[\xi_{t\mid t}\T A^j]_k$. The likelihood keeps a single regime for the whole window, which is a reasonable approximation because 5 days is short against typical regime durations of 20--50 days (Section 5.3); the window-average weight below makes the point forecast exact even when the regime changes inside the window. The gate weight for the window is the average of the $j=1,\dots,5$ forecasts (decided 2026-10-05, Q27; Section~\ref{sec:predfilt}). Consecutive daily targets overlap by four days: statistics are overlap-corrected (Hansen--Hodrick), and the training likelihood is used for estimation, not inference.
+
+\subsection{Every regime probability, and where it may be used}
+\begin{center}
+\small\renewcommand{\arraystretch}{1.3}
+\begin{tabularx}{\textwidth}{@{}p{2.6cm}p{1.6cm}p{2.6cm}Xp{1.4cm}@{}}
+\toprule
+Quantity & Measurable w.r.t. & Computed from & Used for & At forecast time \\
+\midrule
+filtered $\xi_{t\mid t}$ & $\F_t$ & forward pass ($\hat\alpha_t$) & building the gate & yes \\
+gate $\bar w_k(t)$ ($=\pi_k(t)$ if $h=1$) & $\F_t$ & $\xi_{t\mid t}$ and $A$ & weighting the experts & yes \\
+smoothed $\gamma_t$ (gate) & $\F_T$ & $\hat\alpha_t\hat\beta_t$ & Baum--Welch M-step, training block & \textbf{no} \\
+pairwise $\xi_t(j,k)$ & $\F_T$ & $\hat\alpha,A,\eta,\hat\beta$ & updating $A$, training block & \textbf{no} \\
+responsibility $\gamma_{i,t}(k)$ & $\mathcal G_{t+1}$ & Bayes per stock-day, uses $r_{i,t+1}$ & weighting expert gradients in training & \textbf{no} \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\subsection{Why smoothed probabilities leak the future}
+\begin{equation}
+\gamma_t(k)\propto\alpha_t(k)\,\beta_t(k),\qquad\beta_t(k)=p(m_{t+1},\dots,m_T\mid z_t=k).
+\end{equation}
+Suppose the market crashes on day $t+3$. That crash is far more likely under the stressed regime, so $\beta_t$ shifts weight to the stressed regime on day $t$, three days before the crash, when no past data pointed to it. A gate built on smoothed probabilities therefore enters crashes in advance: the backtest looks excellent and means nothing. In the language of Section 1.4, the smoothed probability is not $\F_t$-measurable, so a forecast built on it is not adapted.
+
+\paragraph{Leaks that are easy to miss.}
+\begin{itemize}
+  \item Refitting Baum--Welch on data that include validation or test dates. The M-step uses smoothed posteriors, so future data enter $\theta_g$.
+  \item Training on smoothed weights and testing on filtered ones. This is not look-ahead at test time, but the experts face a different kind of input than they were trained on. That is why the filtered series is used on training dates too.
+  \item Using the responsibilities $\gamma$ as features at forecast time. They contain the target itself.
+  \item The purge gap (Q22, open). The forward pass must be carried continuously through the dates removed between training and test.
+\end{itemize}
+
+\subsection{The gate weight for an $h$-day target (Q27, decided)}\label{sec:predfilt}
+Three $\F_t$-measurable candidates are available at the close of day $t$, all built from the filtered probability:
+\begin{itemize}
+  \item the \emph{filtered} probability $\xi_{t\mid t}(k)$, today's regime (used by \path{Model_Derivation_BaseCase.md} before this decision, and by the code's Hamilton gate);
+  \item the \emph{one-step predicted} probability $\pi_k(t)=[\xi_{t\mid t}\T A]_k$, tomorrow's regime (Section 6 with $h=1$);
+  \item the \emph{window average}, the expected share of the window $(t,t+h]$ spent in regime $k$:
+\end{itemize}
+\begin{equation}\label{eq:wbar}
+\bar w_k(t)=\frac1h\sum_{j=1}^{h}\big[\xi_{t\mid t}\T A^{\,j}\big]_k.
+\end{equation}
+
+\paragraph{Why the window average is exact for the point forecast.} The target is the sum of $h$ daily returns. Suppose each day's expected return is set by that day's regime, with regime $k$ contributing $\mu_k(x_{i,t})/h$ per day. By the law of total expectation, day by day,
+\begin{equation}
+\E\big[y_{i,t}\mid\F_t\big]=\sum_{j=1}^h\sum_k\mathbb P\big(z_{t+j}=k\mid\F_t\big)\frac{\mu_k(x_{i,t})}{h}=\sum_k\bar w_k(t)\,\mu_k(x_{i,t}).
+\end{equation}
+So the gate-weighted forecast with \eqref{eq:wbar} is exactly the expected $h$-day return. The expected within-regime noise also adds up over days and is matched in the same way. The filtered weight assumes the regime never changes during the window, and the one-step weight assumes it changes at most once. For $h=1$, \eqref{eq:wbar} reduces to the one-step predicted probability, so every one-step formula in these notes is the $h=1$ case of this rule.
+
+\paragraph{How large the differences are.} With the example $A$ of Section 5.3 and a filtered belief of certain stress, the weight on stress is $1.00$ (filtered), $0.95$ (one-step) and $0.86$ (window average with $h=5$). A descriptive fit of a two-state Hamilton model to the CRSP S\&P~500 index, 2015--2024, gives an average gap of $0.055$ between the filtered and window-average weights on the stressed regime, with a maximum of $0.10$. The gap is largest when the filter is sure of stress, because stress tends to end.
+
+\paragraph{Decision.} The window average is used on training and test dates alike (Q27, decided 2026-10-05). Costs accepted: slightly softer weights, and dependence on a well-estimated $A$, whose errors compound over $h$ steps. The likelihood with these weights remains the one-regime-per-window approximation: the exact distribution of an $h$-day return is a mixture over regime \emph{paths}.
+\newpage

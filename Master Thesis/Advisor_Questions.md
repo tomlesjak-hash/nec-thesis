@@ -187,6 +187,12 @@ settled in the literature for a different target?
 ---
 
 ### Q8. Expert and base architecture — what is settled by literature and what is not
+
+**Update 2026-10-05 (compute envelope, Tom's decision).** Measured on the laptop (Apple M4 Pro; Progress_Tracker
+section 1c), the whole design runs in about 2-6 days of machine time if it stays within a depth scan of 1-3
+(pyramid widths), a first width of at most 128, and K at most 4. Depths 4-5 and a first width of 256 are ruled
+out by compute (1-1.5 months). The widths and K inside the envelope are still open (this question, Q17, Q18).
+
 **Partly settled 2026-09-19.** Width is no longer a free parameter: it follows the pyramid rule
 (halve at each layer) from a fixed first hidden layer, and no width sweep is run. The first hidden
 layer carries roughly 83% of the parameters at d=100, so the rest of the widths barely matter. Depth
@@ -810,13 +816,108 @@ there is to report the degradation, not to chase it.
 
 ---
 
-### Q16. How much data is needed, and how should it be split across regimes?
-**Status:** open, raised by Tom 2026-09-15. Bears directly on Q3, since it turns data access from a
+### Q16. How much data is needed, and how should it be split across regimes? [PARTLY RESOLVED 2026-10-05]
+**Status:** partly resolved 2026-10-05 (see the resolution block below); raised by Tom 2026-09-15. Bears directly on Q3, since it turns data access from a
 convenience into a requirement.
 **Updated 2026-09-25:** time-decay weighting worked out in detail under point 2, with reading and a
 new question (d). Not implemented; no code until this is decided.
 **Updated 2026-09-26:** ask (e) added, on keeping crash periods out of the decay and on testing which
 historical periods matter. Not implemented.
+
+**Resolution 2026-10-05 (partial; Tom's decisions).** Asks (a), (b), (d) and (e) are decided; ask (c)
+stays open. The theory is written up for study in `Training_Window_and_Weighting_Theory.md`.
+
+- **(a) Sample: 2000-2024** (was 2015-2024). It roughly doubles the stress episodes (2000-02, 2008-09,
+  2010, 2011, 2015-16, 2018, 2020, 2022). 2000 is the earliest start with sectors, because Compustat's
+  GICS history begins in mid-1999 (Q26 part 4). Feature history reaches further back (about 1995 for
+  the 5-year windows); the sample is what is trained and tested on.
+- **(b) Expanding window, never rolling.** A rolling window can contain no stress episode, which
+  leaves the stress expert with nothing to learn from. Older data is down-weighted rather than dropped
+  (d).
+- **(d) Yes, decay, with one memory per component.** Bias against variance: old data adds bias
+  because markets change (McLean & Pontiff 2016; Green, Hand & Zhang 2017; Chordia, Subrahmanyam &
+  Tong 2014), but dropping it adds variance in a very low signal-to-noise setting, and the best
+  weights after a break are smaller but not zero (Pesaran & Timmermann 2007; Pesaran, Pick &
+  Pranovich 2013).
+  - **Base: calendar-time exponential decay with a long half-life.** The base is where structural
+    drift shows most, and every day informs it.
+  - **Experts: regime-clock decay (ask (e), Tom's idea of 2026-09-26).** A row's age is the amount of
+    later experience of the same regime, counted with the gate's filtered probabilities (no
+    look-ahead), with one half-life in regime-days:
+    $$w_s(t)=\sum_k\xi_{s\mid s}(k)\,\rho^{\,n_k(s,t)},\qquad n_k(s,t)=\sum_{u=s+1}^{t}\xi_{u\mid u}(k),\qquad \rho=2^{-1/H}$$
+    Calm data ages quickly and crisis data slowly. With about 30% stress days and H = 500
+    regime-days, the calm half-life is about 2.8 years and the stress half-life about 6.6 years. In
+    the likelihood, the weight multiplies each row's term (a weighted composite likelihood; Q24).
+  - **Gate: regime-clock forgetting too** (this reverses the "never the gate" option in (d)). The
+    evidence for it: Nystrup, Madsen & Lindström (2017) find a 2-state HMM's parameters on daily
+    S&P 500 returns drift well beyond estimation noise, and adaptive estimation forecasts better.
+    The evidence against plain forgetting: that gain holds only after excluding the 20 worst days,
+    and a short-memory gate can lose its stress state in a long calm spell.
+    - Implementation: a weighted Baum-Welch in two passes. First an unweighted fit, then
+      regime-clock weights, then weighted M-steps. Each regime's emission parameters use its own
+      clock; transitions out of regime j use j's clock.
+  - **Choosing the memories.** Each half-life comes from a small preset grid that always includes
+    equal weights, as the reference arm for Gu, Kelly & Xiu's undecayed protocol. The choice is made
+    once, in the pilot, on the early folds' validation blocks only, then frozen and pre-registered
+    (Q15).
+    - The gate's memory is chosen by its own job: the one-step predictive log-likelihood of the
+      market series on validation. This keeps the gate fitted separately and frozen (Q19) and gives
+      every gate the same tuning budget. The mixture's validation loss is reported as a diagnostic
+      only.
+- **(e)** Regime-clock decay is adopted, for the experts and the gate. Fixed exempt windows are not
+  used. "Testing which historical periods matter" remains a possible extension, diagnostic only.
+- **Test period, refits and validation (decided 2026-10-05, second step).**
+  - **Test period: 2010-2024, refitted annually, 15 folds.** Each fold re-fits the gate, base and
+    experts on the expanding block from 2000 to the year before, then tests on the next year.
+  - **Why 2010 and not 2008.** Every setting must be chosen on data before the first test year.
+    - A 2008 start leaves only the almost calm years 2005-2007 for tuning a regime model.
+    - A 2010 start lets the pilot see the 2008 crisis, and every training block contains two crises.
+    - Out of sample there are still six stress episodes (2010, 2011, 2015-16, 2018, 2020, 2022),
+      including COVID, the sharpest transition test.
+    - The 2008 crisis can still be tested out of sample through leave-one-episode-out (c).
+  - **Why annual refits.** The gate's filter updates regime probabilities daily, so the model still
+    reacts daily; refits only update slow parameters. Quarterly refits would cost 4 times as much for
+    little gain. Gu, Kelly & Xiu also refit annually with an expanding window.
+  - **Pilot.** Three folds with validation years 2007, 2008 and 2009 (training blocks 2000-2006,
+    2000-2007, 2000-2008); it never touches 2010 or later. It chooses, once:
+    - the half-lives and the gate memory;
+    - the learning rate and weight decay;
+    - the training length, as a fixed number of gradient steps.
+    Its validation loss is **regime-balanced**: rows are reweighted with the gate's weights so every
+    regime counts equally. The settings are then frozen and pre-registered.
+  - **Main study: no held-out validation tail and no per-fold early stopping.** Each fold trains on
+    its full block with the frozen settings, so the most recent and most heavily weighted data is
+    never withheld. This resolves audit B-2.
+    - A fixed step budget is expected to transfer across folds, because decay weighting keeps the
+      effective sample roughly stable as the window expands.
+    - The pilot checks this by comparing the best training length across its three folds. If it
+      drifts strongly, the fallback is early stopping on a regime-balanced validation tail.
+  - The 5-day purge stays wherever blocks meet.
+- **Compute levers (decided 2026-10-05, third step).** With a fixed step budget, a run costs about
+  steps × batch size × (6P - 2·d·w1) FLOPs, independent of how many training rows there are.
+  - **Train on every day.** Thinning to every fifth day saves nothing under a step budget.
+    Overlapping rows still add some information, because the price features change daily, and the
+    overlap only affects standard errors, which are Hansen-Hodrick corrected.
+  - **Fresh start every fold, no warm starts.** Warm-started networks generalise worse (Ash & Adams
+    2020). Warm starts would also break the zero-initialised residual design (corrections would be
+    relative to last year's base) and would tie the folds together. Fallback only if compute binds:
+    "shrink and perturb".
+  - **Seeds paired across arms** (common random numbers: every arm runs on the same seed list, and
+    comparisons are seed by seed). The plan is 10 seeds per grid cell and 30 for the pre-nominated
+    primary cell (Q11). The final count is the smallest for which the standard error of a paired
+    difference, measured in the pilot, is below about a third of the smallest effect worth detecting.
+  - **Engineering (no design change):**
+    - one process per performance core, one thread each;
+    - large batches (1,024-4,096), with the size fixed in the pilot together with the learning rate;
+    - features and ranks built once for the whole panel;
+    - base predictions cached;
+    - optional: several seeds trained as one batched model, only if the CPU route is too slow.
+- **Still open: (c)** leave-one-episode-out.
+- **Minor open point:** the experts' decay as a mixture over regimes (the formula above) or per
+  expert, where expert k's gradient uses only k's clock (closer to the wording of (e)).
+- **Not implemented.** It needs a brief: row weights in the expert and base losses, and a weighted
+  Baum-Welch for the Hamilton gate, which currently uses statsmodels without weights.
+
 
 **The tension, stated plainly.** The regimes where the gate should matter most are the rare ones. They
 are rare by construction, they must appear in training for an expert to specialise in them and in test

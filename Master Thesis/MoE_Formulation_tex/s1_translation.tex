@@ -1,0 +1,134 @@
+\section{From Bishop's mixture of experts to our model}
+
+\subsection{Bishop's starting point and the hidden latent variable}
+
+Bishop (\S14.5.3) writes a mixture of experts as
+\begin{equation}\label{eq:bishop-moe}
+p(y\mid x) = \sum_{k=1}^{K} \pi_k(x)\, p_k(y\mid x).
+\end{equation}
+(Bishop writes the target as $t$; we write it as $y$.) No latent variable appears in \eqref{eq:bishop-moe}, because it has already been \emph{summed out}. Introduce a one-hot vector $z$ whose component $z_k=1$ means ``expert $k$ generated this observation''. The model then consists of two statements:
+\begin{equation}
+p(z_k=1\mid x)=\pi_k(x), \qquad p(y\mid x, z_k=1) = p_k(y\mid x).
+\end{equation}
+Using the exponent trick of Bishop (9.10)--(9.11), the joint distribution is
+\begin{equation}
+p(y,z\mid x) = p(z\mid x)\,p(y\mid x,z) = \prod_{k=1}^K \big[\pi_k(x)\,p_k(y\mid x)\big]^{z_k}.
+\end{equation}
+Because $z$ is never observed, we sum it out. Each value of $z$ switches on exactly one factor, so
+\begin{equation}
+p(y\mid x)=\sum_z p(y,z\mid x)=\sum_{k=1}^K \pi_k(x)\,p_k(y\mid x).
+\end{equation}
+The latent variable is therefore still present in \eqref{eq:bishop-moe}: $\pi_k$ is its prior and $p_k$ is the distribution of $y$ given its value. It becomes explicit again in two places:
+\begin{itemize}
+  \item in the \textbf{complete-data likelihood} that EM works with;
+  \item in the \textbf{posterior} (the responsibility)
+  \begin{equation}
+  \gamma_k = p(z_k=1\mid y,x)=\frac{\pi_k(x)\,p_k(y\mid x)}{\sum_j \pi_j(x)\,p_j(y\mid x)}.
+  \end{equation}
+\end{itemize}
+
+\subsection{Three changes take Bishop's model to ours}
+
+\begin{center}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabularx}{\textwidth}{@{}lllX@{}}
+\toprule
+ & Bishop & Ours & Meaning \\
+\midrule
+Index & $n$ & $(i,t)$ & one observation: stock $i$ on day $t$ \\
+Target & $y_n$ & $r_{i,t+1}$ & forward return \\
+Expert input & $x_n$ & $x_{i,t}$ & characteristics of the stock \\
+Gate input & $x_n$ & $\F_t$ & market information up to $t$ \\
+Latent & $z_n$, one per point & $z_{t+1}$, one per date & the regime, shared by all stocks \\
+Expert mean & $w_k\T\phi(x)$ & $\mu_k(x_{i,t};\theta_k)$ & linear regression becomes an MLP (Section 3) \\
+Noise & $\beta^{-1}$, shared & $s_k^2$, per expert & each regime has its own noise level \\
+Gate & $\softmax_k(v\T x_n)$ & HMM probability & Sections 4 and 5 \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\textbf{Change 1: the indices.} Bishop has a single index $n$. Our data form a panel, so we use two indices, stock $i$ and day $t$.
+
+\textbf{Change 2: the experts.} Bishop's expert is already a regression whose mean depends on the input. The MLP makes that mean function flexible. Section 3 shows that an MLP is linear regression on learned basis functions.
+
+\textbf{Change 3: the gate.} This change has two parts.
+\begin{itemize}
+  \item \emph{What the gate looks at.} Our gate sees only market information $\F_t$, so every stock on the same day receives the same weights. The gate answers ``what state is the market in?'', not ``what kind of stock is this?''.
+  \item \emph{Where the probability comes from.} Our gate is a probability computed from an explicit model of the regime: a Markov chain over regimes, observed through the market series. It therefore has memory.
+\end{itemize}
+
+The result, with every time index written explicitly, is
+\begin{equation}\label{eq:our-moe}
+\boxed{\;p\big(r_{i,t+1}\mid x_{i,t},\F_t\big)=\sum_{k=1}^K \underbrace{p\big(z_{t+1}=k\mid \F_t\big)}_{\text{HMM gate}}\;\underbrace{\N\big(r_{i,t+1};\,\mu_k(x_{i,t};\theta_k),\,s_k^2\big)}_{\text{expert }k}\;}
+\end{equation}
+Everything to the right of the conditioning bar is known at the close of day $t$. Only $r_{i,t+1}$ lies in the future. For the study's 5-day target the gate weight is the average of this probability over the window, which reduces to it when $h=1$ (Section~\ref{sec:predfilt}, Q27).
+
+\subsection{The generative story}
+For each day:
+\begin{enumerate}
+  \item the market regime takes one step along its Markov chain;
+  \item the market return for that day is drawn from that regime's distribution (this is what the HMM sees);
+  \item every stock's return is drawn from the expert of the same regime, with a mean set by the stock's own characteristics.
+\end{enumerate}
+We never observe step 1. The gate is our best guess of it given the market history, and the mixture averages the experts over that guess.
+
+\textbf{Why an HMM gate rather than Bishop's learned softmax?}
+\begin{itemize}
+  \item \emph{Persistence.} Regimes last for weeks or months, and the transition matrix builds that memory in.
+  \item \emph{Interpretability.} Each state has an economic meaning (for example calm versus stressed), with its own mean and volatility.
+  \item \emph{Few parameters.} A Gaussian HMM with $K=2$ has seven parameters (one initial probability, two transition probabilities, two means, two variances), whereas a learned gate is easy to overfit when the signal-to-noise ratio is low.
+  \item \emph{Market information enters only through the gate.} Ye \& Borde (2026) found that regime variables helped when they entered through the gate and hurt when they were added to the predictors.
+\end{itemize}
+
+\subsection{Information sets as $\sigma$-algebras and filtrations}
+
+``Market information at time $t$'' has a precise meaning in probability theory, and that meaning is what makes ``no look-ahead'' a checkable statement.
+
+\paragraph{The probability space.} All random quantities (regimes $z_t$, market returns $m_t$, characteristics $x_{i,t}$, stock returns $r_{i,t+1}$) live on one probability space $(\Omega,\mathcal A,\mathbb P)$. Here $\Omega$ is the set of possible histories, $\mathcal A$ is a $\sigma$-algebra of events, and $\mathbb P$ is the probability measure.
+
+\paragraph{The gate's information.} The information contained in the market series up to day $t$ is the $\sigma$-algebra it generates,
+\begin{equation}
+\F_t=\sigma(m_1,\dots,m_t)\subseteq\mathcal A.
+\end{equation}
+This is the smallest $\sigma$-algebra with respect to which every $m_s$, $s\le t$, is measurable. An event belongs to $\F_t$ exactly when an observer who has seen $m_1,\dots,m_t$ can tell whether it has occurred.
+
+\paragraph{A filtration.} Because $\F_s\subseteq\F_t$ whenever $s\le t$, the family $\mathbb F=(\F_t)_{t\ge1}$ is a \emph{filtration}: information accumulates and is never forgotten. It is the \emph{natural filtration} of the market series. The full information set at the close of $t$ is a larger filtration,
+\begin{equation}
+\mathcal G_t=\sigma\big(m_s,\ x_{i,s},\ r_{i,s}\ :\ s\le t,\ i\in\mathcal S_{s}\big),\qquad \F_t\subseteq\mathcal G_t.
+\end{equation}
+The base-case gate is \emph{designed} to use only $\F_t$. The experts' inputs $x_{i,t}$ are $\mathcal G_t$-measurable.
+
+\paragraph{The gate as a conditional probability given a $\sigma$-algebra.}
+\begin{equation}
+\pi_k(t)=\mathbb P\big(z_{t+1}=k\mid\F_t\big)=\E\big[\mathbf 1\{z_{t+1}=k\}\mid\F_t\big].
+\end{equation}
+This is a random variable, and it is $\F_t$-measurable. By the Doob--Dynkin lemma it is therefore a measurable function of the observed path: $\pi_k(t)=g_k(m_1,\dots,m_t)$. The forward recursion of Section 5 is the explicit formula for $g_k$.
+
+\paragraph{No look-ahead means adaptedness.} A sequence of forecasts $(\hat r_{i,t+1})_t$ is free of look-ahead exactly when it is \emph{adapted} to the information filtration, i.e.\ $\hat r_{i,t+1}$ is $\mathcal G_t$-measurable for every $t$. The gate must be $\F_t$-measurable. The smoothed probability $\xi_{t\mid T}(k)=\mathbb P(z_t=k\mid\F_T)$ is $\F_T$-measurable but in general \emph{not} $\F_t$-measurable, because it depends on $m_{t+1},\dots,m_T$. That is the formal version of ``smoothed probabilities leak the future'' (Section 8).
+
+\paragraph{Notation.} Wherever these notes write $p(\,\cdot\mid\F_t)$ or $p(\,\cdot\mid m_{1:t})$, they mean the same object: conditioning on $\F_t$ is conditioning on the values of $m_1,\dots,m_t$.
+
+\subsection{Two notational points}
+
+\paragraph{The bar ``$\mid$'' versus the semicolon ``;''.}
+\begin{itemize}
+  \item $p(a\mid b)$ conditions on a \emph{random variable}: $b$ has a distribution, and $p(a\mid b)=p(a,b)/p(b)$.
+  \item $p(a;\theta)$ indexes a family of distributions by a \emph{fixed parameter}. Since $p(\theta)$ is not defined, Bayes' rule cannot be applied to $\theta$.
+  \item Frequentist papers such as Jordan \& Jacobs (1994) write $\N(y;\mu,\sigma^2)$. Bishop writes $\mid$ for both cases.
+\end{itemize}
+A careful version of our expert density puts each quantity where it belongs:
+\begin{equation}
+p\big(r_{i,t+1}\mid x_{i,t},z_{t+1}=k;\,\theta_k,s_k\big)=\N\big(r_{i,t+1};\,\mu_k(x_{i,t};\theta_k),\,s_k^2\big).
+\end{equation}
+The rule: anything that will ever be summed over or appear on the left of a probability is a random variable and goes after $\mid$.
+
+\paragraph{The target is a future return, not the next feature vector.}
+\begin{itemize}
+  \item $x_{i,t+1}$ is tomorrow's \emph{characteristic vector}, whereas the target is a single number, the return $r_{i,t+1}$. In Weigend et al.\ (1995) a series predicts its own next value, which is why they write the target as the next input. In a cross-sectional model the inputs and the target are different variables.
+  \item Two dating conventions are in use, and both are fine if applied consistently:
+  \begin{itemize}
+    \item label by \emph{realisation} date: $y_{i,t}=r_{i,t}$, conditioned on information at $t-1$;
+    \item label by \emph{formation} date: $y_{i,t}:=r_{i,t+1}$, conditioned on information at $t$. The code and \path{Model_Derivation_BaseCase.md} use this one.
+  \end{itemize}
+  \item These notes always write the forward return explicitly: $r_{i,t+1}$ is predicted from $x_{i,t}$, the regime that generates it is $z_{t+1}$, and the market return over the same day is $m_{t+1}$. That way the timing is visible in every equation.
+\end{itemize}

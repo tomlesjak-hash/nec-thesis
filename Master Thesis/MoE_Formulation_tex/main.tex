@@ -1,0 +1,76 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=2.4cm]{geometry}
+%\usepackage[T1]{fontenc}
+%\usepackage{lmodern}
+\usepackage{amsmath,amssymb,mathtools,bm}
+\usepackage{booktabs,tabularx,array}
+\usepackage{enumitem}
+\usepackage{tikz}
+\usetikzlibrary{positioning,fit,arrows.meta,backgrounds}
+\usepackage[most]{tcolorbox}
+\usepackage[hidelinks]{hyperref}
+\usepackage{xcolor}
+\usepackage{url}
+\urlstyle{tt}
+\makeatletter\g@addto@macro{\UrlBreaks}{\do\_\do\.}\makeatother
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{6pt}
+\setlist{itemsep=2pt,topsep=3pt}
+
+\definecolor{exbg}{RGB}{238,244,252}
+\definecolor{exfr}{RGB}{40,90,160}
+\definecolor{kbg}{RGB}{245,245,240}
+\definecolor{kfr}{RGB}{120,120,100}
+\definecolor{wbg}{RGB}{253,243,235}
+\definecolor{wfr}{RGB}{190,100,40}
+
+\newtcolorbox{exercise}[1]{colback=exbg,colframe=exfr,fonttitle=\bfseries,title={#1},breakable}
+\newtcolorbox{keybox}[1]{colback=kbg,colframe=kfr,fonttitle=\bfseries,title={#1},breakable}
+\newtcolorbox{warnbox}[1]{colback=wbg,colframe=wfr,fonttitle=\bfseries,title={#1},breakable}
+
+\newcommand{\N}{\mathcal{N}}
+\newcommand{\F}{\mathcal{F}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\T}{^{\top}}
+\DeclareMathOperator{\Var}{Var}
+\DeclareMathOperator{\Cov}{Cov}
+\DeclareMathOperator{\diag}{diag}
+\DeclareMathOperator{\softmax}{softmax}
+\DeclareMathOperator*{\argmax}{arg\,max}
+
+\tikzset{
+  lat/.style={circle,draw,minimum size=11mm,inner sep=1pt},
+  obs/.style={circle,draw,fill=gray!25,minimum size=11mm,inner sep=1pt},
+  par/.style={rectangle,draw,fill=black,minimum size=1.6mm,inner sep=0pt},
+  edge/.style={-{Latex[length=2.2mm]},thick},
+  plate/.style={draw,rounded corners,inner sep=6pt}
+}
+
+\title{Formulating a Mixture of Experts with a Hidden Markov Gate\\[4pt]
+\large From Bishop's mixture of experts to a regime-gated cross-sectional return model}
+\author{Course notes for Tom Kores Lesjak\\ \small Master Thesis, SAIF / SJTU}
+\date{Compiled 1 October 2026; revised 5 October 2026}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+\input{s0_howto}
+\input{s1_translation}
+\input{s2_warmup}
+\input{s3_experts}
+\input{s4_gate_em_backprop}
+\input{s5_hmm_gate}
+\input{s6_generative}
+\input{s7_likelihood}
+\input{s8_prediction}
+\input{s9_checklist}
+\appendix
+\input{a1_solution}
+\input{a2_solution}
+\input{a3_papers}
+\input{a4_perrow}
+
+\end{document}

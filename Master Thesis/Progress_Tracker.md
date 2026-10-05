@@ -1,7 +1,8 @@
 # Progress tracker
 
 Everything added to the model or the thesis, with the date and where the detail lives. Section 1 is the
-current state and is edited in place. Section 2 is a log, newest first, and is only appended to. The
+current state and is edited in place. Section 1b is the decision register: every big decision, oldest
+first, only appended to. Section 1c is the compute budget. Section 2 is a log, newest first, and is only appended to. The
 detail stays in the source documents; this file points to them.
 
 - **Decisions and open questions:** `Advisor_Questions.md`
@@ -12,17 +13,17 @@ detail stays in the source documents; this file points to them.
 
 ---
 
-## 1. Current state (2026-10-01)
+## 1. Current state (2026-10-05)
 
 | Component | What it is | Status | Where |
 |---|---|---|---|
-| Data | CRSP daily stock file (CIZ `ciz202512`, to Dec 2025) feeds the whole pipeline: a resumable extract and the point-in-time panel (1,264,598 rows, 2,516 dates, 2015-2024) in `Data/derived/`. Free data (yfinance, Stooq, Wikipedia) retired. CRSP/Compustat Merged downloaded, not used | Implemented (brief 06 A, B); integration run on CRSP passed (F) | Q3; `crsp.py`; `Data/` (gitignored, licensed) |
+| Data | CRSP daily stock file (CIZ `ciz202512`), re-extracted from the full daily file with open/high/low/close/bid/ask (brief 08 C); CRSP/Compustat Merged (`cfz202607`) for fundamentals, GICS and the link. **Sample decided: 2000-2024** (was 2015-2024; panel still built for 2015-2024 until re-run). Free data retired | CRSP and Compustat pipelines implemented (briefs 06, 08 C); 2000-2024 extract not yet built | Q3, Q16 (a), Q26; `crsp.py`; `Data/` (gitignored) |
 | Universe | S&P 500 point-in-time from CRSP membership spells, INDNO 1000500 (not 1000502, which has no constituents), bounds inclusive, 502-508 members per day; dual-class companies kept as two PERMNOs. Delisting returns already in `DlyRet` (rule a); forward windows past a delisting completed by `post_delisting_return` (`"cash"` default, not a decision) | Implemented (brief 06 A) | `crsp.py`, `universe.py` |
 | Frequency and horizon | Daily Hamilton gate, daily cross-section, 5-day forward target (h = 5, overlapping by 4 days; Hansen-Hodrick t-stats, purge = h). Already what the code does | **Decided 2026-10-05** (option B); no code change | Q21 |
-| Target | **Market-neutral return**: the forward return minus the date's equal-weighted cross-sectional mean over the stocks with a valid target. Not the code's existing `target_kind="residual"` (a trailing-beta CAPM-style residual). Code still defaults to `"raw"` | **Decided 2026-10-01**; implementation pending (no brief yet) | Q25 |
-| Features | Three families: price/volume (CRSP), fundamentals (Compustat via CCM, point-in-time), industry (GICS, Compustat; ICB dropped because CRSP's ICB stops in Oct 2023). Rule: exactly two representatives per JKP theme (13 themes, 26 characteristics), plus a short-horizon market block (6 themes × 2), 11 sector dummies, industry momentum, within-industry reversal and 4 within-sector fundamentals: 40 characteristics (22 market, 18 fundamental), 57 inputs. Rank to [-1, 1]. Missing: minimum-count windows, fundamentals carried forward (12-month cap), then 0 plus a flag per family; rows no longer dropped. Code still has the 14 price/volume features ranked to [-0.5, 0.5] (two exact duplicates after ranking) | **Decided 2026-10-05**; not implemented (needs a CRSP re-extract with OHLC and bid/ask, and the Compustat pipeline) | Q26 |
+| Target | **Market-neutral return** (`fwd_mn_ret_5d`): the forward return minus the date's equal-weighted cross-sectional mean over the stocks with a valid target. Reporting market-neutral throughout | **Decided 2026-10-01**; implemented, now the default (brief 08 A, 7bb3a4d) | Q25 |
+| Features | Three families: price/volume (CRSP), fundamentals (Compustat via CCM, point-in-time), industry (GICS, Compustat; ICB dropped because CRSP's ICB stops in Oct 2023). Rule: exactly two representatives per JKP theme (13 themes, 26 characteristics), plus a short-horizon market block (6 themes × 2), 11 sector dummies, industry momentum, within-industry reversal and 4 within-sector fundamentals: 40 characteristics (22 market, 18 fundamental), 57 inputs. Rank to [-1, 1]. Missing: minimum-count windows, fundamentals carried forward (12-month cap), then 0 plus a flag per family; rows no longer dropped. The legacy 14-feature set is kept only as `feature_set="legacy14"` | **Decided 2026-10-05**; implemented (brief 08 C, D: 488baad, 0633379; real-data fixes be77fb7, 5524da1); first coverage report run | Q26 |
 | Base | MLP, trained on the training block, then frozen | Decided, implemented | Q7; brief 02 |
-| Gate | Regime model fitted separately, then frozen; gate weight is the **average over the 5-day target window of the h-step-ahead regime probabilities** (built from the filtered probability and A; never the smoothed one). Code still uses the filtered probability | Decided. Hamilton implemented, the autoregressive variant too (brief 07, G-2); jump, Wasserstein and TVTP to come. The backprop-HMM baseline now runs on the point-in-time panel (state keyed by stock, M-5) | Q19, Q27; briefs 03, 04 B, 07 |
+| Gate | Regime model fitted separately, then frozen; gate weight is the **average over the 5-day target window of the h-step-ahead regime probabilities** (built from the filtered probability and A; never the smoothed one); implemented as `gate_weight="window"` (brief 08 B, 3f1fac5). Memory: regime-clock forgetting, decided, not implemented | Decided. Hamilton implemented, the autoregressive variant too (brief 07, G-2); jump, Wasserstein and TVTP to come. The backprop-HMM baseline now runs on the point-in-time panel (state keyed by stock, M-5) | Q19, Q27; briefs 03, 04 B, 07 |
 | Experts | MLP corrections to the base, $\hat y = f_0 + \sum_k \pi_k r_k$, zero-initialised heads | Implemented. Hidden-layer initialisation is a switch, `hidden_init` (brief 06 D); which one is used is **open** (X-1) | brief 02; audit X-1 |
 | Number of regimes K | | **Open** | Q18 |
 | Error function | Only the mixture NLL is registered, behind a seam | **Open** | Q20 |
@@ -31,11 +32,188 @@ detail stays in the source documents; this file points to them.
 | Runs and resume | Every run in `results/<campaign>/<run_id>/` with settings, status, registry, metrics, figures, log and `SUMMARY.md`, one row in `results/INDEX.csv`; per-stock outputs only in `Data/derived/runs/`. Ctrl+C checkpoints and stops; resume is exact and refuses changed settings or data unless forced | Implemented (brief 07 B, C); how-to in `nec_baseline/RUNBOOK.md` | `runstore.py`, `scripts/runs.py` |
 | Likelihood for the experts | Per row: the composite (independence) likelihood of the per-date model; one log-sum-exp per row. Already what the code does (`losses.mixture_nll`) | **Decided 2026-10-05**; no code change | Q24; PDF Section 7.3 and Appendix D |
 | Gate through the purge gap | Whether the filter sees the gap's market returns | **Open** | Q22 |
-| Sample weighting | Time decay; crash-preserving weights | **Parked**, not in code | Q16 (d), (e) |
+| Training window and weighting | Expanding window. Experts: regime-clock decay; base: calendar decay, long half-life; gate: regime-clock forgetting (weighted Baum-Welch), memory chosen by predictive log-likelihood. Half-lives from a preset grid, chosen once in the pilot | **Decided 2026-10-05**; not implemented (needs a brief). Test 2010-2024 with annual refits (15 folds); pilot on 2007-2009 with a regime-balanced loss; main study on full blocks with frozen settings. Every day, fresh starts, paired seeds, process-parallel. Training scheme fully decided except leave-one-episode-out (Q16 c) | Q16; `Training_Window_and_Weighting_Theory.md` |
+
+## 1b. Decision register
+
+Every big decision, oldest first, with what it replaced and where the reasoning lives. Rows are only
+added. A decision that is later reversed keeps its row, and the reversal gets its own row.
+
+| Date | Decision | Instead of / why | Where |
+|---|---|---|---|
+| 2026-09-18 | Data is CRSP (US equities); Wind only as a possible China extension | free data | Q3; advisor meeting |
+| 2026-09-18 | Report the full mechanism-by-depth grid, nothing tuned away; depths set by the compute budget | fixing or tuning depth | Q11; advisor meeting |
+| 2026-09-18 | No width sweep: widths follow the pyramid rule from a fixed first layer | sweeping widths | advisor meeting |
+| 2026-09-18 | No sweep over K: K fixed by argument and held across all gates | sweeping K | advisor meeting; K itself is Q18 (open) |
+| 2026-09-18 | Order of work: data, then compute budget, then parameters; start with the base and a generic loss | designing the loss first | advisor meeting |
+| 2026-09-21 | Gate fitted separately and frozen, for every gate | joint training | Q19 |
+| 2026-09-21 | Base pre-trained and frozen; experts are corrections to it (residual design) | joint training | Q7; brief 02 |
+| 2026-09-26 | CRSP replaces free price and universe data everywhere | yfinance/Stooq/Wikipedia | brief 06 |
+| 2026-09-26 | S&P 500 universe from CRSP membership INDNO 1000500, bounds inclusive | 1000502 (no constituents) | brief 06 A.3 erratum |
+| 2026-09-26 | Delisting rule (a): CIZ `DlyRet` already contains the delisting return | compounding `DelRet` in | brief 06 |
+| 2026-09-26 | Overlapping-target t-statistics: Hansen-Hodrick | Newey-West (worse size in simulation) | audit E-2 |
+| 2026-09-26 | Report the volatility-only NLL gain next to the correction gain | one combined number | audit E-1 follow-up |
+| 2026-10-01 | Target: market-neutral return (forward return minus the date's equal-weighted cross-sectional mean) | raw, CAPM residual, standardised, vol-scaled | Q25 |
+| 2026-10-05 | All reporting on the market-neutral basis, no raw-return reporting | reporting raw returns too | Q25 clarification |
+| 2026-10-05 | Daily gate, daily cross-section, 5-day target (option B) | h = 1, monthly | Q21 |
+| 2026-10-05 | Features: two representatives per JKP theme plus a 6-theme short-horizon market block and an industry block; 40 characteristics, 57 inputs | the 14 legacy price features | Q26 |
+| 2026-10-05 | Ranks mapped to [-1, 1] | [-0.5, 0.5] | Q26 part 2 |
+| 2026-10-05 | Missing values: minimum-count windows, fundamentals carried forward for at most 12 months, then 0 plus a flag per family; rows no longer dropped | dropping rows; interpolation (look-ahead) | Q26 part 3 |
+| 2026-10-05 | Industry: sector dummies, within-sector ranks of 4 fundamentals, industry momentum and within-industry reversal | none, or a subset | Q26 part 4 |
+| 2026-10-05 | Sector source: GICS from Compustat | ICB (CRSP stops filling it in Oct 2023) | Q26 part 4 |
+| 2026-10-05 | Point-in-time fundamentals: usable the trading day after the later of report and filing date; surprises dated by the report date | quarter end plus a lag | Q26 part 5; brief 08 C |
+| 2026-10-05 | IVAOQ, IVSTQ, MIBQ, PSTKQ count as 0 when blank in total accruals and net operating assets | strict "missing" (left those features on about 5% of rows) | commit 5524da1 (after the first coverage report) |
+| 2026-10-05 | Experts trained on the per-row likelihood, read as the composite (independence) likelihood of the per-date model | per-date likelihood | Q24; PDF Appendix D |
+| 2026-10-05 | Gate weight for the 5-day target: average of the 1- to 5-step-ahead regime probabilities | filtered or one-step predicted | Q27; PDF Section 8.9 |
+| 2026-10-05 | Backprop-HMM baseline keeps its own h-step predict | moving it to window weights | Q27 correction |
+| 2026-10-05 | Sample 2000-2024 | 2015-2024 (too few stress episodes) | Q16 (a) |
+| 2026-10-05 | Expanding training window | rolling | Q16 (b) |
+| 2026-10-05 | Experts: regime-clock decay (age = later same-regime experience; one half-life in regime-days) | equal weights; calendar decay (erases crises) | Q16 (d)(e); `Training_Window_and_Weighting_Theory.md` |
+| 2026-10-05 | Base: calendar exponential decay, long half-life | equal weights | Q16 (d) |
+| 2026-10-05 | Gate: regime-clock forgetting via a two-pass weighted Baum-Welch; memory chosen by one-step predictive log-likelihood on validation | full history; calendar forgetting (can lose the stress state) | Q16 (d)(e); theory notes section 7 |
+| 2026-10-05 | Every half-life chosen once from a preset grid (equal weights always included) in the pilot on early validation blocks, then frozen and pre-registered | tuning per fold or on test data | Q16; Q15 |
+| 2026-10-05 | Compute planning on the laptop (Apple M4 Pro, 48 GB) until the school node is confirmed | — | this log |
+| 2026-10-05 | Test period 2010-2024, refitted annually (15 folds) | testing from 2008 (pilot would see no crisis) | Q16 |
+| 2026-10-05 | Pilot on validation years 2007-2009 chooses every setting once (half-lives, gate memory, learning rate, weight decay, step budget), with a regime-balanced validation loss; then frozen and pre-registered | tuning in every fold; a calm-only validation | Q16; Q15 |
+| 2026-10-05 | Main study trains on the full block: no held-out tail, no per-fold early stopping (resolves B-2); fallback to regime-balanced early stopping if the pilot's best step budget drifts | the last-20% validation tail | Q16; audit B-2 |
+| 2026-10-05 | Train on every day under a fixed step budget | every 5th day (saves nothing under a step budget) | Q16 |
+| 2026-10-05 | Fresh initialisation every fold; warm starts only as a fallback (shrink and perturb) | warm starts (worse generalisation; break zero-init residual design) | Q16; Ash & Adams 2020 |
+| 2026-10-05 | Seeds paired across arms; 10 per grid cell, 30 for the primary cell, final count from the pilot's measured seed variance | independent seeds per arm | Q16; Q11 |
+| 2026-10-05 | Engineering: one process per performance core, large batches fixed in the pilot, features built once, base cached | default single-process training | Q16 |
+| 2026-10-05 | Compute envelope for the design: depth scan 1-3 (pyramid widths from a fixed first width), first width at most 128, K at most 4; runs on the laptop, 10 parallel processes | depths 1-5 and first width 256 (1-1.5 months of laptop time; Gu, Kelly & Xiu find depths 4-5 add nothing) | section 1c; Q8, Q11 |
+| 2026-10-05 | Brief 09 written: implements the sample extension, calendar-year folds, the pilot, decay weights, the weighted Baum-Welch gate, the parallel runner | — | `Code_Change_Brief_09_Training_Scheme.md` |
+
+
+---
+
+## 1c. Compute budget (laptop, measured 2026-10-05)
+
+**Machine.** Apple M4 Pro: 10 performance and 4 efficiency cores, 48 GB, GPU (MPS) available.
+
+**Benchmark.** Script `nec_baseline/scripts/benchmark_compute.py`, run on synthetic data only. Results
+in `nec_baseline/results/benchmark/compute_benchmark_20261005_233042.{csv,json}`.
+
+- **One thread per run.** A single core reaches 30-230 GFLOP/s; for K = 3, widths 64-32, batch
+  4,096, that is 238 steps/s. Extra threads in one run give nothing (244 steps/s at 4 threads, 212
+  at 8).
+- **Parallel runs.** 10 runs on the performance cores give 6.9x (1,622 steps/s in total); adding the
+  efficiency cores gives 7.6x. The largest model scales 5.5x at 10 runs (shared memory bandwidth).
+  Plan: 10 parallel runs.
+- **GPU (MPS).** It has a fixed cost of about 1.6-3 ms per step, whatever the model size. It loses to
+  10 CPU runs on small models and roughly matches them on the largest, so it is at most one extra
+  worker for large configurations.
+- **Experts computed as one batched product:** no gain on CPU, so this option is dropped.
+- **Cost of a step:** steps × batch × (6P - 2·d·w1) FLOPs, which does not depend on the number of
+  training rows (fixed step budget).
+
+**What counts as one run.** One run trains one model, for one fold, from one seed. The design
+multiplies:
+
+| Block | Count | Runs |
+|---|---|---|
+| Gate × depth grid | 6 arms (5 gates + no-regime control) × depths × 10 seeds × 15 folds | 900 per depth |
+| Primary cell, extra seeds | 20 seeds × 15 folds | 300 |
+| Stage-2 construction arms | 5 arms × 10 seeds × 15 folds | 750 |
+| Base depth sweep | depths × 10 seeds × 15 folds (about half the cost of a K = 2 model) | 150 per depth |
+| Pilot | about 50 settings × 3 folds × 3 seeds | 450 |
+| Robustness: no-decay arm for every gate (primary depth) | 6 × 10 × 15 | 900 |
+| Robustness: leave-one-episode-out (primary cell) | | about 30 |
+
+- **Depths 1-3:** 5,580 clean runs.
+- **Depths 1-5:** 7,680 clean runs.
+- The hours below assume **everything is run twice**: bugs, fixes and changed settings in practice
+  double the clean count.
+
+**Laptop hours.** Assumptions: everything run twice, 10 parallel runs, batch 4,096, and ×2.5 for the
+real pipeline's overhead (an assumption until one real run is timed). Widths follow the pyramid rule
+from the first width. Steps per run are set in the pilot, so three values are shown.
+
+| Depth scan | K | First width | 3k steps | 10k steps | 30k steps |
+|---|---|---|---|---|---|
+| 1-3 | 3 | 64 | 13 h | 44 h (1.8 d) | 133 h (5.5 d) |
+| 1-3 | 3 | 128 | 26 h | 86 h (3.6 d) | 258 h (10.7 d) |
+| 1-3 | 4 | 64 | 17 h | 57 h (2.4 d) | 171 h (7.1 d) |
+| 1-3 | 4 | 256 | 71 h | 237 h (9.9 d) | 710 h (29.6 d) |
+| 1-5 | 3 | 64 | 21 h | 69 h (2.9 d) | 206 h (8.6 d) |
+| 1-5 | 3 | 128 | 40 h | 132 h (5.5 d) | 397 h (16.5 d) |
+| 1-5 | 4 | 64 | 26 h | 88 h (3.7 d) | 264 h (11.0 d) |
+| 1-5 | 4 | 256 | 109 h | 364 h (15.2 d) | 1,093 h (45.6 d) |
+
+Depths 4 and 5 are extrapolated from the measured cost of going from depth 2 to depth 3.
+
+**Envelope decided 2026-10-05:** depths 1-3, first width at most 128, K at most 4.
+
+**Reading.** With moderate widths (first width 64-128) and K ≤ 4, the whole study, run twice, takes
+roughly 1-6 days of machine time, or 1-2 weeks of overnight runs. That fits a laptop. Only the corner
+of wide experts (first width 256) with long training (30k steps) and a depth scan to 5 becomes
+impractical, at 1-1.5 months. Compute therefore rules out that corner only. Within the rest, the
+binding limit is statistical (Q17).
+
+**To confirm:**
+
+- the real-pipeline overhead, from one timed real run;
+- the steps per run, from the pilot;
+- the slowdown from heat over multi-day runs (budget 10-20%).
+
 
 ---
 
 ## 2. Log (newest first)
+
+### 2026-10-05 (compute envelope; brief 09)
+- **Decided: the compute envelope.** Depth scan 1-3 with pyramid widths from a fixed first width; first width at
+  most 128; K at most 4; 10 parallel processes on the M4 Pro. All 5 gates plus a control, the depth scan, seeds,
+  robustness runs and a full re-run fit in about 2-6 days of machine time (section 1c). K itself (Q18) and the
+  widths (Q8/Q17) are still to be chosen inside this envelope.
+- **Brief 09 written** (`Code_Change_Brief_09_Training_Scheme.md`) for local Claude Code: implements every training-scheme
+  decision of today, with a reading list.
+
+### 2026-10-05 (compute benchmark on the M4 Pro)
+- **Benchmark** (`nec_baseline/scripts/benchmark_compute.py`, synthetic data only; results in
+  `nec_baseline/results/benchmark/compute_benchmark_20261005_233042.*`). M4 Pro, 10 performance + 4 efficiency cores,
+  48 GB, MPS available.
+  - One thread per run: 30-230 GFLOP/s per core; e.g. K=3, widths 64-32, batch 4,096: 238 steps/s. Extra threads
+    give nothing (244 steps/s at 4 threads, 212 at 8).
+  - Parallel runs: 10 processes give 6.9x (1,622 steps/s), 14 give 7.6x; the largest model scales 5.5x at 10.
+  - GPU (MPS): about 1.6-3 ms fixed cost per step, so it loses to 10 CPU processes for small models and roughly
+    matches them for the largest; usable as one extra worker for large configurations.
+  - Experts as one batched product: no gain on CPU (dropped).
+- **Budget for the whole design** (4,650 runs: 6 arms x 3 depths x 10 seeds x 15 folds, the 30-seed primary cell,
+  Stage-2 arms, pilot, base sweep; 10 parallel processes, batch 4,096, x2.5 for real-pipeline overhead), at
+  10,000 steps per run: K=3 with first width 64 about 18 hours; K=4 with first width 256 about 96 hours. At 30,000
+  steps, at most about 12 days. **Compute on the laptop is not the binding constraint** for K <= 4, depth <= 3,
+  first width <= 256; the data (Q17) is. To confirm: real-pipeline overhead (one timed real run) and steps per run
+  (pilot).
+
+### 2026-10-05 (compute levers decided)
+- **Decided:** every-day training under a fixed step budget; fresh start every fold; seeds paired across arms (10 per
+  grid cell, 30 primary, final count from the pilot); process-parallel runs, large batches, features built once.
+  Next: benchmark on the M4 Pro, then the compute budget.
+
+### 2026-10-05 (test period, refits, pilot)
+- **Decided:** test 2010-2024, refitted annually (15 folds); a pilot on validation years 2007-2009 chooses every
+  setting once with a regime-balanced validation loss; the main study trains on full blocks with frozen settings and
+  no held-out tail (resolves audit B-2). Recorded in Q16 and the decision register.
+
+### 2026-10-05 (gate memory decided; brief 08 implemented; decision register)
+- **Decided: the gate gets regime-clock forgetting** (two-pass weighted Baum-Welch), with its memory chosen by the
+  one-step predictive log-likelihood of the market series on validation (Nystrup, Madsen & Lindström 2017: HMM
+  parameters drift, but plain forgetting loses on the worst days). Q16 marked partly resolved: (a), (b), (d), (e)
+  decided; (c) open.
+- **Brief 08 implemented** by the cloud session: A target (7bb3a4d), B gate weight and Q24 notes (3f1fac5), C data
+  layer (488baad), D features (0633379), E registry/docs/scripts (bd7f730); fixes from the first real-data run
+  (be77fb7); Tom's zero-fill decision for four blank balance-sheet items (5524da1).
+- **Decision register added** (section 1b): every big decision since the 2026-09-18 meeting in one table.
+
+### 2026-10-05 (sample and data weighting)
+- **Decided: sample 2000-2024** (was 2015-2024): about twice the stress episodes; 2000 is the earliest start with
+  Compustat GICS history. Expanding window, never rolling. Laptop for compute: Apple M4 Pro, 48 GB.
+- **Decided: experts use regime-clock decay** (a row's age is the amount of later same-regime experience, from the
+  gate's filtered probabilities; one half-life in regime-days). **Base uses calendar exponential decay with a long
+  half-life.** Half-lives chosen once in the pilot on early validation blocks, then frozen.
+- **Open: the gate's memory** (full history, calendar forgetting, or regime-clock forgetting via weighted
+  Baum-Welch; chosen by the gate's one-step predictive log-likelihood on validation).
+- Theory written up in `Training_Window_and_Weighting_Theory.md` (new). Not yet in Advisor_Questions (Q16).
 
 ### 2026-10-05 (sector source changed; brief 08)
 - **Sector source changed to GICS (Compustat) from ICB** (Tom's decision): CRSP's ICB field is NOAVAIL for every
@@ -201,10 +379,9 @@ detail stays in the source documents; this file points to them.
 
 ## 3. Open, in one place
 
-- **Advisor questions open:** Q1, Q2, Q4, Q5, Q6 (design half), Q8, Q9, Q10, Q12 to Q18, Q20, Q22, Q23.
-- **Not yet a question:** whether to extend the sample before 2015 (loader `start` is a config field).
-- **Audit findings still open:** B-2 (the base withholds its validation tail with early stopping
-  off; interacts with Q16); the majors S-2 (the superseded 2026-09-25 smoke report's NLL columns)
+- **Advisor questions open:** Q1, Q2, Q4, Q5, Q6 (design half), Q8, Q9, Q10, Q12 to Q15, Q16 (c) and the rest of the training scheme, Q17, Q18, Q20, Q22, Q23.
+- **Audit findings still open:** B-2 (decided 2026-10-05 to be resolved by training on full blocks;
+  not yet coded); the majors S-2 (the superseded 2026-09-25 smoke report's NLL columns)
   and X-1 (the `hidden_init` choice); and the minors and notes listed in audit section 12.
 - **Next in `WORK_QUEUE.md`:** documentation drift and `DECISIONS.md`, diagnostics (ICC, gate
   permutation test), the remaining gates, pre-registration.
@@ -214,6 +391,5 @@ detail stays in the source documents; this file points to them.
 - **Future study, beyond the thesis:** `Improvements_and_Extensions.md` (created 2026-10-05). E1: how to improve the model for one-day forecasting.
 - Switching the gate's input from French Mkt-RF to a CRSP index series (Q23).
 
-- Time decay of old data (Q16 d).
-- Keeping crash periods at full weight, regime-clock decay, and testing which periods matter (Q16 e).
+- Testing which historical periods matter (Q16 e, extension; diagnostic only).
 - Leave-one-episode-out: train without 2008, test on it (Q16 point 3).

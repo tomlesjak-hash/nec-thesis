@@ -1,0 +1,162 @@
+\section{From the softmax gate to the HMM gate}
+
+\subsection{Three steps from Bishop's gate to ours}
+\begin{enumerate}
+  \item \textbf{The gate input becomes date-level.} Instead of the stock's own input, the gate sees the market history $\F_t$.
+  \item \textbf{The latent becomes one per date and is shared.} A single $z_{t+1}$ governs every stock's return on day $t+1$ (Exercise A1(i), Chamroukhi \& Nguyen \S3).
+  \item \textbf{The latent gets memory.} The prior of $z_{t+1}$ depends on $z_t$ through a transition matrix $A$, which makes the gate an HMM.
+\end{enumerate}
+
+\subsection{Why the Markov chain sits on the latent variables (Bishop \S13.1--13.2)}
+
+\paragraph{Bishop \S13.1: a Markov chain on the observations.} The simplest way to give a series memory is
+\begin{equation}
+p(m_{t+1}\mid m_1,\dots,m_t)=p(m_{t+1}\mid m_t).
+\end{equation}
+This remembers a single step. A chain of order $M$ needs a number of parameters exponential in $M$, which is useless for regimes that last months.
+
+\paragraph{Bishop \S13.2: put the chain on a hidden variable.} Let the hidden regime follow a first-order Markov chain, and let each observation depend only on the current regime:
+
+\begin{center}
+\begin{tikzpicture}[node distance=13mm]
+\node[lat] (z1) {$z_1$}; \node[lat,right=of z1] (z2) {$z_2$}; \node[lat,right=of z2] (z3) {$z_3$}; \node[right=8mm of z3] (dots) {$\cdots$};
+\node[obs,below=9mm of z1] (m1) {$m_1$}; \node[obs,below=9mm of z2] (m2) {$m_2$}; \node[obs,below=9mm of z3] (m3) {$m_3$};
+\draw[edge] (z1)--node[above]{$A$}(z2); \draw[edge] (z2)--node[above]{$A$}(z3); \draw[edge] (z3)--(dots);
+\draw[edge] (z1)--(m1); \draw[edge] (z2)--(m2); \draw[edge] (z3)--(m3);
+\end{tikzpicture}
+\end{center}
+
+The observations are then \emph{not} Markov of any finite order. To predict $m_{t+1}$ one needs the belief about $z_t$, and that belief depends on the whole history $m_1,\dots,m_t$. The model has long memory with only $K(K-1)$ transition parameters.
+
+\paragraph{The transition matrix.} In Bishop's notation (eq.~13.7), with one-hot regimes,
+\begin{equation}
+A_{jk}=p(z_{t+1}=k\mid z_t=j),\qquad 0\le A_{jk}\le1,\qquad\sum_{k=1}^KA_{jk}=1,\qquad p(z_{t+1}\mid z_t,A)=\prod_{j=1}^K\prod_{k=1}^KA_{jk}^{\,z_{tj}\,z_{t+1,k}}.
+\end{equation}
+Exactly one $z_{tj}$ and one $z_{t+1,k}$ equal $1$, so the double product picks out the single entry for the transition that happened. The first regime has its own distribution (Bishop eq.~13.8, where it is called $\pi$; we write $\rho$ because $\pi$ is our gate):
+\begin{equation}
+p(z_1\mid\rho)=\prod_k\rho_k^{\,z_{1k}}.
+\end{equation}
+The gate's parameters are $\theta_g=\{\rho,A,\nu_{1:K},\sigma_{1:K}\}$, the analogue of Bishop's $\theta=\{\pi,A,\phi\}$ in eq.~13.11. For $K=2$ that is $1+2+4=7$ numbers.
+
+\paragraph{The HMM as a mixture model whose weights move (Bishop \S13.2).}
+\begin{center}
+\renewcommand{\arraystretch}{1.25}
+\begin{tabularx}{\textwidth}{@{}llX@{}}
+\toprule
+Model & Mixing weight for observation $t+1$ & Depends on \\
+\midrule
+Gaussian mixture (Bishop ch.\ 9) & $\pi_k$, a constant & nothing \\
+Mixture of experts (Bishop \S14.5) & $\pi_k(u)$, softmax gate & the input \\
+HMM (Bishop \S13.2) & $A_{jk}$, row $j$ of $A$ & the previous regime \\
+\textbf{Our HMM gate} & $\sum_jA_{jk}\,\xi_{t\mid t}(j)$ & the previous regime, averaged over our belief \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\subsection{What $A$ does in the gate}
+
+If we knew today's regime, tomorrow's mixing weights would be row $z_t$ of $A$. We do not know it, so we apply the sum rule over $z_t$ and then the Markov property:
+\begin{equation}\label{eq:gate}
+\boxed{\;\pi_k(t)=\mathbb P(z_{t+1}=k\mid\F_t)=\sum_{j=1}^Kp(z_{t+1}=k\mid z_t=j)\,\mathbb P(z_t=j\mid\F_t)=\sum_{j=1}^KA_{jk}\,\xi_{t\mid t}(j)\;}
+\end{equation}
+Inside the filter, $A$ is used every day in a \emph{predict} step, followed by a Bayes \emph{update} with the new market return. Write $\eta_{t}(k)=\N(m_{t};\nu_k,\sigma_k^2)$. Then
+\begin{equation}
+\xi_{t+1\mid t}(k)=\sum_jA_{jk}\,\xi_{t\mid t}(j)\quad\text{(predict)},\qquad\xi_{t+1\mid t+1}(k)=\frac{\xi_{t+1\mid t}(k)\,\eta_{t+1}(k)}{\sum_l\xi_{t+1\mid t}(l)\,\eta_{t+1}(l)}\quad\text{(update)}.
+\end{equation}
+So $A$ is the model's prior about how regimes move, and the market data correct it every day. The gate \eqref{eq:gate} is exactly the predict step.
+
+\paragraph{What $A$ tells you.}
+\begin{itemize}
+  \item \emph{Persistence:} the diagonal $A_{kk}$ is the probability of staying in a regime.
+  \item \emph{Expected duration:} each day the chain leaves regime $k$ with probability $1-A_{kk}$, so the time spent in $k$ is geometric. First-step analysis gives $\E[\text{duration}]=1/(1-A_{kk})$.
+  \item \emph{Long-run share of time in each regime:} the stationary distribution, $\bar\rho A=\bar\rho$ with $\sum_k\bar\rho_k=1$.
+  \item \emph{Forecasts $h$ days ahead:} $\mathbb P(z_{t+h}=k\mid\F_t)=[\xi_{t\mid t}\T A^h]_k$. These converge to $\bar\rho$; for $K=2$ the gap shrinks like $\lambda^h$, with $\lambda=A_{11}+A_{22}-1$ the second eigenvalue.
+\end{itemize}
+
+\paragraph{Worked example.}
+\begin{equation}
+A=\begin{pmatrix}0.98&0.02\\0.05&0.95\end{pmatrix}.
+\end{equation}
+\begin{itemize}
+  \item Durations: calm lasts $1/0.02=50$ days on average, stressed lasts $1/0.05=20$ days.
+  \item Stationary distribution: $0.02\,\bar\rho_1=0.05\,\bar\rho_2$ gives $\bar\rho=(5/7,\,2/7)\approx(0.71,\,0.29)$.
+  \item Second eigenvalue: $\lambda=0.93$, so a regime forecast loses half of its distance to the long-run mix in $\ln0.5/\ln0.93\approx9.6$ days.
+\end{itemize}
+
+\subsection{How $A$ is estimated}
+
+\paragraph{Step 1: if the regimes were observed.} The probability of a regime path depends on $A$ only through the transition counts $n_{jk}$:
+\begin{equation}
+p(z_{1:T}\mid A,\rho)=\rho_{z_1}\prod_{t=1}^{T-1}A_{z_tz_{t+1}}=\rho_{z_1}\prod_{j,k}A_{jk}^{\,n_{jk}}.
+\end{equation}
+Maximise the log subject to each row summing to one, with a Lagrange multiplier $\lambda_j$ per row:
+\begin{equation}
+\frac{\partial}{\partial A_{jk}}\Big[\sum_{j,k}n_{jk}\log A_{jk}+\sum_j\lambda_j\Big(1-\sum_kA_{jk}\Big)\Big]=\frac{n_{jk}}{A_{jk}}-\lambda_j=0\quad\Rightarrow\quad\hat A_{jk}=\frac{n_{jk}}{\sum_ln_{jl}}.
+\end{equation}
+So the estimate is a frequency: transitions from $j$ to $k$ divided by visits to $j$.
+
+\paragraph{Step 2: the regimes are hidden, so use EM (Baum--Welch, Bishop \S13.2.1).} We replace the counts with their posterior expectations, which the forward--backward algorithm provides (next subsection):
+\begin{equation}
+\hat A_{jk}=\frac{\sum_{t=1}^{T-1}\xi_t(j,k)}{\sum_{t=1}^{T-1}\sum_l\xi_t(j,l)},\qquad\xi_t(j,k)=\mathbb P(z_t=j,z_{t+1}=k\mid\F_T).
+\end{equation}
+
+\subsection{The forward--backward recursion and how $\alpha$ and $\beta$ are used}
+
+The recursion is needed in \textbf{Stage 1}, when the gate is fitted to the market series. Stage 2 does not need it, because there the gate prior is fixed for each date (Section 7).
+
+\paragraph{The two quantities} (stated here without derivation; Bishop \S13.2.2):
+\begin{align}
+\alpha_t(k)&=p(m_1,\dots,m_t,\,z_t=k), & \alpha_1(k)&=\rho_k\eta_1(k), & \alpha_{t+1}(k)&=\eta_{t+1}(k)\textstyle\sum_j\alpha_t(j)A_{jk},\\
+\beta_t(k)&=p(m_{t+1},\dots,m_T\mid z_t=k), & \beta_T(k)&=1, & \beta_t(j)&=\textstyle\sum_kA_{jk}\,\eta_{t+1}(k)\,\beta_{t+1}(k).
+\end{align}
+$\alpha$ looks at the past and today; $\beta$ looks at the future.
+
+\paragraph{The five uses.}
+\begin{enumerate}
+  \item \emph{The likelihood:}
+  \begin{equation}
+  p(m_{1:T})=\sum_k\alpha_T(k)=\sum_k\alpha_t(k)\,\beta_t(k)\quad\text{for every }t.
+  \end{equation}
+  The second form gives a useful check that the code is correct.
+  \item \emph{The filtered probability (the gate's ingredient):} $\xi_{t\mid t}(k)=\alpha_t(k)/\sum_j\alpha_t(j)$.
+  \item \emph{The gate:} $\pi_k(t)=\sum_jA_{jk}\,\xi_{t\mid t}(j)$, eq.~\eqref{eq:gate}.
+  \item \emph{The smoothed probability of a single regime:} $\gamma_t(k)=\mathbb P(z_t=k\mid\F_T)=\alpha_t(k)\,\beta_t(k)/p(m_{1:T})$.
+  \item \emph{The smoothed probability of a transition:}
+  \begin{equation}
+  \xi_t(j,k)=\frac{\overbrace{\alpha_t(j)}^{\text{past, end in }j}\;\overbrace{A_{jk}}^{\text{jump}}\;\overbrace{\eta_{t+1}(k)}^{\text{tomorrow in }k}\;\overbrace{\beta_{t+1}(k)}^{\text{later data from }k}}{p(m_{1:T})}.
+  \end{equation}
+\end{enumerate}
+
+\paragraph{The Baum--Welch loop.}
+\begin{enumerate}
+  \item \emph{Initialise} $\rho,A,\nu,\sigma$, e.g.\ $A$ with $0.9$ on the diagonal and the rest spread evenly.
+  \item \emph{E-step:} forward and backward passes, then $\gamma_t(k)$ and $\xi_t(j,k)$.
+  \item \emph{M-step}, all in closed form:
+  \begin{equation}
+  \rho_k=\gamma_1(k),\quad A_{jk}=\frac{\sum_{t=1}^{T-1}\xi_t(j,k)}{\sum_{t=1}^{T-1}\gamma_t(j)},\quad\nu_k=\frac{\sum_t\gamma_t(k)\,m_t}{\sum_t\gamma_t(k)},\quad\sigma_k^2=\frac{\sum_t\gamma_t(k)(m_t-\nu_k)^2}{\sum_t\gamma_t(k)}.
+  \end{equation}
+  \item \emph{Monitor} $\log p(m_{1:T})$, which EM never decreases (Section 4.4). Stop when it stops changing.
+  \item \emph{Restart} from several initial values and keep the run with the highest likelihood.
+\end{enumerate}
+
+\paragraph{Scaling (Bishop \S13.2.4).} $\alpha_t$ is a product of $t$ densities and underflows. Work with normalised quantities instead:
+\begin{equation}
+\hat\alpha_t(k)=\xi_{t\mid t}(k),\qquad c_t=p(m_t\mid\F_{t-1}),\qquad\log p(m_{1:T})=\sum_{t=1}^T\log c_t,
+\end{equation}
+\begin{gather}
+\hat\beta_T(k)=1,\qquad\hat\beta_t(j)=\frac{\sum_kA_{jk}\,\eta_{t+1}(k)\,\hat\beta_{t+1}(k)}{c_{t+1}},\\
+\gamma_t(k)=\hat\alpha_t(k)\,\hat\beta_t(k),\qquad\xi_t(j,k)=\frac{\hat\alpha_t(j)\,A_{jk}\,\eta_{t+1}(k)\,\hat\beta_{t+1}(k)}{c_{t+1}}.
+\end{gather}
+The normalised forward pass is exactly the Hamilton filter. The Kim smoother used in \path{Model_Derivation_BaseCase.md} is another way of computing the same $\gamma_t$. Packages such as \texttt{statsmodels} maximise the same likelihood, with a few EM iterations followed by a numerical optimiser.
+
+\begin{warnbox}{$\alpha$ is legal for forecasting, $\beta$ is not}
+$\beta_t$ contains $m_{t+1},\dots,m_T$, so $\gamma_t$ and $\xi_t(j,k)$ are $\F_T$-measurable but not $\F_t$-measurable (Section 1.4). They may be used only inside the M-step on the \emph{training block}. The walk-forward procedure is therefore: fit Baum--Welch on the training block, freeze $\theta_g$, then run \emph{only the forward pass} through validation and test.
+\end{warnbox}
+
+\subsection{Initialising and labelling}
+\begin{itemize}
+  \item \emph{Simulating data.} Choose $A$ yourself (as in the example) and draw $z_{t+1}$ from the categorical distribution given by row $z_t$.
+  \item \emph{Starting values for EM.} Use a heavy diagonal or random rows, with several restarts.
+  \item \emph{Label switching.} Permuting the state labels permutes the rows and columns of $A$ and leaves the likelihood unchanged. To make ``state 1'' mean the same thing in every walk-forward fold, order the states after fitting, e.g.\ by $\sigma_k$ from low to high. The HMM is fitted first, so this ordering also fixes which expert is which.
+\end{itemize}
+\newpage

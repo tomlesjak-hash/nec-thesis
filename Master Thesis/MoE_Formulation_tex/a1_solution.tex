@@ -1,0 +1,108 @@
+\section{Solution to Exercise A1}
+
+Throughout, $\N_{nk}:=\N(y_n;\beta_k\T x_n,s_k^2)$ and $\pi_{nk}:=\pi_k(x_n;w)$.
+
+\paragraph{(a) Generative story and graph.} For each $n$: given $x_n$, draw the expert label, then the target,
+\begin{equation*}
+z_n\sim\text{Cat}(\pi_{n1},\dots,\pi_{nK}),\qquad y_n\sim\N\big(\beta_{z_n}\T x_n,\,s_{z_n}^2\big).
+\end{equation*} The graph is the one in Section 4.2 with $u_n=x_n$. Observed: $x_n,y_n$. Latent: $z_n$. Parameters: $w$ (entering at $z_n$) and $\beta_k,s_k$ (entering at $y_n$). The plate is over $n$, so the $z_n$ are independent across observations.
+
+\paragraph{(b) Complete-data likelihood.} Exactly one $z_{nk}=1$ for each $n$, so
+\begin{equation}
+p(Y,Z\mid X;\Psi)=\prod_{n=1}^N\prod_{k=1}^K\big[\pi_{nk}\,\N_{nk}\big]^{z_{nk}},\qquad\log L_c(\Psi)=\sum_{n=1}^N\sum_{k=1}^Kz_{nk}\big[\log\pi_{nk}+\log\N_{nk}\big].
+\end{equation}
+
+\paragraph{(c) Observed-data log-likelihood.} Summing over $Z$ means summing over every $z_n$. The factor for observation $n$ depends only on $z_n$, so the sum moves inside the product. This is what fails in an HMM, where transitions link neighbouring latents:
+\begin{equation}
+p(Y\mid X;\Psi)=\sum_{z_1}\cdots\sum_{z_N}\prod_n\prod_k\big[\pi_{nk}\N_{nk}\big]^{z_{nk}}=\prod_n\sum_{z_n}\prod_k\big[\pi_{nk}\N_{nk}\big]^{z_{nk}}=\prod_n\sum_k\pi_{nk}\N_{nk}.
+\end{equation}
+The last step holds because, when $z_n$ has its $1$ in position $j$, every factor with $k\ne j$ equals $1$. Hence
+\begin{equation}
+\log L(\Psi)=\sum_{n=1}^N\log\sum_{k=1}^K\pi_k(x_n;w)\,\N(y_n;\beta_k\T x_n,s_k^2).
+\end{equation}
+The sum inside the logarithm couples $w$, every $\beta_k$ and every $s_k$, and the function is not concave. Setting the gradient to zero gives equations in which the responsibilities themselves depend on all the parameters, so there is no closed-form solution.
+
+\paragraph{(d) E-step.} By Bayes' rule,
+\begin{equation}
+\tau_{nk}^{(q)}=p(z_{nk}=1\mid y_n,x_n;\Psi^{(q)})=\frac{p(z_{nk}=1\mid x_n)\,p(y_n\mid x_n,z_{nk}=1)}{p(y_n\mid x_n)}=\frac{\pi_{nk}^{(q)}\N_{nk}^{(q)}}{\sum_j\pi_{nj}^{(q)}\N_{nj}^{(q)}}.
+\end{equation}
+
+\paragraph{(e) The $Q$-function.} $\log L_c$ is linear in $z_{nk}$, so its expectation replaces $z_{nk}$ by $\tau_{nk}^{(q)}$:
+\begin{equation}
+Q(\Psi;\Psi^{(q)})=\underbrace{\sum_n\sum_k\tau^{(q)}_{nk}\log\pi_k(x_n;w)}_{Q_{\text{gate}}(w)}+\sum_{k=1}^K\underbrace{\sum_n\tau^{(q)}_{nk}\log\N(y_n;\beta_k\T x_n,s_k^2)}_{Q_k(\beta_k,s_k^2)}.
+\end{equation}
+The gate term involves only $w$, and each $Q_k$ involves only $(\beta_k,s_k^2)$, so the M-step splits into $K+1$ separate problems.
+
+\paragraph{(f) Expert M-step.} Writing out the Gaussian,
+\begin{equation}
+Q_k=\sum_n\tau_{nk}\Big[-\tfrac12\log2\pi-\tfrac12\log s_k^2-\frac{(y_n-\beta_k\T x_n)^2}{2s_k^2}\Big].
+\end{equation}
+Differentiate with respect to $\beta_k$ and set to zero:
+\begin{equation}
+\frac{\partial Q_k}{\partial\beta_k}=\frac1{s_k^2}\sum_n\tau_{nk}(y_n-\beta_k\T x_n)\,x_n=0\quad\Rightarrow\quad\Big(\sum_n\tau_{nk}x_nx_n\T\Big)\beta_k=\sum_n\tau_{nk}x_ny_n.
+\end{equation}
+With $X$ the $N\times d$ design matrix, $y$ the target vector and $W_k=\diag(\tau_{1k},\dots,\tau_{Nk})$,
+\begin{equation}
+\beta_k^{(q+1)}=\big(X\T W_kX\big)^{-1}X\T W_ky.
+\end{equation}
+This is weighted least squares (Chamroukhi \& Nguyen eq.~18). Next differentiate with respect to $s_k^2$:
+\begin{equation}
+\frac{\partial Q_k}{\partial s_k^2}=-\frac{1}{2s_k^2}\sum_n\tau_{nk}+\frac{1}{2s_k^4}\sum_n\tau_{nk}(y_n-\beta_k\T x_n)^2=0\quad\Rightarrow\quad s_k^{2\,(q+1)}=\frac{\sum_n\tau_{nk}\big(y_n-\beta_k^{(q+1)\top}x_n\big)^2}{\sum_n\tau_{nk}}.
+\end{equation}
+
+\paragraph{(g) Gate M-step.} Using $\log\pi_{nk}=w_k\T x_n-\log\sum_j\exp(w_j\T x_n)$ and $\sum_k\tau_{nk}=1$,
+\begin{equation}
+Q_{\text{gate}}(w)=\sum_n\Big[\sum_k\tau_{nk}w_k\T x_n-\log\sum_j\exp(w_j\T x_n)\Big].
+\end{equation}
+\emph{Gradient}, for $k=1,\dots,K-1$:
+\begin{equation}
+\frac{\partial Q_{\text{gate}}}{\partial w_k}=\sum_n\big(\tau_{nk}-\pi_{nk}\big)\,x_n.
+\end{equation}
+\emph{Hessian blocks}, from $\partial\pi_{nk}/\partial w_l=\pi_{nk}(\delta_{kl}-\pi_{nl})x_n$:
+\begin{equation}
+\frac{\partial^2Q_{\text{gate}}}{\partial w_k\,\partial w_l\T}=-\sum_n\pi_{nk}(\delta_{kl}-\pi_{nl})\,x_nx_n\T.
+\end{equation}
+\emph{Concavity.} Stack $w=(w_1,\dots,w_{K-1})$. The Hessian is $-\sum_n\big(\diag(\pi_n)-\pi_n\pi_n\T\big)\otimes x_nx_n\T$. Here $\pi_n$ means the first $K-1$ components. The matrix $\diag(\pi_n)-\pi_n\pi_n\T$ is the covariance matrix of those components of a one-hot categorical vector, so it is positive semidefinite, and a Kronecker product of positive semidefinite matrices is positive semidefinite. The Hessian is therefore negative semidefinite and $Q_{\text{gate}}$ is concave: Newton's method finds its global maximum.
+
+\emph{No closed form.} The first-order condition $\sum_n(\tau_{nk}-\pi_{nk}(w))x_n=0$ is nonlinear in $w$, because $w$ sits inside exponentials.
+
+\emph{One Newton--Raphson step:}
+\begin{equation}
+w^{\text{new}}=w^{\text{old}}-H^{-1}g.
+\end{equation}
+For $K=2$ this is the familiar IRLS form. With $R=\diag\big(\pi_{n1}(1-\pi_{n1})\big)$ and $\tau=(\tau_{n1})_n$,
+\begin{equation}
+w_1^{\text{new}}=w_1^{\text{old}}+(X\T RX)^{-1}X\T(\tau-\pi)=(X\T RX)^{-1}X\T R\,\zeta,\qquad\zeta=Xw_1^{\text{old}}+R^{-1}(\tau-\pi).
+\end{equation}
+This is a weighted least-squares regression on a working response $\zeta$, repeated until convergence (Bishop \S4.3.3; Chamroukhi \& Nguyen \S4.3.2).
+
+\paragraph{(h) Gate without input.} Now $\pi_k=\alpha_k$ is a constant. Maximise $\sum_n\sum_k\tau_{nk}\log\alpha_k$ subject to $\sum_k\alpha_k=1$:
+\begin{equation}
+\frac{\partial}{\partial\alpha_k}\Big[\sum_{n,k}\tau_{nk}\log\alpha_k+\lambda\Big(1-\sum_k\alpha_k\Big)\Big]=\frac{\sum_n\tau_{nk}}{\alpha_k}-\lambda=0.
+\end{equation}
+Summing $\alpha_k=\sum_n\tau_{nk}/\lambda$ over $k$ gives $\lambda=N$, so $\alpha_k^{(q+1)}=\frac1N\sum_n\tau_{nk}^{(q)}$ (Chamroukhi \& Nguyen eq.~8). Equivalently, the gradient in (g) with $x_n\equiv1$ is $\sum_n(\tau_{nk}-\alpha_k)=0$.
+
+\paragraph{(i) The panel version.} One $z_t$ per date, shared by all $i\in\mathcal S_t$; gate $\pi_k(u_t;w)$; write $\N_{itk}=\N(r_{i,t+1};\beta_k\T x_{i,t},s_k^2)$.
+\begin{align}
+\text{(b)}\quad&p(R,Z\mid X,U)=\prod_t\prod_k\Big[\pi_k(u_t)\prod_{i\in\mathcal S_t}\N_{itk}\Big]^{z_{tk}},\\
+\text{(c)}\quad&\log L=\sum_t\log\sum_k\pi_k(u_t)\prod_{i\in\mathcal S_t}\N_{itk},\\
+\text{(d)}\quad&\tau_{tk}=\frac{\pi_k(u_t)\prod_i\N_{itk}}{\sum_j\pi_j(u_t)\prod_i\N_{itj}},\\
+\text{(f)}\quad&\beta_k=\Big(\sum_t\tau_{tk}X_t\T X_t\Big)^{-1}\sum_t\tau_{tk}X_t\T r_{t+1},\qquad s_k^2=\frac{\sum_t\tau_{tk}\,\|r_{t+1}-X_t\beta_k\|^2}{\sum_t\tau_{tk}N_t},
+\end{align}
+where $X_t$ is the $N_t\times d$ matrix of today's characteristics and $r_{t+1}$ the vector of tomorrow's returns. These are Chamroukhi \& Nguyen eqs.~18--19 with curve $=$ date and point $=$ stock.
+
+\emph{What changes in $\tau$.} The log-odds are
+\begin{equation}
+\log\frac{\tau_{tk}}{\tau_{tj}}=\log\frac{\pi_k(u_t)}{\pi_j(u_t)}+\sum_{i\in\mathcal S_t}\log\frac{\N_{itk}}{\N_{itj}}.
+\end{equation}
+The evidence term is a sum of $N_t$ terms whose expectation under the true regime is $N_t$ times a positive Kullback--Leibler divergence. It grows linearly in $N_t$, so with hundreds of stocks the posterior is close to $0$ or $1$ and the prior hardly matters. In the per-row model only one term enters (Section 7.5 and Appendix~\ref{app:perrow}).
+
+\paragraph{(j) EM never decreases the likelihood.} Since $\log p(Y\mid\Psi)=\log p(Y,Z\mid\Psi)-\log p(Z\mid Y,\Psi)$ for every $Z$, take the expectation over $Z\sim p(\cdot\mid Y;\Psi^{(q)})$:
+\begin{equation}
+\log L(\Psi)=\underbrace{\E\big[\log p(Y,Z\mid\Psi)\big]}_{Q(\Psi;\Psi^{(q)})}\;\underbrace{-\;\E\big[\log p(Z\mid Y,\Psi)\big]}_{H(\Psi;\Psi^{(q)})}.
+\end{equation}
+$H(\Psi;\Psi^{(q)})$ is a cross-entropy between $p(\cdot\mid Y;\Psi^{(q)})$ and $p(\cdot\mid Y;\Psi)$. By Gibbs' inequality it is minimised at $\Psi=\Psi^{(q)}$, so $H(\Psi^{(q+1)};\Psi^{(q)})\ge H(\Psi^{(q)};\Psi^{(q)})$. Therefore
+\begin{equation}
+\log L(\Psi^{(q+1)})-\log L(\Psi^{(q)})=\underbrace{\big[Q(\Psi^{(q+1)};\Psi^{(q)})-Q(\Psi^{(q)};\Psi^{(q)})\big]}_{\ge0\text{ by the M-step}}+\underbrace{\big[H(\Psi^{(q+1)};\Psi^{(q)})-H(\Psi^{(q)};\Psi^{(q)})\big]}_{\ge0\text{ by Gibbs}}\ge0.
+\end{equation}
+\newpage

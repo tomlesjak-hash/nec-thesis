@@ -1,0 +1,127 @@
+\section{The full generative model (base case)}
+
+\subsection{The generative story}
+
+Days run $t=1,\dots,T$. On each day the universe $\mathcal S_t$ is fixed at the close, characteristics $x_{i,t}$ are observed, and tomorrow's returns $r_{i,t+1}$ are the targets.
+
+\begin{enumerate}
+  \item \textbf{Regime.} $z_1\sim\text{Cat}(\rho)$. For $t\ge1$, tomorrow's regime is drawn from row $z_t$ of $A$:
+  \begin{equation}
+  z_{t+1}\mid z_t=j\ \sim\ \text{Cat}\big(A_{j1},\dots,A_{jK}\big).
+  \end{equation}
+  \item \textbf{Market.} The market return is drawn from the regime's Gaussian:
+  \begin{equation}
+  m_{t}\mid z_{t}=k\ \sim\ \N\big(\nu_k,\sigma_k^2\big).
+  \end{equation}
+  \item \textbf{Cross-section.} For every $i\in\mathcal S_t$, tomorrow's return is drawn from the expert of tomorrow's regime, with a mean set by the stock's characteristics today:
+  \begin{equation}
+  r_{i,t+1}\mid z_{t+1}=k,\ x_{i,t}\ \sim\ \N\big(\mu_k(x_{i,t}),\,s_k^2\big),\qquad\mu_k(x)=f_0(x)+c_k(x;\psi_k).
+  \end{equation}
+\end{enumerate}
+
+\subsection{The graph}
+
+\begin{center}
+\begin{tikzpicture}[node distance=16mm]
+\node[lat] (zt) {$z_t$};
+\node[lat,right=22mm of zt] (zt1) {$z_{t+1}$};
+\node[lat,right=22mm of zt1] (zt2) {$z_{t+2}$};
+\node[left=8mm of zt] (dl) {$\cdots$}; \node[right=8mm of zt2] (dr) {$\cdots$};
+\draw[edge] (dl)--(zt); \draw[edge] (zt)--node[above]{$A$}(zt1); \draw[edge] (zt1)--node[above]{$A$}(zt2); \draw[edge] (zt2)--(dr);
+\node[obs,above=9mm of zt] (mt) {$m_t$};
+\node[obs,above=9mm of zt1] (mt1) {$m_{t+1}$};
+\node[obs,above=9mm of zt2] (mt2) {$m_{t+2}$};
+\draw[edge] (zt)--(mt); \draw[edge] (zt1)--(mt1); \draw[edge] (zt2)--(mt2);
+\node[obs,below=14mm of zt1] (r) {$r_{i,t+1}$};
+\node[obs,left=14mm of r] (x) {$x_{i,t}$};
+\draw[edge] (x)--(r); \draw[edge] (zt1)--(r);
+\begin{scope}[on background layer]
+\node[plate,fit=(x)(r),label={[anchor=north east]south east:{$i\in\mathcal S_t$}}] {};
+\end{scope}
+\node[par,right=14mm of r,label=right:{$\psi_k,s_k$ (experts), $f_0$ frozen}] (pe) {}; \draw[edge] (pe)--(r);
+\node[par,above=7mm of mt1,label=above:{$\nu_k,\sigma_k$}] (pg) {}; \draw[edge] (pg)--(mt1);
+\end{tikzpicture}
+\end{center}
+
+The model has two layers.
+\begin{itemize}
+  \item \textbf{The HMM layer:} a chain over days, in which each regime emits that day's market return.
+  \item \textbf{The cross-section layer:} a plate over stocks. Each stock's return has two parents, the \emph{shared} regime of its day and its \emph{own} characteristics.
+\end{itemize}
+Equivalently, this is an HMM whose emission on day $t+1$ is the whole vector
+\begin{equation*}
+\big(m_{t+1},\,r_{1,t+1},\,\dots,\,r_{N_t,t+1}\big).
+\end{equation*}
+It is Chamroukhi \& Nguyen's HMM regression (\S4.2) with a vector-valued observation at each time point.
+
+\subsection{Deriving the joint distribution}
+
+Write $R$ for all returns $r_{i,t+1}$ ($t=1,\dots,T-1$, $i\in\mathcal S_t$) and $X$ for all characteristics.
+
+\paragraph{Step 1: product rule} (always true):
+\begin{equation}
+p(z_{1:T},m_{1:T},R\mid X)=p(z_{1:T}\mid X)\;p(m_{1:T}\mid z_{1:T},X)\;p(R\mid m_{1:T},z_{1:T},X).
+\end{equation}
+
+\paragraph{Step 2: the regime path.} Two assumptions:
+\begin{itemize}
+  \item \textbf{A0 (exogenous characteristics):} $p(z_{1:T}\mid X)=p(z_{1:T})$.
+  \item \textbf{A1 (Markov):} $p(z_{t+1}\mid z_{1:t})=p(z_{t+1}\mid z_t)$.
+\end{itemize}
+Using the chain rule and then A1,
+\begin{equation}
+p(z_{1:T})=p(z_1)\prod_{t=1}^{T-1}p(z_{t+1}\mid z_{1:t})\overset{\text{A1}}{=}p(z_1)\prod_{t=1}^{T-1}A_{z_tz_{t+1}}.
+\end{equation}
+
+\paragraph{Step 3: the market series.}
+\begin{itemize}
+  \item \textbf{A2 (market emission):} given its own day's regime, $m_t$ is independent of all other regimes, all other market returns and the characteristics.
+\end{itemize}
+\begin{equation}
+p(m_{1:T}\mid z_{1:T},X)=\prod_{t=1}^Tp(m_t\mid m_{1:t-1},z_{1:T},X)\overset{\text{A2}}{=}\prod_{t=1}^T\N(m_t;\nu_{z_t},\sigma_{z_t}^2).
+\end{equation}
+
+\paragraph{Step 4: the cross-section.}
+\begin{itemize}
+  \item \textbf{A3 (cross-sectional emission):} given $z_{t+1}$ and its own $x_{i,t}$, $r_{i,t+1}$ is independent of (a) the other stocks' returns, (b) the market return $m_{t+1}$, (c) all other days' returns and (d) the regimes on other days.
+\end{itemize}
+\begin{equation}
+p(R\mid m_{1:T},z_{1:T},X)\overset{\text{A3}}{=}\prod_{t=1}^{T-1}\prod_{i\in\mathcal S_t}\N\big(r_{i,t+1};\mu_{z_{t+1}}(x_{i,t}),s_{z_{t+1}}^2\big).
+\end{equation}
+
+\paragraph{Result.}
+\begin{equation}\label{eq:joint}
+\boxed{\begin{aligned}p(z_{1:T},m_{1:T},R\mid X)&=p(z_1)\prod_{t=1}^{T-1}A_{z_tz_{t+1}}\;\prod_{t=1}^{T}\N\big(m_t;\nu_{z_t},\sigma_{z_t}^2\big)\\&\quad\times\prod_{t=1}^{T-1}\prod_{i\in\mathcal S_t}\N\big(r_{i,t+1};\mu_{z_{t+1}}(x_{i,t}),s_{z_{t+1}}^2\big)\end{aligned}}
+\end{equation}
+This is Bishop's eq.~13.10 with one extra product over stocks inside each day. It can be read straight off the graph: one factor per node, each conditioned on its parents (Bishop eq.~8.5).
+
+\subsection{What kind of quantity each symbol is}
+\begin{center}
+\renewcommand{\arraystretch}{1.25}
+\begin{tabularx}{\textwidth}{@{}lX@{}}
+\toprule
+Role & Quantities \\
+\midrule
+Observed & market series $m_{1:T}$, stock returns $r_{i,t+1}$ \\
+Conditioned on, not modelled & characteristics $x_{i,t}$, universe $\mathcal S_t$ \\
+Latent & regimes $z_{1:T}$ \\
+Gate parameters $\theta_g$ & $\rho$, $A$, $\nu_k$, $\sigma_k$ \\
+Base parameters (frozen) & $\phi$ inside $f_0$ \\
+Expert parameters & $\psi_k$ inside $c_k$, noise $s_k$ \\
+\bottomrule
+\end{tabularx}
+\end{center}
+The cross-section part of the model is \emph{discriminative}: it models returns given characteristics, never the characteristics themselves. The market part is \emph{generative}: it models the series itself.
+
+\subsection{How realistic the assumptions are}
+\begin{itemize}
+  \item \textbf{A0} is mild. Characteristics such as momentum do vary with the regime, but we condition on them rather than use them to infer it. This is the design choice that keeps stock information out of the gate.
+  \item \textbf{A1} carries the persistence. It implies geometric regime durations (Chamroukhi \& Nguyen \S4.3).
+  \item \textbf{A2} holds for a plain Gaussian Hamilton model. The autoregressive version deliberately breaks it, which is the origin of the alignment bug G-2.
+  \item \textbf{A3(b)} is the weak point for \emph{raw} returns. The market return is roughly the average of the stock returns, so on a $-4\%$ day almost every stock is down beyond what the regime explains. With the \emph{market-neutral} target the study uses (Q25) the common shock is removed and A3(b) becomes a reasonable approximation.
+  \item \textbf{A3(a)} is only approximate, because industry peers stay correlated. This would make the per-date posterior of Section 7 overconfident, and is one reason the experts are trained on the per-row composite likelihood instead (Section 7.3, Q24).
+  \item \textbf{A4 (homoskedastic experts):} $s_k$ is the same for every stock in regime $k$ (Section 3.3).
+\end{itemize}
+
+\paragraph{Base-case estimation} (Section 7). The gate parameters are fitted by maximum likelihood on the market series (Baum--Welch) and frozen. The expert parameters are then fitted by maximising the mixture likelihood of the returns. There are no penalties, no tempering and no joint fit.
+\newpage

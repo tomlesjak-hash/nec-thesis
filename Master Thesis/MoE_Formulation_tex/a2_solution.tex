@@ -1,0 +1,90 @@
+\section{Solution to Exercise A2}
+
+Write $\eta_t(k)=\N(m_t;\nu_k,\sigma_k^2)$, $\N_{itk}=\N(r_{i,t+1};\beta_k\T x_{i,t},s_k^2)$, $X_t$ for the $N_t\times d$ matrix of today's characteristics and $r_{t+1}$ for the vector of tomorrow's returns.
+
+\paragraph{(a) Graph.} The graph is the one in Section 6.2, with linear expert means. Observed: $m_{1:T}$ and $r_{i,t+1}$. Conditioned on only: $x_{i,t}$ and $\mathcal S_t$. Latent: $z_{1:T}$. Parameters: $\rho,A,\nu,\sigma$ (gate) and $\beta_k,s_k$ (experts).
+
+\paragraph{(b) Joint.} This is Section 6.3 with assumptions A0--A3 and $\mu_k(x)=\beta_k\T x$:
+\begin{equation}
+p(z_{1:T},m_{1:T},R\mid X)=\rho_{z_1}\prod_{t=1}^{T-1}A_{z_tz_{t+1}}\prod_{t=1}^T\eta_t(z_t)\prod_{t=1}^{T-1}\prod_{i\in\mathcal S_t}\N_{i,t,z_{t+1}}.
+\end{equation}
+
+\paragraph{(c) Emissions and the forward recursion.} Group everything that day $t+1$ emits:
+\begin{equation}
+e_1(k)=\eta_1(k),\qquad e_{t+1}(k)=\eta_{t+1}(k)\prod_{i\in\mathcal S_t}\N_{itk}.
+\end{equation}
+Then the model is a standard HMM with emissions $e_t$, and
+\begin{equation}
+L=\sum_{z_1,\dots,z_T}\rho_{z_1}e_1(z_1)\prod_{t=1}^{T-1}A_{z_tz_{t+1}}\,e_{t+1}(z_{t+1}).
+\end{equation}
+The scaled forward recursion (Bishop \S13.2.4) is
+\begin{equation}
+c_1=\sum_k\rho_ke_1(k),\quad\hat\alpha_1(k)=\frac{\rho_ke_1(k)}{c_1},\qquad c_{t+1}=\sum_ke_{t+1}(k)\sum_j\hat\alpha_t(j)A_{jk},\quad\hat\alpha_{t+1}(k)=\frac{e_{t+1}(k)\sum_j\hat\alpha_t(j)A_{jk}}{c_{t+1}},
+\end{equation}
+with $\log L=\sum_t\log c_t$. Each step costs $O(K^2)$ for the sum over $j$, plus $O(N_tK)$ to evaluate the emissions, so the whole pass costs $O(TK^2+K\sum_tN_t)$ instead of the $K^T$ terms of the path sum.
+
+\paragraph{(d) Backward recursion and posteriors.}
+\begin{equation}
+\hat\beta_T(k)=1,\qquad\hat\beta_t(j)=\frac{\sum_kA_{jk}\,e_{t+1}(k)\,\hat\beta_{t+1}(k)}{c_{t+1}},
+\end{equation}
+\begin{equation}
+\gamma_t(k)=\hat\alpha_t(k)\,\hat\beta_t(k),\qquad\xi_t(j,k)=\frac{\hat\alpha_t(j)\,A_{jk}\,e_{t+1}(k)\,\hat\beta_{t+1}(k)}{c_{t+1}}.
+\end{equation}
+
+\paragraph{(e) $Q$ and the M-step.} Taking the expectation of the log of (b) under the posterior,
+\begin{equation}
+Q=\sum_k\gamma_1(k)\log\rho_k+\sum_{t=1}^{T-1}\sum_{j,k}\xi_t(j,k)\log A_{jk}+\sum_{t=1}^T\sum_k\gamma_t(k)\log\eta_t(k)+\sum_{t=1}^{T-1}\sum_k\gamma_{t+1}(k)\sum_{i\in\mathcal S_t}\log\N_{itk}.
+\end{equation}
+Each block is maximised separately:
+\begin{align}
+\rho_k&=\gamma_1(k),\qquad A_{jk}=\frac{\sum_{t=1}^{T-1}\xi_t(j,k)}{\sum_{t=1}^{T-1}\gamma_t(j)},\qquad\nu_k=\frac{\sum_t\gamma_t(k)m_t}{\sum_t\gamma_t(k)},\qquad\sigma_k^2=\frac{\sum_t\gamma_t(k)(m_t-\nu_k)^2}{\sum_t\gamma_t(k)},\\
+\beta_k&=\Big(\sum_{t=1}^{T-1}\gamma_{t+1}(k)\,X_t\T X_t\Big)^{-1}\sum_{t=1}^{T-1}\gamma_{t+1}(k)\,X_t\T r_{t+1},\qquad s_k^2=\frac{\sum_t\gamma_{t+1}(k)\,\|r_{t+1}-X_t\beta_k\|^2}{\sum_t\gamma_{t+1}(k)\,N_t}.
+\end{align}
+Comparison with Chamroukhi \& Nguyen eq.~(46), $\beta_{kr}=[\sum_i\tau_{ik}X_i\T W_{ikr}X_i]^{-1}\sum_i\tau_{ik}X_i\T W_{ikr}y_i$:
+\begin{itemize}
+  \item there is one curve and one cluster, so $\tau=1$;
+  \item their diagonal weight matrix $W_{ikr}$ holds one regime posterior per time point;
+  \item in our model each time point is a whole date, so the weight $\gamma_{t+1}(k)$ is repeated across the $N_t$ stocks of that date and multiplies the block $X_t\T X_t$.
+\end{itemize}
+
+\paragraph{(f) The two-stage version.}
+\begin{itemize}
+  \item \emph{Stage 1:} Baum--Welch as above but with $e_t=\eta_t$, the market only (Section 5.5).
+  \item \emph{Stage 2:} the gate $\pi_k(t)=\sum_jA_{jk}\,\xi_{t\mid t}(j)$ comes from the market-only filter.
+    \begin{itemize}
+      \item E-step: $\gamma^{\text{cs}}_{t}(k)\propto\pi_k(t)\prod_i\N_{itk}$, per date, with no recursion.
+      \item M-step: the same $\beta_k$ and $s_k^2$ formulas as in (e), with $\gamma^{\text{cs}}_t(k)$ in place of $\gamma_{t+1}(k)$.
+    \end{itemize}
+\end{itemize}
+The joint fit uses two things that the two-stage fit ignores:
+\begin{enumerate}
+  \item the cross-section's evidence about the regime, carried \emph{across dates} by $A$ in both directions (forward and backward);
+  \item that evidence when re-estimating $A$, $\nu$ and $\sigma$.
+\end{enumerate}
+Because $\prod_i\N_{itk}$ dominates $\eta_t$, the joint fit lets the cross-section define the regimes. The two-stage fit keeps them market-defined.
+
+\paragraph{(g) Forecasting.}
+\begin{itemize}
+  \item \emph{Two-stage:} at the close of $t$, use $\pi_k(t)=\mathbb P(z_{t+1}=k\mid\F_t)$.
+  \item \emph{Joint model:} use $\sum_jA_{jk}\hat\alpha_t(j)$ from the joint forward pass. This conditions on past market data \emph{and} past returns, so it is $\mathcal G_t$-measurable and legal.
+\end{itemize}
+The smoothed $\gamma_{t+1}=\hat\alpha_{t+1}\hat\beta_{t+1}$ is look-ahead twice over: $\hat\alpha_{t+1}$ already contains $e_{t+1}$, i.e.\ tomorrow's returns, which are the target; and $\hat\beta_{t+1}$ contains every later observation. It is not $\mathcal G_t$-measurable.
+
+\paragraph{(h) Mapping onto the mixture of HMM regressions (Chamroukhi \& Nguyen \S4.2).}
+\begin{center}
+\renewcommand{\arraystretch}{1.25}
+\begin{tabular}{@{}ll@{}}
+\toprule
+Chamroukhi \& Nguyen & Our model \\
+\midrule
+$n$ curves & one long series ($n=1$) \\
+$K$ clusters of curves & one cluster ($\tau_{i1}=1$) \\
+$R_k$ regimes & our $K$ regimes \\
+time points $j=1,\dots,m_i$ & dates $t=1,\dots,T$ \\
+scalar $y_{ij}$ & the vector $(m_{t+1},r_{1,t+1},\dots,r_{N_t,t+1})$ \\
+covariate $x_j$ (polynomial in time) & the design matrix $X_t$ of stock characteristics \\
+diagonal $W_{ikr}$ of $\gamma_{ijr}$ & $\gamma_{t+1}(k)$ repeated over the stocks of each date \\
+\bottomrule
+\end{tabular}
+\end{center}
+\newpage

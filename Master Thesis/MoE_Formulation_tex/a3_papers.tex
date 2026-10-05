@@ -1,0 +1,52 @@
+\section{References and what each one gives}
+
+\paragraph{Textbook.} C.~M.~Bishop (2006), \emph{Pattern Recognition and Machine Learning}:
+\begin{itemize}
+  \item \S3.1: linear basis-function models;
+  \item \S4.2--4.3: where the softmax comes from, and IRLS;
+  \item \S5.1--5.3: MLPs and backpropagation;
+  \item \S9.2--9.4: mixtures, EM, and the lower bound;
+  \item \S13.1--13.2: Markov chains, HMMs, forward--backward and Baum--Welch;
+  \item \S14.5: mixtures of linear regressions and mixtures of experts.
+\end{itemize}
+
+\paragraph{Warm-up reference.} F.~Chamroukhi and H.~D.~Nguyen (2018), \emph{Model-Based Clustering and Classification of Functional Data}, arXiv:1803.00276. EM for regression mixtures (\S3), the softmax-gated RHLP (\S4.3), and the mixture of HMM regressions (\S4.2).
+
+\paragraph{The mixture-of-experts canon.}
+\begin{itemize}
+  \item R.~A.~Jacobs, M.~I.~Jordan, S.~J.~Nowlan and G.~E.~Hinton (1991), Adaptive mixtures of local experts, \emph{Neural Computation} 3(1), 79--87. Eq.~1.3 is the per-observation mixture negative log-likelihood; eq.~1.5 is the responsibility-weighted gradient.
+  \item M.~I.~Jordan and R.~A.~Jacobs (1994), Hierarchical mixtures of experts and the EM algorithm, \emph{Neural Computation} 6(2), 181--214. Indicator variables, the complete-data likelihood, and the E-step posterior $h$.
+  \item A.~S.~Weigend, M.~Mangeas and A.~N.~Srivastava (1995), Nonlinear gated experts for time series: discovering regimes and avoiding overfitting, \emph{International Journal of Neural Systems} 6(4), 373--399. MLP experts (10 tanh units) and an MLP gate (20 units); eqs.~5, 9--10, 12 are the derivation of Section 4. Takeaways:
+  \begin{itemize}
+    \item expert-specific variances matter for discovering regimes (footnote 12);
+    \item the variance can be shrunk towards a prior value (eq.~23);
+    \item the expert gradient $h/\sigma^2$ amounts to a weighted regression (eq.~24);
+    \item a scatter of $g$ against $h$ is a useful diagnostic;
+    \item start with more experts than needed;
+    \item seeds are unstable when regime variances differ by less than a factor of three.
+  \end{itemize}
+  \item Y.~Bengio and P.~Frasconi (1996), Input--output HMMs for sequence processing, \emph{IEEE Transactions on Neural Networks} 7(5), 1231--1249. A hidden Markov chain whose states select neural experts.
+  \item H.~D.~Nguyen and F.~Chamroukhi (2018), Practical and theoretical aspects of mixture-of-experts modeling: an overview, \emph{WIREs Data Mining and Knowledge Discovery} 8(4), e1246. A modern review.
+\end{itemize}
+
+\paragraph{Regimes and finance.}
+\begin{itemize}
+  \item J.~D.~Hamilton (1989), \emph{Econometrica} 57(2), 357--384. The Markov-switching model and its filter.
+  \item S.~Gu, B.~Kelly and D.~Xiu (2020), Empirical asset pricing via machine learning, \emph{Review of Financial Studies} 33(5), 2223--2273. The NN1--NN5 architectures.
+  \item J.~Ye and G.~V.~Borde (2026), Regime-gated residual mixture of experts, arXiv:2608.12251. MLP experts with a frozen base. They train by MSE on the mixed prediction, not by likelihood; regime information helps only through the gate.
+\end{itemize}
+
+\paragraph{Approximation and EM theory.}
+\begin{itemize}
+  \item G.~Cybenko (1989), Approximation by superpositions of a sigmoidal function, \emph{Mathematics of Control, Signals and Systems} 2, 303--314.
+  \item K.~Hornik, M.~Stinchcombe and H.~White (1989), Multilayer feedforward networks are universal approximators, \emph{Neural Networks} 2, 359--366.
+  \item A.~P.~Dempster, N.~M.~Laird and D.~B.~Rubin (1977), Maximum likelihood from incomplete data via the EM algorithm, \emph{Journal of the Royal Statistical Society B} 39, 1--38.
+  \item R.~M.~Neal and G.~E.~Hinton (1998), A view of the EM algorithm that justifies incremental, sparse, and other variants, in \emph{Learning in Graphical Models}. The lower-bound view of EM and generalised EM.
+\end{itemize}
+
+\paragraph{Project documents.}
+\begin{itemize}
+  \item \path{Model_Derivation_BaseCase.md}: Hamilton filter, Kim smoother, Baum--Welch, experts.
+  \item \path{Advisor_Questions.md}: Q6, Q8, Q14, Q16, Q18, Q20--Q24.
+  \item \path{MoE_Formulation_Course_Plan.md}: the plan behind these notes.
+\end{itemize}

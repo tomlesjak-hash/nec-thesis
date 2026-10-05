@@ -1,0 +1,53 @@
+\section{Assumptions and design checklist (base case)}
+
+\subsection{Modelling assumptions}
+\begin{center}
+\renewcommand{\arraystretch}{1.3}
+\begin{tabularx}{\textwidth}{@{}lXX@{}}
+\toprule
+ & Assumption & Comment \\
+\midrule
+A0 & Characteristics carry no information about the regime path & keeps stock information out of the gate \\
+A1 & First-order Markov regimes with one $A$ per training block & geometric durations; $A$ re-estimated in every walk-forward fold \\
+A2 & The market return depends only on its own day's regime (Gaussian, switching mean and variance) & the AR variant breaks it on purpose (G-2) \\
+A3 & Given $z_{t+1}$ and $x_{i,t}$, the stock returns are independent of each other, of $m_{t+1}$ and of other days & weak for raw returns (common market shock); reasonable for the market-neutral target used here; industry peers remain correlated, which the per-row objective tolerates (Q24) \\
+A4 & One noise level $s_k$ per regime, the same for all stocks & no stock-specific volatility in the experts \\
+A5 & All parameters constant within a training block & re-estimated per fold \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\subsection{Design choices and their status}
+``Decided'' means decided for the base case or recorded as resolved in \path{Advisor_Questions.md}. ``Open'' gives the question number.
+\begin{center}
+\small\renewcommand{\arraystretch}{1.3}
+\begin{tabularx}{\textwidth}{@{}p{4.2cm}Xp{3.3cm}@{}}
+\toprule
+Item & Base-case choice or options & Status \\
+\midrule
+Gate fitted separately and frozen & Baum--Welch on the training block, forward pass afterwards & decided (Q19) \\
+Base pre-trained and frozen & $f_0$ fitted first, never updated & decided (Q7) \\
+Filtered, never smoothed, as the basis of the gate & on training and test dates alike & decided (base-case derivation) \\
+Gate weight for the $h$-day target & window average $\bar w_k(t)$ of the $1$- to $h$-step-ahead probabilities (Section 8.9) & decided (Q27) \\
+Number of regimes $K$ & e.g.\ 2 or 3 & \textbf{open} (Q18) \\
+Gate series $m_t$ & French Mkt-RF (code default) vs CRSP index returns & \textbf{open} (Q23) \\
+Frequency and horizon $h$ & daily gate, daily cross-section, $h=5$ (overlapping targets) & decided (Q21) \\
+Filter through the purge gap & run forward continuously or restart & \textbf{open} (Q22) \\
+Likelihood for the experts & $\ell_{\text{row}}$, the composite likelihood of the per-date model (Section 7.3) & decided (Q24) \\
+Objective & base case: mixture log-likelihood only & decided here; Q20 open for the thesis \\
+State labelling across folds & order states, e.g.\ by $\sigma_k$ & to check in code \\
+Residual form & $\mu_k=f_0+c_k$, final layer of $c_k$ zero-initialised & implemented; Q6 and Q14 open \\
+Expert noise $s_k$ & learned scalar per expert, frozen for the first 100 steps & implemented; no floor or prior in the base case \\
+Regime information & enters only through the gate; experts see $x_{i,t}$ only & decided \\
+Target & market-neutral return: forward return minus the date's equal-weighted cross-sectional mean & decided (Q25); not yet implemented \\
+Expert and base architecture & MLP widths and depth & \textbf{open} (Q8; depth grid per Q11) \\
+Training window and weighting & full block vs decay; crash preservation & \textbf{open} (Q16, B-2) \\
+Hidden-layer initialisation & switch X-1 & \textbf{open} \\
+Mini-batching & any rows (under $\ell_{\text{row}}$) & decided (Q24) \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\subsection{The base case in one paragraph}
+A $K$-state Gaussian HMM is fitted by Baum--Welch to the daily market series on the training block and frozen. Its forward pass gives, at the close of each day $t$, the filtered probability $\xi_{t\mid t}$; the gate weight for the 5-day target is its window average $\bar w_k(t)$ \eqref{eq:wbar}, which equals $\pi_k(t)=\mathbb P(z_{t+1}=k\mid\F_t)$ when $h=1$ (Q27). A frozen base MLP $f_0$ and $K$ zero-initialised MLP corrections $c_k$ define expert means $\mu_k=f_0+c_k$ with noise levels $s_k$. The corrections and noise levels are fitted by gradient ascent on the per-row (composite) mixture log-likelihood of tomorrow's returns with the gate held fixed (Q24). The forecast is $\hat r_{i,t+1}=f_0(x_{i,t})+\sum_k\pi_k(t)\,c_k(x_{i,t})$, and its full predictive distribution is the mixture \eqref{eq:pred}.
+\newpage

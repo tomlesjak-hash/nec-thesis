@@ -1,0 +1,245 @@
+\newpage
+\section{Per date versus per row: the theory}\label{app:perrow}
+
+This appendix gives the theory behind the decision in Section 7.3 (Q24, decided 2026-10-05): the experts are trained on the per-row objective $\ell_{\text{row}}$, not on the per-date likelihood $\ell_{\text{date}}$. It proceeds one step at a time:
+\begin{enumerate}
+  \item the two models and their graphs (D.1);
+  \item the likelihood each one implies (D.2);
+  \item the key identity: both models give every single stock the same distribution (D.3);
+  \item composite likelihood, and why $\ell_{\text{row}}$ is one for our model (D.4);
+  \item why it still estimates the right parameters (D.5) and what it gives up (D.6);
+  \item how the responsibilities behave under each objective (D.7);
+  \item what happens when A3 is false (D.8);
+  \item what this means for a frozen gate (D.9), and a summary (D.10).
+\end{enumerate}
+Throughout, fix the gate weights $\pi_k(t)$ (frozen, $\F_t$-measurable) and write
+\begin{equation*}
+\N_{ik}:=\N\big(r_{i,t+1};\mu_k(x_{i,t}),s_k^2\big),\qquad\theta=(\psi_1,\dots,\psi_K,s_1,\dots,s_K).
+\end{equation*}
+
+\subsection*{D.1 Two models}
+
+\paragraph{Model D (per date).} This is the model of Section 6. On each date one regime is drawn and every stock uses it:
+\begin{equation*}
+z_{t+1}\sim\text{Cat}\big(\pi_1(t),\dots,\pi_K(t)\big),\qquad r_{i,t+1}\mid z_{t+1}=k\ \sim\ \N\big(\mu_k(x_{i,t}),s_k^2\big)\ \text{independently over } i.
+\end{equation*}
+
+\paragraph{Model R (per row).} Each stock-day draws its own regime from the same prior:
+\begin{equation*}
+z_{i,t+1}\sim\text{Cat}\big(\pi_1(t),\dots,\pi_K(t)\big)\ \text{independently over } i,\qquad r_{i,t+1}\mid z_{i,t+1}=k\ \sim\ \N\big(\mu_k(x_{i,t}),s_k^2\big).
+\end{equation*}
+
+The only difference is where the latent node sits: outside the stock plate (D) or inside it (R).
+
+\begin{center}
+\begin{tikzpicture}[node distance=14mm]
+\node[lat] (zD) {$z_{t+1}$};
+\node[obs,below=12mm of zD] (rD) {$r_{i,t+1}$};
+\node[obs,left=10mm of rD] (xD) {$x_{i,t}$};
+\draw[edge] (zD)--(rD); \draw[edge] (xD)--(rD);
+\begin{scope}[on background layer]
+\node[plate,fit=(xD)(rD),label={[anchor=north east]south east:{$i\in\mathcal S_t$}}] {};
+\end{scope}
+\node[above=2mm of zD] {\textbf{Model D}};
+\node[obs,right=58mm of rD] (rR) {$r_{i,t+1}$};
+\node[lat,above=12mm of rR] (zR) {$z_{i,t+1}$};
+\node[obs,left=10mm of rR] (xR) {$x_{i,t}$};
+\draw[edge] (zR)--(rR); \draw[edge] (xR)--(rR);
+\begin{scope}[on background layer]
+\node[plate,fit=(xR)(rR)(zR),label={[anchor=north east]south east:{$i\in\mathcal S_t$}}] {};
+\end{scope}
+\node[above=2mm of zR] {\textbf{Model R}};
+\end{tikzpicture}
+\end{center}
+
+\subsection*{D.2 The likelihood each model implies}
+
+\paragraph{Model D.} Sum rule over the one latent of the date, then A3 (independence given the regime):
+\begin{equation}
+p_D\big(r_{\cdot,t+1}\big)=\sum_{k=1}^K\pi_k(t)\prod_{i\in\mathcal S_t}\N_{ik}
+\quad\Rightarrow\quad
+\ell_{\text{date}}(\theta)=\sum_t\log\sum_{k}\pi_k(t)\prod_{i}\N_{ik}.
+\end{equation}
+
+\paragraph{Model R.} Each stock has its own latent, so the sum over latents factorises stock by stock (the same step as Exercise A1(c)):
+\begin{equation}
+p_R\big(r_{\cdot,t+1}\big)=\prod_{i\in\mathcal S_t}\sum_{k=1}^K\pi_k(t)\,\N_{ik}
+\quad\Rightarrow\quad
+\ell_{\text{row}}(\theta)=\sum_t\sum_i\log\sum_k\pi_k(t)\,\N_{ik}.
+\end{equation}
+In D the sum sits outside the product; in R it sits inside.
+
+\subsection*{D.3 The key identity: identical one-stock distributions}
+
+\begin{keybox}{Proposition 1}
+Under Model D, the distribution of one stock's return on its own is
+\begin{equation*}
+p_D\big(r_{i,t+1}\mid x_{\cdot,t},\F_t\big)=\sum_{k=1}^K\pi_k(t)\,\N_{ik},
+\end{equation*}
+which is exactly the factor of stock $i$ in Model R. The two models agree on every single stock and differ only in how stocks move \emph{together}.
+\end{keybox}
+
+\paragraph{Part 1: the independence used (d-separation).} In Model D the only path between $r_{i,t+1}$ and $r_{j,t+1}$ runs through $z_{t+1}$. Conditioning on $z_{t+1}$ blocks it (a tail-to-tail node), so given the regime the returns are independent. That is A3(a), read off the graph.
+
+\paragraph{Part 2: the algebra.} Start from the joint of all returns and integrate out every stock except $i$:
+\begin{equation*}
+p_D(r_{i,t+1})=\int\sum_k\pi_k(t)\prod_{j}\N_{jk}\;\prod_{j\ne i}dr_{j,t+1}.
+\end{equation*}
+The sum over $k$ is finite, so it may be taken outside the integral:
+\begin{equation*}
+=\sum_k\pi_k(t)\,\N_{ik}\prod_{j\ne i}\int\N_{jk}\,dr_{j,t+1}.
+\end{equation*}
+Every remaining integral is the integral of a density, which is one:
+\begin{equation*}
+=\sum_k\pi_k(t)\,\N_{ik}.\qquad\blacksquare
+\end{equation*}
+
+\paragraph{Consequences.}
+\begin{itemize}
+  \item The point forecast $\sum_k\pi_k\mu_k$ and the whole one-stock predictive distribution are the same in both models.
+  \item The models differ in the covariance between stocks. Writing $\mu_{ik}=\mu_k(x_{i,t})$, under D (Section 8.5),
+  \begin{equation*}
+  \Cov_D\big(r_{i,t+1},r_{j,t+1}\big)=\sum_k\pi_k(t)\big(\mu_{ik}-\bar\mu_i\big)\big(\mu_{jk}-\bar\mu_j\big),\qquad\bar\mu_i=\sum_k\pi_k\mu_{ik},
+  \end{equation*}
+  while under R it is zero. Stocks co-move under D because they share an unknown regime.
+\end{itemize}
+
+\subsection*{D.4 Composite likelihood}
+
+\paragraph{Definition (Lindsay 1988).} Split the data into pieces $A_1,\dots,A_M$ (single observations, pairs, blocks) whose densities are known under the model. The composite log-likelihood is the weighted sum of the piece log-likelihoods:
+\begin{equation*}
+\ell_C(\theta)=\sum_{m=1}^M w_m\log p\big(y\in A_m;\theta\big).
+\end{equation*}
+It is a full likelihood only if the pieces happen to be independent. When each piece is one observation and the weights are one, $\ell_C$ is the \emph{independence likelihood}: the log-likelihood one would write if the observations were independent, evaluated with their correct marginals (Varin, Reid \& Firth 2011).
+
+\paragraph{Application.} By Proposition 1, the correct marginal of stock-day $(i,t)$ under Model D is $\sum_k\pi_k\N_{ik}$. Hence
+\begin{equation}
+\ell_{\text{row}}(\theta)=\sum_t\sum_i\log p_D\big(r_{i,t+1};\theta\big)
+\end{equation}
+is the independence likelihood of Model D. The same function therefore has two readings: the exact likelihood of Model R, and a composite likelihood of Model D. Our study adopts the second reading. The model stays Model D; only the estimation objective changes.
+
+\subsection*{D.5 Why it estimates the right parameters}
+
+\paragraph{Step 1: each piece has an unbiased score.} Let $\theta_0$ be the true parameter and $p_i(r;\theta)$ the marginal density of piece $i$. Differentiating the identity that a density integrates to one,
+\begin{equation*}
+\int p_i(r;\theta)\,dr=1\quad\Rightarrow\quad\int\frac{\partial p_i(r;\theta)}{\partial\theta}\,dr=0\quad\Rightarrow\quad\E_{\theta_0}\Big[\frac{\partial}{\partial\theta}\log p_i(r;\theta)\Big|_{\theta_0}\Big]=0.
+\end{equation*}
+The last step writes the derivative of $p_i$ as $p_i$ times the derivative of $\log p_i$ and evaluates at $\theta_0$, where $p_i$ is the true density.
+
+\paragraph{Step 2: a sum of unbiased scores is unbiased.} Expectation is linear, and it does not care whether the pieces are dependent:
+\begin{equation*}
+\E_{\theta_0}\big[\nabla\ell_{\text{row}}(\theta_0)\big]=\sum_t\sum_i\E_{\theta_0}\big[\nabla\log p_i(r_{i,t+1};\theta_0)\big]=0.
+\end{equation*}
+Dependence between the pieces would matter for the \emph{variance} of the sum, never for its mean.
+
+\paragraph{Step 3: consistency.} The estimator solves $\nabla\ell_{\text{row}}(\hat\theta)=0$, an unbiased estimating equation. Under the usual regularity conditions it is consistent: as the number of dates grows, $\hat\theta\to\theta_0$. The conditions are a law of large numbers across dates and identifiability of $\theta$ from the one-stock marginals. Identifiability holds under mild conditions: the marginal is a finite Gaussian mixture of regressions, which is identified up to relabelling of the experts, and the frozen gate removes the relabelling by tying expert $k$ to HMM state $k$.
+
+\subsection*{D.6 What it gives up: efficiency and standard errors}
+
+Define the two matrices of estimating-equation theory:
+\begin{equation*}
+H(\theta_0)=-\E\big[\nabla^2\ell_{\text{row}}\big],\qquad J(\theta_0)=\Var\big[\nabla\ell_{\text{row}}\big].
+\end{equation*}
+For a full likelihood $H=J$, the Fisher information. For a composite likelihood they differ, because the pieces are dependent, and the asymptotic variance is the \emph{sandwich}
+\begin{equation*}
+\Var\big(\hat\theta\big)\approx H^{-1}JH^{-1}=G^{-1},\qquad G=HJ^{-1}H\ \text{(the Godambe information)}.
+\end{equation*}
+Two consequences:
+\begin{itemize}
+  \item \textbf{Efficiency.} $G$ is never larger than the Fisher information of the full likelihood. The information lost is exactly what the co-movement of stocks on a date says about the regime.
+  \item \textbf{Standard errors.} The inverse Hessian alone, $H^{-1}$, is not a valid variance. Overlapping 5-day targets add dependence across dates, which works the same way.
+\end{itemize}
+Neither matters for the study, because inference comes from walk-forward rank ICs with Hansen--Hodrick corrections, never from the likelihood's curvature.
+
+\subsection*{D.7 How the responsibilities behave}
+
+Bayes' rule gives the posterior odds of regimes $k$ and $j$ after seeing the returns.
+
+\paragraph{Per row:} one stock's evidence.
+\begin{equation*}
+\log\frac{\gamma_{i,t}(k)}{\gamma_{i,t}(j)}=\log\frac{\pi_k(t)}{\pi_j(t)}+\log\frac{\N_{ik}}{\N_{ij}}.
+\end{equation*}
+
+\paragraph{Per date:} the sum of all stocks' evidence.
+\begin{equation*}
+\log\frac{\gamma_t(k)}{\gamma_t(j)}=\log\frac{\pi_k(t)}{\pi_j(t)}+\sum_{i\in\mathcal S_t}\log\frac{\N_{ik}}{\N_{ij}}.
+\end{equation*}
+
+\paragraph{Size of the evidence.} If regime $k$ is true, each log-ratio term has expectation $\mathrm{KL}(\N_{\cdot k}\|\N_{\cdot j})>0$. With the example of Section 7.5 this is about $0.22$ nats per stock.
+\begin{itemize}
+  \item Per row the evidence is $0.22$ nats, a likelihood ratio of about $1.25$. The posterior stays close to the gate's prior.
+  \item Per date it is about $0.22\times500=110$ nats. The posterior is $0$ or $1$ whatever the gate said.
+\end{itemize}
+
+\subsection*{D.8 When A3 is false}
+
+\paragraph{A model in which A3 fails but the marginals are right.} Let stocks belong to clusters $c$ (industries) of size $m$, and add a shared cluster shock inside each regime:
+\begin{equation*}
+r_{i,t+1}=\mu_k(x_{i,t})+u_{c(i),t+1}+e_{i,t+1},\qquad u_c\sim\N(0,\rho s_k^2),\quad e_i\sim\N\big(0,(1-\rho)s_k^2\big),
+\end{equation*}
+independently. Two facts follow.
+\begin{enumerate}
+  \item \textbf{The one-stock marginal is unchanged.} The sum of two independent Gaussians is Gaussian with the variances added, $\rho s_k^2+(1-\rho)s_k^2=s_k^2$, so each stock is still $\sum_k\pi_k\N_{ik}$. The per-row objective is \emph{correctly specified}, and D.5 applies unchanged.
+  \item \textbf{The joint is no longer a product.} Two stocks in the same cluster are correlated at $\rho$ within a regime. The per-date likelihood, which multiplies their densities, is \emph{misspecified}.
+\end{enumerate}
+
+\paragraph{How much evidence the per-date likelihood overcounts.} Write $v_i=\log(\N_{ik}/\N_{ij})$ for stock $i$'s evidence term in D.7, with variance $\sigma_v^2$, and let $\rho_v$ be the correlation of two such terms in the same cluster. It equals the return correlation $\rho$ when the two experts differ in their means, because $v_i$ is then linear in the return, and $\rho^2$ when they differ only in their noise levels, because $v_i$ is then linear in the squared residual. The variance of a sum of $N$ terms, in clusters of $m$ with correlation $\rho_v$ inside a cluster and zero across clusters, is
+\begin{equation*}
+\Var\Big(\sum_{i=1}^Nv_i\Big)=N\sigma_v^2\big(1+(m-1)\rho_v\big),
+\end{equation*}
+which is the variance of $N_{\text{eff}}$ independent terms, where
+\begin{equation*}
+N_{\text{eff}}=\frac{N}{1+(m-1)\rho_v}
+\end{equation*}
+(Kish's design effect). The per-date posterior treats the evidence as if it came from $N$ independent stocks, so it is overconfident by the factor $N/N_{\text{eff}}=1+(m-1)\rho_v$. With $m=45$ and $\rho_v=0.1$ the factor is $5.4$. In this illustration the values of $m$ and $\rho_v$ are assumed, not measured. In addition, the parameters that maximise a misspecified likelihood need not be $\theta_0$: they are the pseudo-true values that make the \emph{wrong joint} fit best. When the regimes are far apart this does little harm, because every date is still assigned correctly. When they are close, which is the realistic case for experts that differ by small corrections, overconfident misassignments feed back into the experts' means and noise levels.
+
+\paragraph{A simulation check.} Simulate Model D with the cluster shock above: $K=2$, $T=600$ dates, $N=200$ stocks in clusters of $m=20$, gate weights drawn uniformly in $[0.1,0.9]$, and two close regimes with means $0$ and $0.05$ and noise levels $1$ and $1.08$. Then fit the means and noise levels by maximising each objective.
+\begin{center}
+\small\renewcommand{\arraystretch}{1.25}
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+ & $\mu_1$ & $\mu_2$ & $s_1$ & $s_2$ \\
+\midrule
+True values & $0$ & $0.05$ & $1$ & $1.08$ \\
+A3 holds ($\rho=0$): per row & $-0.003$ & $0.050$ & $0.994$ & $1.088$ \\
+A3 holds ($\rho=0$): per date & $-0.002$ & $0.049$ & $1.001$ & $1.082$ \\
+A3 fails ($\rho=0.5$): per row & $-0.017$ & $0.070$ & $0.995$ & $1.079$ \\
+A3 fails ($\rho=0.5$): per date & $-0.150$ & $0.230$ & $1.017$ & $1.023$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+When A3 holds, both objectives recover the truth. When it fails, the per-row estimates stay close to it, while the per-date estimates are pulled away: the gap between the means is nearly eight times too large (0.38 against 0.05), and the noise levels are squeezed together. Even at the true parameters, the per-date posterior puts more than half its weight on the wrong regime on 14\% of dates when $\rho=0$ and on 35\% when $\rho=0.5$. This is one seed of a stylised example, not a measurement on the data.
+
+\paragraph{The general principle.} An objective built from a lower-dimensional piece of the model (here, single stocks) needs only that piece to be right. This is the logic of generalised estimating equations with a working independence assumption (Liang \& Zeger 1986). The per-date likelihood needs the whole joint distribution to be right, and in a cross-section of 500 stocks it is not.
+
+\subsection*{D.9 What this means for a frozen gate}
+
+\begin{itemize}
+  \item The gradient for expert $k$ on row $(i,t)$ is the regression residual weighted by the responsibility (Section 7.4). The responsibility therefore decides which data each expert learns from.
+  \item \textbf{Per date:} $\gamma_t(k)\in\{0,1\}$ is set by the day's returns (D.7) and inflated by correlated evidence (D.8). Each expert learns from the days whose cross-section fits it, and the cross-section re-decides the regime every day. This is the daily version of the joint fit that Section 7.2 rules out, because it would let the stocks redefine the regimes.
+  \item \textbf{Per row:} $\gamma_{i,t}(k)$ stays near $\pi_k(t)$. Each expert learns mainly from the days the gate assigns to its regime. The regimes remain \emph{market} regimes, which is why the gate was frozen (Q19).
+  \item \textbf{The cost:} specialisation is softer, and the expert with the larger $s_k$ can attract outlying rows. Diagnostic: compare each expert's training weight with $\pi_k(t)$ and with the size of the residuals.
+\end{itemize}
+
+\subsection*{D.10 Summary}
+
+\begin{center}
+\small\renewcommand{\arraystretch}{1.3}
+\begin{tabularx}{\textwidth}{@{}p{3.9cm}XX@{}}
+\toprule
+ & $\ell_{\text{date}}$ & $\ell_{\text{row}}$ (used) \\
+\midrule
+Status under Model D & exact likelihood & independence (composite) likelihood \\
+One-stock distribution & $\sum_k\pi_k\N_{ik}$ & identical (Proposition 1) \\
+Needs A3(a) & yes, the full joint & no, only the marginals \\
+Consistent if A3 fails & not guaranteed; distorted when regimes are close (D.8) & yes (D.5, D.8) \\
+Efficiency if the model is exactly right & full & lower (Godambe, D.6) \\
+Standard errors from the Hessian & valid if A3 holds & invalid; sandwich needed \\
+Responsibilities & $0$ or $1$, set by the returns & close to the gate's $\pi$ \\
+Who defines the regime in training & the cross-section & the frozen gate \\
+Mini-batches & whole dates & any rows \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\emph{References:} Lindsay (1988), Contemporary Mathematics 80; Varin, Reid \& Firth (2011), Statistica Sinica 21; Liang \& Zeger (1986), Biometrika 73(1); Pakel, Shephard, Sheppard \& Engle (2021), JBES 39(3); Kish (1965), \emph{Survey Sampling}; Godambe (1960), Annals of Mathematical Statistics 31.

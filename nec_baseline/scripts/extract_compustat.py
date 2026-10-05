@@ -47,7 +47,11 @@ def main(*window: str) -> None:
     print(f"[compustat] link ambiguities (PERMNO-periods with two GVKEYs): "
           f"{rep['link_ambiguities']}; GICS rows whose lpermno disagrees with the link: "
           f"{rep['gics_lpermno_disagreements']}")
-    print(f"[compustat] period ends: {rep['period_end_mapping']}")
+    mapping = dict(rep["period_end_mapping"])
+    window = mapping.pop("since_history_start", None)
+    print(f"[compustat] period ends, all history: {mapping}")
+    print(f"[compustat] period ends, from {rep['history_start']} (what the features use): "
+          f"{window}")
     print(f"[compustat] keyset-{rep['restated_keyset']} ('PRE') universe firm-quarters: "
           f"{rep['restated_keyset_firm_quarters']}")
     print(f"[compustat] filing types: {rep['filing_srctypes']}")

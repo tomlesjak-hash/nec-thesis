@@ -69,6 +69,11 @@ def main() -> None:
     print("[coverage] characteristic present before the fill (all years):")
     for name, share in report["present_share"].items():
         print(f"    {name:<20s} {share:6.3f}")
+    window = (report.get("quarters") or {}).get("since_history_start")
+    if window:
+        print(f"[coverage] firm-quarters from the history start: {window['firm_quarters']:,}; "
+              f"with a 10Q/10K filing date {window['with_first_filing']:,}; "
+              f"availability rules {window['anchor_rules']}")
     c = report["compustat"]
     print(f"[coverage] keyset-{c['restated_keyset']} universe firm-quarters: "
           f"{c['restated_keyset_firm_quarters']}")

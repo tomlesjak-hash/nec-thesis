@@ -95,14 +95,17 @@ def feature_coverage(panel_metadata: dict[str, Any], compustat_info: dict[str, A
         "sector_missing_share": features.get("sector_missing_share"),
         "within_sector_fallback_share": features.get("within_sector_fallback_share"),
         "seq_window_incomplete_rows": features.get("seq_window_incomplete_rows"),
-        "by_year": features.get("by_year"),
+        # "year_2019", not "2019": a bare number can equal an identifier
+        "by_year": {f"year_{y}": v for y, v in (features.get("by_year") or {}).items()},
         "attach_counts": {k: v for k, v in q26.items() if k != "quarters"},
         "quarters": q26.get("quarters"),
         "compustat": {
             "history_start": compustat_info.get("history_start"),
             "restated_keyset": creport.get("restated_keyset"),
             "restated_keyset_firm_quarters": creport.get("restated_keyset_firm_quarters"),
-            "keyset_firm_quarters": creport.get("keyset_firm_quarters"),
+            "keyset_firm_quarters": {
+                f"keyset_{k}": v for k, v in (creport.get("keyset_firm_quarters") or {}).items()
+            },
             "link_ambiguities": creport.get("link_ambiguities"),
             "link_ambiguous_permnos": creport.get("link_ambiguous_permnos"),
             "gics_lpermno_disagreements": creport.get("gics_lpermno_disagreements"),

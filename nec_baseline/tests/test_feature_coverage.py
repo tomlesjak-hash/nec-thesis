@@ -84,8 +84,8 @@ def test_coverage_report_is_aggregate_and_complete(built, tmp_path: Path):
     report = feature_coverage(panel.metadata, cex.info)
     assert set(report["present_share"]) == set(Q26_CHARACTERISTICS)
     assert all(0.0 <= v <= 1.0 for v in report["present_share"].values())
-    assert set(report["by_year"]) == {"2020"}
-    year = report["by_year"]["2020"]
+    assert set(report["by_year"]) == {"year_2020"}
+    year = report["by_year"]["year_2020"]
     assert set(year) == {"rows", "present_share", "flag_price_rate", "flag_fund_rate",
                          "sector_missing_share"}
     assert year["sector_missing_share"] > 0  # 10008 has no GICS row
@@ -124,6 +124,9 @@ def test_the_report_refuses_per_security_values(built, tmp_path: Path):
     with pytest.raises(PerSecurityValues, match="001003"):
         assert_aggregate_only({"note": "001003"}, {"001003"})
     assert_aggregate_only(report, forbidden)  # the real report passes
+    # a GVKEY written without leading zeros can equal a year: the year keys
+    # are spelled "year_2020", so the guard does not trip on them
+    write_feature_coverage(report, tmp_path / "ok", forbidden | {"2020", "1", "8"})
 
 
 def test_the_real_data_scripts_compile():

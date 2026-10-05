@@ -295,6 +295,24 @@ def test_ytd_cash_flow_differenced_across_a_fiscal_year_boundary(quarters, cfx):
     assert out["OANCFQ"].iloc[0] == 5.0 and np.isnan(out["OANCFQ"].iloc[1])
 
 
+def test_filing_types_match_both_spellings(cfx):
+    """The real cfz202607 file spells them 10Q / 10K; amendments never count."""
+    f = pd.DataFrame({
+        "KYGVKEY": ["a", "a", "a", "b"], "FDATADATE": ["2020-03-31"] * 4,
+        "SRCTYPE": ["10Q/A", "10Q", "8K", "10-Q"],
+        "FILEDATE": ["2020-04-20", "2020-05-01", "2020-04-02", "2020-05-03"],
+    })
+    got = cs.first_filing_dates(f, _cspec(cfx.root)).set_index("KYGVKEY")["first_filing"]
+    assert got["a"] == pd.Timestamp("2020-05-01") and got["b"] == pd.Timestamp("2020-05-03")
+
+
+def test_mapping_counts_are_also_given_for_the_history_window(cex):
+    rep = cex.info["report"]["period_end_mapping"]
+    inside = rep["since_history_start"]
+    assert 0 < inside["rows"] < rep["rows"]  # the extract keeps older quarters too
+    assert inside["not_in_fiscalmarketdata"] == 0
+
+
 def _next_trading(d: pd.Timestamp) -> pd.Timestamp:
     return CAL[CAL > d][0]
 

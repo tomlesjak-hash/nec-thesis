@@ -203,7 +203,8 @@ class CompustatSpec:
       counted, never used.
     - ``link_types`` / ``link_prims``: the CCM link filter (LC, LU; P, C).
     - ``filing_types``: ``SRCTYPE`` values that count as a quarter's
-      filing (10-Q, 10-K).
+      filing (``10Q``, ``10K``, as ``cfz202607`` spells them, and the
+      hyphenated forms); amendments (``10Q/A``) do not.
     - ``availability_lag_trading_days``: trading days after the anchor date
       (later of RDQ and filing) a quarter becomes usable (1).
     - ``fallback_lag_days``: calendar days after the period end used when a
@@ -224,7 +225,9 @@ class CompustatSpec:
     restated_keyset: int = 8
     link_types: tuple[str, ...] = ("LC", "LU")
     link_prims: tuple[str, ...] = ("P", "C")
-    filing_types: tuple[str, ...] = ("10-Q", "10-K")
+    # the real cfz202607 file spells them 10Q / 10K; the hyphenated forms are
+    # kept so either spelling counts (amendments, 10Q/A, never do)
+    filing_types: tuple[str, ...] = ("10Q", "10K", "10-Q", "10-K")
     availability_lag_trading_days: int = 1
     fallback_lag_days: int = 90
     history_quarters: int | None = None
@@ -480,14 +483,37 @@ def computed_period_end(fyearq: pd.Series, fqtr: pd.Series, fyr: pd.Series) -> p
     return out.where(ok)
 
 
+def _mapping_counts(
+    period: pd.DataFrame, dates: pd.Series, computed: pd.Series,
+    pairs: set[tuple[str, pd.Timestamp]] | None,
+) -> dict[str, int]:
+    both = dates.notna() & computed.notna()
+    out = {
+        "rows": int(len(period)),
+        "missing": int(dates.isna().sum()),
+        "agree_with_computed": int((dates[both] == computed[both]).sum()),
+        "disagree_with_computed": int((dates[both] != computed[both]).sum()),
+    }
+    if pairs is not None:
+        known = [(g, d) in pairs for g, d in zip(period["KYGVKEY"], dates, strict=True)
+                 if pd.notna(d)]
+        out["found_in_fiscalmarketdata"] = int(sum(known))
+        out["not_in_fiscalmarketdata"] = int(len(known) - sum(known))
+    return out
+
+
 def period_end_dates(
-    period: pd.DataFrame, fiscal_market: pd.DataFrame | None
+    period: pd.DataFrame, fiscal_market: pd.DataFrame | None,
+    since: pd.Timestamp | None = None,
 ) -> tuple[pd.Series, dict[str, Any]]:
     """``DATADATE`` for each row of ``period`` and how it was found.
 
     Returns the dates (aligned to ``period``'s index) and a report: the
     source used and agreement counts against the computed rule and the
-    ``(KYGVKEY, DATADATE)`` pairs of ``fiscalmarketdataquarterly``.
+    ``(KYGVKEY, DATADATE)`` pairs of ``fiscalmarketdataquarterly``, over
+    every row and, with ``since``, under ``"since_history_start"`` over the
+    rows whose period end is on or after it (the quarters the features use;
+    the extract keeps each company's whole history).
     """
     computed = computed_period_end(period["FYEARQ"], period["FQTR"], period["FYRQ"])
     report: dict[str, Any] = {}
@@ -506,18 +532,16 @@ def period_end_dates(
     else:
         dates = computed
         report["source"] = "computed (FYEARQ, FQTR, fyrq)"
-    both = dates.notna() & computed.notna()
-    report["rows"] = int(len(period))
-    report["missing"] = int(dates.isna().sum())
-    report["agree_with_computed"] = int((dates[both] == computed[both]).sum())
-    report["disagree_with_computed"] = int((dates[both] != computed[both]).sum())
+    pairs = None
     if fiscal_market is not None and len(fiscal_market):
         pairs = set(zip(fiscal_market["KYGVKEY"], parse_dates(fiscal_market["DATADATE"]),
                         strict=True))
-        known = [(g, d) in pairs for g, d in zip(period["KYGVKEY"], dates, strict=True)
-                 if pd.notna(d)]
-        report["found_in_fiscalmarketdata"] = int(sum(known))
-        report["not_in_fiscalmarketdata"] = int(len(known) - sum(known))
+    report |= _mapping_counts(period, dates, computed, pairs)
+    if since is not None:
+        inside = (dates >= since).to_numpy()
+        report["since_history_start"] = _mapping_counts(
+            period[inside], dates[inside], computed[inside], pairs
+        )
     return dates, report
 
 
@@ -619,7 +643,8 @@ def quarterly_fundamentals(
     consecutive quarters differ by 1). Plus an aggregate report."""
     period = ex.period[ex.period["KEYSET"] == spec.keyset].copy()
     period = period.drop_duplicates(["KYGVKEY", "FYYYYQ"])
-    dates, mapping = period_end_dates(period, ex.fiscal_market)
+    since = fundamentals_start(spec)
+    dates, mapping = period_end_dates(period, ex.fiscal_market, since)
     period["datadate"] = dates.to_numpy()
     period["rdq"] = parse_dates(period["RDQ"], fmt="%Y%m%d")
     keys = ["KYGVKEY", "KEYSET", "FYYYYQ"]
@@ -638,6 +663,17 @@ def quarterly_fundamentals(
         "firm_quarters": int(len(q)),
         "anchor_rules": {str(k): int(v) for k, v in q["anchor_rule"].value_counts().items()},
         "with_first_filing": int(q["first_filing"].notna().sum()),
+        # the quarters the features use (period end from the history start on)
+        "since_history_start": {
+            "firm_quarters": int((q["datadate"] >= since).sum()),
+            "anchor_rules": {
+                str(k): int(v)
+                for k, v in q.loc[q["datadate"] >= since, "anchor_rule"].value_counts().items()
+            },
+            "with_first_filing": int(
+                (q["first_filing"].notna() & (q["datadate"] >= since)).sum()
+            ),
+        },
         "filing_srctypes": {
             str(k): int(v)
             for k, v in ex.filings["SRCTYPE"].astype("string").value_counts().items()
@@ -1029,7 +1065,7 @@ def extract_compustat(
 
     ex = load_compustat_extract(spec, check=False)
     period = ex.period if period_filter is None else period_filter(ex.period)
-    dates, mapping = period_end_dates(period, ex.fiscal_market)
+    dates, mapping = period_end_dates(period, ex.fiscal_market, since)
     period = period.assign(datadate=dates.to_numpy())
     ambiguous = link_ambiguities(raw_links, spec)
     report = {

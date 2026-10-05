@@ -44,6 +44,12 @@ from torch import Tensor
 
 from .base import BaseCache, BaseFit, base_cache_key, load_base_fit, save_base_fit
 from .data import Panel
+from .decay import (
+    calendar_decay_weights,
+    no_decay,
+    regime_clock_components,
+    weight_summary,
+)
 from .registry import TrialRegistry, gate_weight_of, trial_provenance
 from .runstore import Run
 
@@ -88,6 +94,7 @@ __all__ = [
     "base_single_gaussian_nll",
     "expert_stage_seed",
     "fold_metrics_frame",
+    "fold_decay_weights",
 ]
 
 
@@ -812,6 +819,10 @@ class FoldResult:
     # probability and the residual size, on the training rows, in canonical
     # expert order (nec_moe.diagnostics.expert_weight_diagnostics)
     expert_weights: tuple[tuple[str, float], ...] = ()
+    # brief 09 C.3: the decay weights' summaries (Kish ESS overall and per
+    # regime, mass by calendar year) for the base and the experts; empty when
+    # neither decays (fold_decay_weights)
+    weights: tuple[tuple[str, float], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -878,6 +889,7 @@ class _FoldAccumulator:
         timing: tuple[tuple[str, float], ...] = (),
         gate_excluded_dates: int = 0,
         expert_weights: tuple[tuple[str, float], ...] = (),
+        weights: tuple[tuple[str, float], ...] = (),
     ) -> dict[str, Any]:
         """Score a freshly-evaluated fold. Returns the picklable payload that
         fold-level resume persists and :meth:`add_completed` re-ingests."""
@@ -921,6 +933,7 @@ class _FoldAccumulator:
                 timing=timing,
                 gate_excluded_dates=gate_excluded_dates,
                 expert_weights=expert_weights,
+                weights=weights,
             ),
             "ics": ics,
             "base_ics": base_ics,
@@ -1379,9 +1392,64 @@ def fold_metrics_frame(result: WalkForwardResult) -> pd.DataFrame:
                     "mean_turnover": f.portfolio.mean_turnover,
                     "portfolio_scheme": f.portfolio.scheme}
         row |= dict(f.expert_weights)
+        row |= dict(f.weights)
         row |= dict(f.timing)
         rows.append(row)
     return pd.DataFrame(rows).set_index("fold")
+
+
+def fold_decay_weights(
+    trainer: Trainer, train: Panel, expert_train: Panel
+) -> tuple[Tensor | None, dict[str, float]]:
+    """The experts' row weights for this fold and the fold's weight
+    diagnostics (brief 09 C).
+
+    - Experts (``train.expert_decay="regime_clock"``): the mixture-form
+      regime-clock weights of :mod:`nec_moe.decay`, from the frozen gate's
+      **filtered** probabilities on ``expert_train``'s dates, ``T`` its last
+      date. Returned per row (every stock of a date shares its weight), or
+      ``None`` when the half-life is infinite, so the step is exactly the
+      unweighted one.
+    - Base (``base.decay_half_life_days``): :func:`~nec_moe.base.fit_base`
+      applies the calendar weights itself; only their summary is made here,
+      over the base's training block.
+
+    The summary (:func:`~nec_moe.decay.weight_summary`) holds the Kish ESS
+    overall (dates and rows) and per regime, and the weight mass by calendar
+    year: aggregates only. Everything is computed from data up to ``T``.
+    """
+    cfg = trainer.cfg
+    prior = trainer.model.prior
+    filtered = getattr(prior, "filtered_probabilities", None)
+    stats: dict[str, float] = {}
+    if cfg.base.enabled and not no_decay(cfg.base.decay_half_life_days):
+        dates, counts = torch.unique(train.date, sorted=True, return_counts=True)
+        w = calendar_decay_weights(dates, cfg.base.decay_half_life_days)
+        assert w is not None
+        comps = None
+        if filtered is not None:
+            covered = prior.covers(dates)  # type: ignore[operator]
+            if bool(covered.all()):
+                comps = w.numpy()[:, None] * filtered(dates)
+        stats |= weight_summary("base_weight", w.numpy(), dates, counts.numpy(),
+                                train.date_labels, comps)
+    row_weight = None
+    if cfg.train.expert_decay == "regime_clock":
+        if filtered is None:
+            raise ValueError(
+                "expert_decay='regime_clock' needs a fitted gate with filtered "
+                f"probabilities; {type(prior).__name__} has none"
+            )
+        dates, inverse, counts = torch.unique(
+            expert_train.date, sorted=True, return_inverse=True, return_counts=True
+        )
+        comps = regime_clock_components(filtered(dates), cfg.train.expert_decay_half_life)
+        per_date = comps.sum(axis=1)
+        if not no_decay(cfg.train.expert_decay_half_life):
+            row_weight = torch.from_numpy(per_date)[inverse]
+        stats |= weight_summary("expert_weight", per_date, dates, counts.numpy(),
+                                expert_train.date_labels, comps)
+    return row_weight, stats
 
 
 def expert_stage_seed(seed: int, fold: int) -> int:
@@ -1545,6 +1613,9 @@ def walk_forward_evaluate(
             remaining = steps
         if run is not None:  # status heartbeat while the experts train (C.5)
             trainer.on_heartbeat = _heartbeat(run, fold.fold)
+        # the fold's decay weights (brief 09 C): fixed before training, from
+        # the frozen gate and the dates up to the last training date
+        row_weight, weight_stats = fold_decay_weights(trainer, train, expert_train)
         t0 = time.perf_counter()
         if trainer.model.prior.stateful:
             check_panel_input_mode(expert_train, trainer.cfg.experts.input_mode)
@@ -1552,7 +1623,8 @@ def walk_forward_evaluate(
                 expert_train.time_sequence(), steps=remaining, checkpoint_path=fit_ckpt
             )
         else:
-            trainer.fit(expert_train, steps=remaining, checkpoint_path=fit_ckpt)
+            trainer.fit(expert_train, steps=remaining, checkpoint_path=fit_ckpt,
+                        row_weight=row_weight)
         t_train = time.perf_counter() - t0
 
         canonical = canonical_expert_order(trainer.model.experts.log_sigma)
@@ -1601,6 +1673,7 @@ def walk_forward_evaluate(
             ),
             gate_excluded_dates=excluded,
             expert_weights=expert_weights,
+            weights=tuple(weight_stats.items()),
         )
         if done_file is not None:
             payload = dict(

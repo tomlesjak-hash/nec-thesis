@@ -53,6 +53,7 @@ from torch import Tensor
 
 from .config import NECConfig
 from .data import Batch, Panel
+from .decay import weighted_mean
 from .diagnostics import (
     expert_output_correlation,
     gate_entropy,
@@ -560,8 +561,14 @@ class Trainer:
         return m
 
     # ------------------------------------------------- memoryless (one-shot)
-    def train_step(self, batch: Batch) -> dict[str, float]:
-        """One optimizer step on one cross-sectional batch (memoryless prior)."""
+    def train_step(self, batch: Batch, weight: Tensor | None = None) -> dict[str, float]:
+        """One optimizer step on one cross-sectional batch (memoryless prior).
+
+        ``weight`` (``(B,)``, optional) are the rows' decay weights (brief 09
+        C.3): the data term becomes ``sum(w * nll_row) / sum(w)``; without it
+        the step is exactly the unweighted one. The auxiliary terms (load
+        balancing, decorrelation, the correction penalty) are unweighted
+        regularisers and stay so."""
         if self.model.prior.stateful:
             raise ValueError(
                 "the model's prior is stateful (HMM): shuffled one-shot batches "
@@ -575,7 +582,7 @@ class Trainer:
         # (Gumbel temperature) schedule off it
         ctx = PriorContext(step=self.step_count)
         out, nll_out = self._forward_nll(batch, ctx)
-        loss = nll_out.nll
+        loss = nll_out.nll if weight is None else weighted_mean(nll_out.per_sample_nll, weight)
 
         # buffer always updated: it feeds the running-utilization dashboard
         # even when the aux loss is off
@@ -608,23 +615,30 @@ class Trainer:
             out.prior.log_prior.exp(), out.corrections
         )
 
-    def _next_fit_batch(self, data: Panel) -> Batch:
-        """The next shuffled minibatch of the seeded epoch stream.
+    def _next_fit_index(self, n_rows: int) -> Tensor:
+        """The row indices of the next shuffled minibatch of the seeded epoch
+        stream.
 
         Identical stream to chaining ``data.minibatches(batch_size, g)`` epoch
         after epoch — but the generator, the current permutation, and the
         position within it live on the instance, so a checkpoint can freeze
-        the stream mid-epoch and resume it exactly.
+        the stream mid-epoch and resume it exactly. The stream depends only on
+        ``TrainConfig.seed``, the batch size and the number of rows, never on
+        the arm (brief 09 E.3).
         """
         t = self.cfg.train
         if self._fit_gen is None:
             self._fit_gen = torch.Generator().manual_seed(t.seed)
         if self._fit_perm is None or self._fit_pos >= len(self._fit_perm):
-            self._fit_perm = torch.randperm(len(data), generator=self._fit_gen)
+            self._fit_perm = torch.randperm(n_rows, generator=self._fit_gen)
             self._fit_pos = 0
         idx = self._fit_perm[self._fit_pos : self._fit_pos + t.batch_size]
         self._fit_pos += t.batch_size
-        return data._batch(idx)
+        return idx
+
+    def _next_fit_batch(self, data: Panel) -> Batch:
+        """The next shuffled minibatch (see :meth:`_next_fit_index`)."""
+        return data._batch(self._next_fit_index(len(data)))
 
     def _maybe_checkpoint(self, path: Path | None) -> None:
         if (
@@ -657,8 +671,14 @@ class Trainer:
         data: Panel,
         steps: int | None = None,
         checkpoint_path: str | Path | None = None,
+        row_weight: Tensor | None = None,
     ) -> list[dict[str, float]]:
         """Minibatch training loop over a panel (memoryless prior).
+
+        ``row_weight`` (``(len(data),)``, optional) are the experts' decay
+        weights (brief 09 C), fixed for the fold; each step's loss is the
+        weighted mean over its batch (:meth:`train_step`). The weights are not
+        checkpointed: they are recomputed from the frozen gate on resume.
 
         ``steps`` are *additional* steps for this call — the sample stream and
         ``step_count`` continue across calls, so ``fit(60)`` then ``fit(40)``
@@ -672,12 +692,18 @@ class Trainer:
         from .features import check_panel_input_mode  # late: features is data-side
 
         check_panel_input_mode(data, self.cfg.experts.input_mode)
+        if row_weight is not None and row_weight.shape != (len(data),):
+            raise ValueError(
+                f"row_weight must be ({len(data)},), got {tuple(row_weight.shape)}"
+            )
         t = self.cfg.train
         steps = t.steps if steps is None else steps
         ckpt = Path(checkpoint_path) if checkpoint_path is not None else None
         metrics: list[dict[str, float]] = []
         for _ in range(steps):
-            metrics.append(self.train_step(self._next_fit_batch(data)))
+            idx = self._next_fit_index(len(data))
+            weight = None if row_weight is None else row_weight[idx]
+            metrics.append(self.train_step(data._batch(idx), weight))
             self._after_step(ckpt)
         if ckpt is not None:
             self.save_checkpoint(ckpt)

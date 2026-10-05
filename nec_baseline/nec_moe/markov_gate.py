@@ -629,6 +629,10 @@ class MarkovSwitchingRegimePrior(PrecomputedRegimePrior):
         #: the target horizon the gate weight is built for; set from the
         #: training panel by fit()
         self.horizon: int | None = horizon
+        #: date code -> the filtered probability xi_{t|t} (canonical order) of
+        #: every date the fit saw or the frozen filter reached: what the
+        #: experts' regime-clock decay counts with (brief 09 C.2)
+        self._filtered: dict[int, np.ndarray] = {}
 
     def _panel_horizon(self, panel: Panel) -> int:
         """The panel target's horizon, checked against the configured one."""
@@ -677,8 +681,9 @@ class MarkovSwitchingRegimePrior(PrecomputedRegimePrior):
         self.fit_result = self._summarize(result, perm, trace)
         # the fitted table: gate weights from the filtered probabilities over
         # the training dates (Q27), the same rule apply_causal uses
-        log_prior = self._gate_log_prior(result, perm)
-        self.set_fitted_table(dates[self.cfg.order :], log_prior)
+        filtered = self._filtered_canonical(result, perm)
+        self._remember_filtered(dates[self.cfg.order :], filtered)
+        self.set_fitted_table(dates[self.cfg.order :], self._gate_log_prior(filtered))
 
     def _multi_start_fit(self, model, series: np.ndarray):
         """Best converged fit over the scheme's starts; every start is a trial.
@@ -760,39 +765,69 @@ class MarkovSwitchingRegimePrior(PrecomputedRegimePrior):
             distinct_optima_tol=self.cfg.distinct_optima_tol,
         )
 
-    def _gate_log_prior(self, result, perm: np.ndarray) -> Tensor:
-        """Log of the gate weights, canonically ordered (Q27).
+    @staticmethod
+    def _filtered_canonical(result, perm: np.ndarray) -> np.ndarray:
+        """``(T, K)`` filtered probabilities, canonically ordered.
 
-        Built from `filtered_marginal_probabilities`, never the smoothed
-        attribute: the filtered quantity at date t conditions on the series
-        through t, which is what a gate applied at t is allowed to know (Kim &
-        Nelson ch. 4). :func:`gate_weight_probs` then moves it forward with
-        the frozen canonical ``A`` (``fit_result.transition``) for
-        ``cfg.gate_weight``; ``prob_floor`` and renormalisation come after.
+        From `filtered_marginal_probabilities`, never the smoothed attribute:
+        the filtered quantity at date t conditions on the series through t,
+        which is what a gate applied at t is allowed to know (Kim & Nelson
+        ch. 4).
         """
-        assert self.fit_result is not None
         probs = np.asarray(result.filtered_marginal_probabilities, dtype=float)
         if probs.ndim != 2:  # pragma: no cover - shape contract of statsmodels
             raise ValueError(f"unexpected filtered probability shape {probs.shape}")
         if probs.shape[0] < probs.shape[1]:  # (K, T) in some versions
             probs = probs.T
-        probs = probs[:, perm]
+        return probs[:, perm]
+
+    def _gate_log_prior(self, filtered: np.ndarray) -> Tensor:
+        """Log of the gate weights (Q27) from canonically ordered filtered
+        probabilities: :func:`gate_weight_probs` moves them forward with the
+        frozen canonical ``A`` (``fit_result.transition``) for
+        ``cfg.gate_weight``; ``prob_floor`` and renormalisation come after.
+        """
+        assert self.fit_result is not None
         probs = gate_weight_probs(
-            probs, self.fit_result.transition, self.cfg.gate_weight, self.horizon
+            filtered, self.fit_result.transition, self.cfg.gate_weight, self.horizon
         )
         probs = np.clip(probs, self.cfg.prob_floor, None)
         probs = probs / probs.sum(axis=1, keepdims=True)
         return torch.log(torch.from_numpy(probs).to(torch.float32))
 
+    def _remember_filtered(self, dates: Tensor, filtered: np.ndarray, *,
+                           only_after: int | None = None) -> None:
+        """Keep each date's filtered probability; a fitted date is never
+        overwritten by the causal application (as in the log-prior table)."""
+        for d, row in zip(dates.tolist(), filtered, strict=True):
+            if only_after is not None and d <= only_after:
+                continue
+            self._filtered.setdefault(int(d), np.asarray(row, dtype=float).copy())
+
+    def filtered_probabilities(self, dates: Tensor) -> np.ndarray:
+        """``(D, K)`` filtered probabilities ``xi_{t|t}`` of ``dates``,
+        canonically ordered: the gate's input to the experts' regime-clock
+        decay (brief 09 C.2). Raises for a date the gate never reached."""
+        missing = [int(d) for d in dates.tolist() if int(d) not in self._filtered]
+        if missing:
+            raise ValueError(
+                f"{len(missing)} date(s) have no filtered probability (first "
+                f"{missing[:5]}): the gate was not fitted or applied there"
+            )
+        return np.stack([self._filtered[int(d)] for d in dates.tolist()])
+
     def _extra_state(self) -> dict:
         """The frozen fit (parameters, canonical permutation, multi-start
-        trace) and the horizon its gate weight was built for, so a resumed
-        fold reuses exactly this gate (brief 07 C.1)."""
-        return {"fit_result": self.fit_result, "horizon": self.horizon}
+        trace), the horizon its gate weight was built for and the filtered
+        probabilities, so a resumed fold reuses exactly this gate (brief 07
+        C.1) and the same decay weights (brief 09 C)."""
+        return {"fit_result": self.fit_result, "horizon": self.horizon,
+                "filtered": dict(self._filtered)}
 
     def _load_extra_state(self, extra: dict) -> None:
         self.fit_result = extra.get("fit_result")
         self.horizon = extra.get("horizon", self.horizon)
+        self._filtered = dict(extra.get("filtered", {}))
 
     # -------------------------------------------------- causal application
     def apply_causal(self, panel: Panel) -> None:
@@ -821,9 +856,10 @@ class MarkovSwitchingRegimePrior(PrecomputedRegimePrior):
                 f"max |difference| = {np.abs(used - frozen).max():.3e}"
             )
         perm = np.asarray(self.fit_result.permutation, dtype=int)
-        self.extend_causal_table(
-            dates[self.cfg.order :], self._gate_log_prior(applied, perm)
-        )
+        filtered = self._filtered_canonical(applied, perm)
+        self._remember_filtered(dates[self.cfg.order :], filtered,
+                                only_after=self.fit_max_date)
+        self.extend_causal_table(dates[self.cfg.order :], self._gate_log_prior(filtered))
 
     # ------------------------------------------------------------ forward
     def forward(self, gate_logits: Tensor, ctx=None) -> PriorOutput:

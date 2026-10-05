@@ -42,6 +42,7 @@ from torch import Tensor
 
 from .config import BaseConfig
 from .data import Panel
+from .decay import calendar_decay_weights, weighted_mean
 from .networks import MLPBlock
 
 __all__ = ["BaseModel", "BaseFit", "fit_base", "BaseCache", "base_cache_key"]
@@ -110,6 +111,11 @@ class BaseFit:
 def fit_base(panel: Panel, cfg: BaseConfig, *, seed: int) -> BaseFit:
     """Fit ``f0`` on a training block and return it **frozen**.
 
+    The training loss is the mean squared error, or with
+    ``cfg.decay_half_life_days`` set the weighted mean ``sum(w e^2) /
+    sum(w)`` of the calendar decay weights (brief 09 C.1, C.3), with ``T`` the
+    last date the base trains on.
+
     With ``val_fraction = 0`` (the default) the base trains on all of
     ``panel`` for ``cfg.steps`` steps and has no validation loss. With
     ``val_fraction > 0`` the validation set is the chronological tail of
@@ -158,11 +164,15 @@ def _fit_base(
     best_val, best_state, since_best = math.inf, None, 0
     train_loss = math.nan
     steps_run, stopped_early = 0, False
+    # fixed for the fold, from the dates the base trains on (C.1); None means
+    # equal weights and keeps the exact unweighted loss
+    row_weight = calendar_decay_weights(train.date, cfg.decay_half_life_days)
 
     for step in range(cfg.steps):
         model.train()
         idx = torch.randint(len(train), (min(cfg.batch_size, len(train)),), generator=gen)
-        loss = torch.mean((model(train.x_snap[idx]) - train.y[idx]) ** 2)
+        sq = (model(train.x_snap[idx]) - train.y[idx]) ** 2
+        loss = weighted_mean(sq, None if row_weight is None else row_weight[idx])
         opt.zero_grad(set_to_none=True)
         loss.backward()
         opt.step()
@@ -221,6 +231,7 @@ def base_cache_key(
         cfg.early_stopping_patience,
         cfg.val_fraction,
         cfg.seed_offset,
+        cfg.decay_half_life_days,
         window,
         seed,
         input_dim,

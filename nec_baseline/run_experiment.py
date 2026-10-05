@@ -90,6 +90,7 @@ from nec_moe import (  # noqa: E402
     expert_stage_seed,
     expert_weight_report,
     fit_temperature,
+    fold_decay_weights,
     gate_regime_alignment,
     gate_reliability,
     graceful_interrupts,
@@ -201,6 +202,12 @@ class Experiment:
     warmstart: bool = True          # expert warm-start (keep on; handbook I.11)
     warmstart_channel: int | None = None  # seq channel of the vol proxy; None = auto
     chunk_len: int = 50             # HMM truncated-BPTT chunk (dates per step)
+    # decay weights (Q16 (d)(e), brief 09 C; chosen by the pilot, so the
+    # defaults are equal weights): the experts' "none" | "regime_clock"
+    # (age = later same-regime experience, counted with the frozen gate's
+    # filtered probabilities; prior="markov" only), half-life in regime-days
+    expert_decay: str = "none"
+    expert_decay_half_life: float = math.inf
     # Q24 diagnostic: bins of each expert's gate probability (interior edges)
     expert_weight_quantiles: tuple[float, ...] = (0.2, 0.4, 0.6, 0.8)
 
@@ -224,6 +231,8 @@ class Experiment:
     # required by the calendar-year main and pilot folds (brief 09 B.3)
     base_val_fraction: float = 0.0
     base_seed_offset: int = 0
+    # the base's calendar decay half-life in trading days; None = equal weights
+    base_decay_half_life_days: float | None = None
     # alpha of the correction-magnitude penalty. Ye & Borde do not report
     # theirs: select on the training block, log every candidate as a trial,
     # and publish the sensitivity curve (brief 02 §3).
@@ -451,7 +460,8 @@ def _nec_config(exp: Experiment, panel: Panel, sigma_init: float) -> NECConfig:
                         batch_size=exp.base_batch_size,
                         early_stopping_patience=exp.base_early_stopping_patience,
                         val_fraction=exp.base_val_fraction,
-                        seed_offset=exp.base_seed_offset),
+                        seed_offset=exp.base_seed_offset,
+                        decay_half_life_days=exp.base_decay_half_life_days),
         train=TrainConfig(objective=exp.objective,
                           lr=exp.lr, batch_size=exp.batch_size, steps=exp.steps,
                           sigma_init=sigma_init,
@@ -463,7 +473,9 @@ def _nec_config(exp: Experiment, panel: Panel, sigma_init: float) -> NECConfig:
                           freeze_gate=exp.freeze_gate,
                           aux_correction_penalty=exp.aux_correction_penalty,
                           correction_penalty_weight=exp.correction_penalty_weight,
-                          expert_weight_quantiles=tuple(exp.expert_weight_quantiles)),
+                          expert_weight_quantiles=tuple(exp.expert_weight_quantiles),
+                          expert_decay=exp.expert_decay,  # type: ignore[arg-type]
+                          expert_decay_half_life=exp.expert_decay_half_life),
     )
 
 
@@ -573,6 +585,8 @@ def _quick(exp: Experiment, panel: Panel, purge: int, run: Run) -> dict:
         trainer.warmstart_experts(expert_train.full_batch(), sort_key=key(expert_train))
 
     trainer.on_heartbeat = _heartbeat(run, fold.fold)
+    # the decay weights (brief 09 C), as the walk-forward harness uses them
+    row_weight, weight_stats = fold_decay_weights(trainer, train, expert_train)
     if exp.prior == "hmm":
         trainer.fit_sequence(expert_train.time_sequence(), steps=remaining,
                              chunk_len=exp.chunk_len, checkpoint_path=ckpt)
@@ -581,7 +595,8 @@ def _quick(exp: Experiment, panel: Panel, purge: int, run: Run) -> dict:
                                        init_state=warm.final_state)
         nll, pred = ev.nll, torch.cat(list(ev.y_hat))
     else:
-        trainer.fit(expert_train, steps=remaining, checkpoint_path=ckpt)
+        trainer.fit(expert_train, steps=remaining, checkpoint_path=ckpt,
+                    row_weight=row_weight)
         nll = trainer.evaluate(test.full_batch())
         trainer.model.eval()
         with torch.no_grad():
@@ -633,7 +648,8 @@ def _quick(exp: Experiment, panel: Panel, purge: int, run: Run) -> dict:
 
     # every trial carries the parameter-count confound and, where the prior
     # has a transition matrix, how sticky the fitted chain actually is
-    trial: dict[str, float] = {"nll": nll, "gate_excluded_dates": float(excluded)}
+    trial: dict[str, float] = {"nll": nll, "gate_excluded_dates": float(excluded),
+                               **weight_stats}
     # §5: the base's own out-of-sample score beside every result, the
     # improvement over it, and the correction magnitude actually applied
     if trainer.model.base is not None:

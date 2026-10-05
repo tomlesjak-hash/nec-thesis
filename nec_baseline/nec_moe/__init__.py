@@ -70,6 +70,14 @@ from .data import (
     SyntheticRegimePanel,
     SyntheticSpec,
 )
+from .decay import (
+    EXPERT_DECAYS,
+    calendar_decay_weights,
+    kish_ess,
+    regime_clock_components,
+    regime_clock_exponents,
+    regime_clock_weights,
+)
 from .evaluation import (
     HAC_KERNELS,
     PORTFOLIO_SCHEMES,
@@ -85,6 +93,7 @@ from .evaluation import (
     calendar_year_folds,
     expert_stage_seed,
     expert_weight_report,
+    fold_decay_weights,
     fold_metrics_frame,
     ic_summary,
     long_run_variance,
@@ -277,6 +286,13 @@ __all__ = [
     "build_activation",
     "WalkForwardFold",
     "walk_forward_folds",
+    "fold_decay_weights",
+    "EXPERT_DECAYS",
+    "calendar_decay_weights",
+    "regime_clock_weights",
+    "regime_clock_components",
+    "regime_clock_exponents",
+    "kish_ess",
     "calendar_year_folds",
     "pilot_folds",
     "pilot_slice",

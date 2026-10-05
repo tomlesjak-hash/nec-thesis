@@ -22,6 +22,7 @@ Conventions
 from __future__ import annotations
 
 import dataclasses
+import math
 import re
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -423,6 +424,12 @@ class BaseConfig:
     ``early_stopping_patience``) remains for the count-based development
     folds. The base seed is the run seed plus ``seed_offset``, so a base can
     be re-seeded independently of the experts.
+
+    ``decay_half_life_days`` (brief 09 C.1, Q16 (d)): calendar exponential
+    decay of the training rows, ``w(s) = 2 ** (-age(s) / H)`` with ``age`` in
+    trading days to the fold's last training date (:mod:`nec_moe.decay`).
+    ``None`` (the default, until the pilot chooses) or infinity means equal
+    weights, and then the loss is exactly the unweighted one.
     """
 
     enabled: bool = False  # residual mode off: existing behaviour preserved
@@ -438,6 +445,8 @@ class BaseConfig:
     # main study and the pilot, brief 09 B.3)
     val_fraction: float = 0.0
     seed_offset: int = 0
+    # calendar decay half-life in trading days; None = equal weights (C.1)
+    decay_half_life_days: float | None = None
 
 
 @dataclass(frozen=True)
@@ -496,6 +505,13 @@ class TrainConfig:
     # expert-weight diagnostic (nec_moe.diagnostics.expert_weight_diagnostics):
     # the mean responsibility is reported within each bin. Quintiles by default.
     expert_weight_quantiles: tuple[float, ...] = (0.2, 0.4, 0.6, 0.8)
+    # Row weights of the experts' training loss (brief 09 C.2, Q16 (d)(e)):
+    # "none" | "regime_clock" (the mixture form: a row's age is the later
+    # experience of its own regime, counted with the frozen gate's filtered
+    # probabilities; nec_moe.decay). The half-life is in regime-days;
+    # infinity means equal weights. Default "none" until the pilot chooses.
+    expert_decay: Literal["none", "regime_clock"] = "none"
+    expert_decay_half_life: float = math.inf
 
 
 @dataclass(frozen=True)
@@ -671,6 +687,19 @@ class NECConfig:
                 f"correction_penalty_weight must be >= 0, got "
                 f"{t.correction_penalty_weight}"
             )
+        from .decay import EXPERT_DECAYS
+
+        if t.expert_decay not in EXPERT_DECAYS:
+            raise bad(f"unknown train.expert_decay {t.expert_decay!r}; use one of "
+                      f"{EXPERT_DECAYS}")
+        if not t.expert_decay_half_life > 0:
+            raise bad(f"expert_decay_half_life must be > 0, got {t.expert_decay_half_life}")
+        if t.expert_decay == "regime_clock" and p.kind != "markov":
+            raise bad(
+                "train.expert_decay='regime_clock' counts each row's age with the "
+                "frozen gate's filtered regime probabilities, which only the fitted "
+                f"Hamilton gate (prior.kind='markov') provides; got prior.kind={p.kind!r}"
+            )
         if t.aux_load_balance and t.freeze_gate:
             # Q19 consequence 3: with a frozen gate the mean gate probability
             # has no trainable parameter behind it, so the Shazeer term's
@@ -713,6 +742,11 @@ class NECConfig:
             raise bad(
                 f"base early_stopping_patience must be >= 1 or None, got "
                 f"{b.early_stopping_patience}"
+            )
+        if b.decay_half_life_days is not None and not b.decay_half_life_days > 0:
+            raise bad(
+                f"base decay_half_life_days must be > 0 or None, got "
+                f"{b.decay_half_life_days}"
             )
         if b.early_stopping_patience is not None and b.val_fraction == 0.0:
             raise bad(

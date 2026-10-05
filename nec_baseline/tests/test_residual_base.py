@@ -238,7 +238,7 @@ def test_base_cache_shares_across_gate_arms_and_splits_on_config():
         ("hidden_dims", (8, 4)), ("dropout", 0.1), ("activation", "gelu"),
         ("lr", 5e-3), ("weight_decay", 0.0), ("steps", 61),
         ("batch_size", 32), ("early_stopping_patience", 5),
-        ("val_fraction", 0.3), ("seed_offset", 1),
+        ("val_fraction", 0.3), ("seed_offset", 1), ("decay_half_life_days", 250.0),
     ]:
         changed = dataclass_replace(cfg, field, value)
         assert base_cache_key(changed, (0, 60), 0, 3) != base_cache_key(

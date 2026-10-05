@@ -124,7 +124,7 @@ def _mkt_log_ret(fixture: fx.Fixture, days, indno: int = fx.MEMBER_INDNO) -> flo
 def test_spec_defaults_are_the_brief_and_the_approved_indno():
     s = CRSPSpec()
     assert (s.stock_file, s.market_indno, s.membership_indno) == (
-        "StkDlySecurityPrimaryData", 1000500, 1000500,
+        "StkDlySecurityData", 1000500, 1000500,  # brief 08 C.1: OHLC and quotes
     )
     assert (s.universe, s.start, s.end) == ("sp500", "2015-01-01", "2024-12-31")
     assert s.post_delisting_return == "cash"
@@ -161,7 +161,11 @@ def test_extract_keeps_member_rows_in_bounds_and_resumes(tmp_path: Path, monkeyp
     extract_crsp(_spec(clean_fx.root), verbose=False)
     clean = load_extract(_spec(clean_fx.root))
     lo, hi = _spec(clean_fx.root).extract_bounds
-    assert sorted(clean.stock["PERMNO"].unique()) == list(range(10001, 10009))  # not 10009
+    # the members, plus 10010 (a non-member share class of a member's
+    # company, kept for market equity); never 10009
+    assert sorted(clean.stock["PERMNO"].unique()) == [*range(10001, 10009), fx.SIBLING]
+    assert clean.info["n_company_permnos"] == 1
+    assert sorted(clean.spells["PERMNO"].unique()) == list(range(10001, 10009))
     assert clean.stock["DlyCalDt"].between(lo, hi).all()
     assert len(clean.stock) == len(clean.adj)
 
@@ -439,7 +443,9 @@ def test_missing_return_split_changes_nothing_in_the_panel(fixture, builds):
     assert split["totals"]["b_forward_only"] == H
     assert split["totals"]["d_missing_delisting_return"] == H
     assert split["totals"]["c_both"] == 0
-    assert split["next_return_duration_flags"] is None  # duration flags not extracted
+    # the duration flags now come with the stock rows (StkDlySecurityData,
+    # brief 08 C.1): the gap after 10003's missing day spans one extra day
+    assert split["next_return_duration_flags"] == {"P1": 1}
 
 
 # --------------------------------------------------------------------------- #

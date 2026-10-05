@@ -17,7 +17,15 @@ The cast, on a business-day calendar from 2018-06-01 to 2020-12-31, window
   trading day with a delisting return ``DELIST_RET``;
 - 10006: delists on ``DELIST2_LAST`` and its delisting return is missing;
 - 10001 and 10002: two share classes of one company (same PERMCO);
-- 10009: never a member of the membership index (a member of another one).
+- 10009: never a member of the membership index (a member of another one);
+- 10010: a second share class of 10003's company that is never a member: the
+  extract keeps it for the company's market equity (brief 08 C.1).
+
+``StkDlySecurityData`` carries every column the brief 08 extract keeps: the
+primary file's values plus an invented open, high, low, close, bid and ask
+(close = ``DlyPrc``; a delisting row has none). ``MetaItemInfo`` carries
+invented unit rows for ``DlyCap``, ``DlyShrOut`` and ``DlyVol`` under an
+invented header (the real layout is not known to this code).
 """
 
 from __future__ import annotations
@@ -84,7 +92,17 @@ HEADERS = {
         "FlagType", "FlagValue", "FlagTypeDesc", "FlagDesc", "FlagDef", "FlagCoverageFlg",
         "FlagKey"
     )),
+    "MetaItemInfo": "|".join(("FixtureItem", "FixtureDesc", "FixtureUnit")),
 }
+
+#: invented metadata rows for the unit check (not CRSP's texts)
+ITEM_TEXT = {
+    "DlyCap": ("fixture market cap", "fixture: thousands of dollars"),
+    "DlyShrOut": ("fixture shares outstanding", "fixture: thousands of shares"),
+    "DlyVol": ("fixture volume", "fixture: shares"),
+    "DlyPrc": ("fixture price", "fixture: dollars"),
+}
+SIBLING = 10010  # 10003's second share class, never a member
 
 #: invented flag descriptions (the codes are CRSP's, the texts are not)
 FLAG_TEXT = {
@@ -143,7 +161,8 @@ def write_fixture(
                 DlyCalDt=_d(day), DlyTotRet=f"{r:.8f}", DlyTotCnt=500,
             ))
 
-    life = {p: (CAL[0], CAL[-1]) for p in range(10001, 10010)}
+    life = {p: (CAL[0], CAL[-1]) for p in range(10001, 10011)}
+    quotes = np.random.default_rng(20261005)  # its own stream: g's draws stay as they were
     life[10005] = (CAL[0], _next_day(DELIST_LAST))
     life[10006] = (CAL[0], _next_day(DELIST2_LAST))
     returns: dict[int, pd.Series] = {}
@@ -174,12 +193,31 @@ def write_fixture(
             ret = r[day]
             duration = "MR" if np.isnan(ret) else (f"P{gap}" if gap else "D1")
             miss_flag = ("DM" if is_del else "NT") if np.isnan(ret) else "NA"
+            close = None if is_del else float(price[day])
+            ohlc: dict[str, object] = {}
+            if close is not None:
+                intraday = quotes.normal(0.0, 0.01)
+                open_ = close * np.exp(-intraday)
+                wiggle = abs(quotes.normal(0.0, 0.004))
+                half = 0.0005 + 0.001 * quotes.uniform()
+                ohlc = dict(
+                    DlyOpen=f"{open_:.4f}", DlyClose=f"{close:.4f}",
+                    DlyHigh=f"{max(open_, close) * (1 + wiggle):.4f}",
+                    DlyLow=f"{min(open_, close) * (1 - wiggle):.4f}",
+                    DlyBid=f"{close * (1 - half):.4f}", DlyAsk=f"{close * (1 + half):.4f}",
+                )
             files["StkDlySecurityData"].append(_row(
                 HEADERS["StkDlySecurityData"], PERMNO=permno,
                 YYYYMMDD=day.strftime("%Y%m%d"), DlyCalDt=_d(day),
                 DlyDelFlg="Y" if is_del else "N",
+                DlyPrc=None if is_del else f"{price[day]:.4f}",
+                DlyPrcFlg="DA" if is_del else "TR",
+                DlyCap=None if is_del else f"{price[day] * 1000:.2f}",
+                DlyCapFlg="NA",
                 DlyRet=None if np.isnan(ret) else f"{ret:.8f}",
-                DlyRetMissFlg=miss_flag, DlyRetDurFlg=duration, DlyVol=f"{vol[day]:.0f}",
+                DlyRetx=None if np.isnan(ret) else f"{ret:.8f}",
+                DlyRetMissFlg=miss_flag, DlyRetDurFlg=duration, DlyDistRetFlg="NA",
+                DlyVol=f"{vol[day]:.0f}", **ohlc,
             ))
             gap = gap + 1 if np.isnan(ret) else 0
             files["StkDlySecurityPrimaryData"].append(_row(
@@ -235,7 +273,11 @@ def write_fixture(
 
     ticker_change = pd.Timestamp("2020-03-16")
     for permno in life:
-        permco = 50001 if permno in (10001, 10002) else 50000 + permno
+        permco = (
+            50001 if permno in (10001, 10002)
+            else 50000 + 10003 if permno == SIBLING
+            else 50000 + permno
+        )
         periods = [(CAL[0], CAL[-1], f"T{permno % 100:02d}")]
         if permno == 10007:
             periods = [
@@ -254,6 +296,11 @@ def write_fixture(
             HEADERS["MetaFlagInfo"], FlagType=ftype, FlagValue=value,
             FlagTypeDesc=f"fixture flag type {ftype}", FlagDesc=text, FlagDef=text,
             FlagCoverageFlg="Y", FlagKey=900000 + i,
+        ))
+
+    for item, (desc, unit) in ITEM_TEXT.items():
+        files["MetaItemInfo"].append(_row(
+            HEADERS["MetaItemInfo"], FixtureItem=item, FixtureDesc=desc, FixtureUnit=unit,
         ))
 
     texts = {name: "\n".join(lines) + "\n" for name, lines in files.items()}

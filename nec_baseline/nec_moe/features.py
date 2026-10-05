@@ -50,6 +50,8 @@ The result is a plain :class:`~nec_moe.data.Panel` — everything downstream
 
 from __future__ import annotations
 
+import dataclasses
+import math
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
@@ -64,6 +66,10 @@ from .data import FeatureSchema, Panel
 __all__ = [
     "DAILY_COLUMNS",
     "TARGET_KINDS",
+    "CALENDAR_DAYS_PER_YEAR",
+    "FeatureSpec",
+    "price_history_trading_days",
+    "fundamental_history_quarters",
     "SEQUENCE_FEATURES",
     "SNAPSHOT_FEATURES",
     "StageBSpec",
@@ -120,6 +126,148 @@ SNAPSHOT_FEATURES: tuple[str, ...] = (
     "rel_ret_20d",
     "rel_vol_20d",
 )
+
+
+#: Calendar days per year, for turning trading-day windows into calendar
+#: spans (a property of the calendar, not a modelling choice).
+CALENDAR_DAYS_PER_YEAR = 365.25
+
+
+@dataclass(frozen=True)
+class FeatureSpec:
+    """Every window, threshold and cap of the Q26 feature set (brief 08 D).
+
+    ``feature_set="q26"`` is the decision (Q26, 2026-10-05): 26 JKP
+    characteristics, 12 short-horizon market characteristics, 17 industry
+    inputs and 2 missing-value flags, 57 inputs. ``"legacy14"`` is the
+    earlier 14-feature price/volume set, kept for comparison and the older
+    tests only. Windows are in trading days and trailing through the close
+    of t; fundamentals are point in time (:mod:`nec_moe.compustat`).
+
+    Defaults are the brief's definitions; the field comments name the
+    characteristic each one belongs to. ``trading_days_per_year`` turns the
+    year-based windows (seasonality, and the extract's lookback) into trading
+    days; a month is a twelfth of it.
+    """
+
+    feature_set: Literal["q26", "legacy14"] = "q26"
+    # D.4: a rolling window needs at least this share of its days, rounded up
+    min_obs_frac: float = 0.8
+    trading_days_per_year: int = 252
+    # ---- D.1, CRSP part of the JKP block
+    ret_5d_window: int = 5  # ret_5d
+    ret_20d_window: int = 20  # ret_20d
+    mom_start_lag: int = 251  # mom_12_1: sum of r from t-251 ...
+    mom_end_lag: int = 21  # ... to t-21 (the last 21 days skipped)
+    high_window: int = 252  # prc_highprc_252d
+    rvol_window: int = 21  # rvol_21d
+    beta_corr_window: int = 1260  # beta_bab: correlation window ...
+    beta_corr_min_obs: int = 750  # ... and its minimum count
+    beta_overlap_days: int = 3  # ... of overlapping 3-day summed returns
+    beta_vol_window: int = 252  # ... times std(r_i, 252) / std(m, 252)
+    amihud_window: int = 126  # ami_126d
+    seas_first_year: int = 2  # seas_2_5an: years 2 ...
+    seas_last_year: int = 5  # ... to 5 back
+    coskew_window: int = 21  # coskew_21d
+    # ---- D.2, the short-horizon market block
+    ivol_window: int = 21  # ivol_capm_21d
+    vol_shock_short: int = 5  # vol_shock = std(r, 5) ...
+    vol_shock_long: int = 60  # ... / std(r, 60)
+    rskew_window: int = 21  # rskew_21d
+    rmax_window: int = 21  # rmax1_21d
+    volume_z_window: int = 20  # volume_z (the split-invariant z-score)
+    spread_window: int = 21  # qspread_21d
+    overnight_window: int = 20  # overnight_20d
+    ma_window: int = 50  # ma50_gap
+    earn_ahead_days: int = 5  # earn_next5: announcement within 5 trading days
+    earn_cycle_days: int = 364  # ... expected at a past RDQ + 364 calendar days
+    var_ratio_window: int = 60  # var_ratio_60d
+    var_ratio_q: int = 5  # ... of 5-day against 1-day variance
+    ret_vol_corr_window: int = 60  # ret_vol_corr_60d
+    # ---- D.3, the industry block
+    industry_weighting: Literal["value", "equal"] = "value"
+    min_sector_names: int = 5  # within-sector rank falls back below this
+    # ---- fundamentals (C.4, D.1)
+    fundamental_max_staleness_days: int = 365  # calendar days after availability
+    trailing_quarters: int = 4  # trailing-4-quarter flows
+    growth_lag_quarters: int = 4  # at_gr1, sale_gr1, taccruals_at, noa_at, ni_inc8q
+    debt_growth_lag_quarters: int = 12  # debt_gr3
+    surprise_std_quarters: int = 8  # niq_su / saleq_su: std over 8 quarters ...
+    surprise_min_quarters: int = 6  # ... with at least 6
+    earnings_streak_max: int = 8  # ni_inc8q
+
+    def validate(self) -> FeatureSpec:
+        if self.feature_set not in ("q26", "legacy14"):
+            raise ValueError(f"unknown feature_set {self.feature_set!r}; use 'q26' or 'legacy14'")
+        if not 0.0 < self.min_obs_frac <= 1.0:
+            raise ValueError(f"min_obs_frac must be in (0, 1], got {self.min_obs_frac}")
+        if self.industry_weighting not in ("value", "equal"):
+            raise ValueError(f"unknown industry_weighting {self.industry_weighting!r}")
+        windows = {
+            k: v for k, v in dataclasses.asdict(self).items()
+            if isinstance(v, int) and not isinstance(v, bool)
+        }
+        bad = {k: v for k, v in windows.items() if v < 1}
+        if bad:
+            raise ValueError(f"FeatureSpec windows must be >= 1, got {bad}")
+        if self.mom_end_lag >= self.mom_start_lag:
+            raise ValueError("mom_end_lag must be smaller than mom_start_lag")
+        if self.seas_first_year > self.seas_last_year:
+            raise ValueError("seas_first_year must be <= seas_last_year")
+        if self.beta_corr_min_obs > self.beta_corr_window:
+            raise ValueError("beta_corr_min_obs must be <= beta_corr_window")
+        if self.surprise_min_quarters > self.surprise_std_quarters:
+            raise ValueError("surprise_min_quarters must be <= surprise_std_quarters")
+        return self
+
+    @property
+    def trading_days_per_month(self) -> int:
+        return self.trading_days_per_year // 12
+
+    def min_obs(self, window: int) -> int:
+        """Observations a ``window``-day statistic needs: ``min_obs_frac`` of
+        the window, rounded up (D.4)."""
+        return max(1, math.ceil(self.min_obs_frac * window - 1e-9))
+
+
+def price_history_trading_days(fs: FeatureSpec) -> int:
+    """Trading days of CRSP history the longest Q26 price window reaches back.
+
+    The longest of: the beta correlation window over overlapping sums, the
+    seasonality years (``seas_last_year`` years plus the month itself), the
+    momentum lag, the 52-week high, and every shorter window. Feeds the
+    extract's lookback (:attr:`nec_moe.crsp.CRSPSpec.lookback_days`); the
+    training window itself does not move.
+    """
+    return max(
+        fs.beta_corr_window + fs.beta_overlap_days - 1,
+        fs.beta_vol_window,
+        fs.seas_last_year * fs.trading_days_per_year + fs.trading_days_per_month,
+        fs.mom_start_lag + 1,
+        fs.high_window,
+        fs.amihud_window,
+        fs.ma_window,
+        fs.vol_shock_long,
+        fs.var_ratio_window,
+        fs.ret_vol_corr_window,
+    )
+
+
+def fundamental_history_quarters(fs: FeatureSpec) -> int:
+    """Fiscal quarters before the latest one the Q26 fundamentals reach back.
+
+    The longest of: debt growth over ``debt_growth_lag_quarters``; the
+    surprise standard deviation over ``surprise_std_quarters`` differences,
+    each ``growth_lag_quarters`` long; the earnings streak's comparisons; and
+    a trailing sum a growth lag earlier (sales growth). Feeds the Compustat
+    extract's start (:func:`nec_moe.compustat.fundamentals_start`).
+    """
+    return max(
+        fs.debt_growth_lag_quarters,
+        fs.surprise_std_quarters - 1 + fs.growth_lag_quarters,
+        fs.earnings_streak_max - 1 + fs.growth_lag_quarters,
+        fs.trailing_quarters - 1 + fs.growth_lag_quarters,
+    )
 
 
 #: The target kinds :class:`StageBSpec` accepts; ``"market_neutral"`` is the

@@ -14,16 +14,38 @@ Source files (release ``ciz202512``, pipe-delimited with a header row)
 -----------------------------------------------------------------------
 Read from the extracted copy ``Data/crspdata/<release>_ascii/<file>.dat`` when
 it exists, else streamed from ``Data/<release>_ascii.zip``; the archive is
-never unzipped whole. Only the smaller primary stock file is used
-(``StkDlySecurityPrimaryData``); every column this module needs is in it or in
-the files below, so the 42 GB ``StkDlySecurityData`` is not read.
+never unzipped whole (:func:`crsp_file_source`, shared with the
+CRSP/Compustat Merged release ``cfz202607`` read by :mod:`nec_moe.compustat`).
 
-- ``StkDlySecurityPrimaryData``: ``DlyRet``, ``DlyPrc``, ``DlyVol`` and flags;
+The stock file is ``StkDlySecurityData`` (brief 08 C.1; about 42 GB
+uncompressed, streamed once): it carries the open, high, low, close, bid and
+ask the Q26 features need, filled on every S&P 500 member stock-day of
+2015-2024 (Tom's check). ``DlyNumTrd`` is not used (28% filled, Nasdaq only).
+The brief 06 extract streamed the smaller ``StkDlySecurityPrimaryData``,
+which lacks them; it remains readable as ``stock_file`` with its own column
+set (:data:`PRIMARY_STOCK_COLUMNS`).
+
+- ``StkDlySecurityData``: ``DlyRet``, ``DlyRetx``, ``DlyPrc``, ``DlyCap``,
+  ``DlyVol``, ``DlyOpen``/``DlyHigh``/``DlyLow``/``DlyClose``,
+  ``DlyBid``/``DlyAsk``, ``DlyRetDurFlg`` and flags;
 - ``StkDlyCumulativeAdjFactor``: ``DlyCumFacShr`` for split-invariant volume;
 - ``StkDelists``: delisting records (for reporting; see rule 2);
 - ``IndDlySeriesData``: ``DlyTotRet`` of the market index;
 - ``StkIndMembership``: index membership spells;
-- ``StkSecurityInfoHist``: tickers and ``PERMCO``, for report labels only.
+- ``StkSecurityInfoHist``: tickers and ``PERMCO``: report labels, and the
+  company grouping of market equity (all PERMNOs of a member's PERMCO are
+  extracted, members or not, so ``ME`` sums every share class).
+
+Units (brief 08 C.1). ``DlyPrc``, ``DlyOpen``..``DlyAsk`` are dollars per
+share and ``DlyVol`` a share count, as in the legacy files. ``DlyCap``
+(price times shares outstanding) and ``DlyShrOut`` follow CRSP's
+convention of thousands (of dollars, of shares): ``CRSPSpec.cap_unit_dollars``
+holds that unit and converts ``ME`` to the $ millions of Compustat. **Not yet
+verified against ``MetaItemInfo.dat``**, which this code has never seen: the
+extract copies the metadata rows of these three items verbatim into
+``extract.json`` (``item_metadata``) for that check. Every Q26 input that
+uses them is a cross-sectional rank of a ratio or a log, so a wrong
+constant unit would shift no input; only aggregate reports quote levels.
 
 Construction rules (brief 06 A.4), checked against the release's metadata
 --------------------------------------------------------------------------
@@ -85,30 +107,41 @@ import contextlib
 import dataclasses
 import hashlib
 import json
+import math
 import zipfile
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import IO, Any, Literal
+from typing import IO, Any, Literal, Protocol
 
 import numpy as np
 import pandas as pd
 
 from .data import Panel
 from .features import (
+    CALENDAR_DAYS_PER_YEAR,
+    FeatureSpec,
     StageBSpec,
     _valid_rows,
     assemble_panel,
     feature_warmup,
     market_frame,
     post_fill_used,
+    price_history_trading_days,
     stock_features,
 )
 from .universe import SpellUniverse, filter_point_in_time
 
 __all__ = [
     "REPO_DATA_DIR",
+    "STOCK_COLUMNS",
+    "PRIMARY_STOCK_COLUMNS",
     "CRSPSpec",
+    "ExtractMismatch",
+    "extract_identity",
+    "company_permnos",
+    "trading_to_calendar_days",
+    "read_item_metadata",
     "CRSPExtract",
     "CRSPBuild",
     "TickerLookup",
@@ -132,7 +165,8 @@ __all__ = [
 #: its ``derived/`` subfolder only.
 REPO_DATA_DIR = Path(__file__).resolve().parents[2] / "Data"
 
-STOCK_COLUMNS: dict[str, str] = {
+#: Columns kept from the primary stock file (the brief 06 extract).
+PRIMARY_STOCK_COLUMNS: dict[str, str] = {
     "PERMNO": "int64",
     "DlyCalDt": "date32",
     "DlyDelFlg": "string",
@@ -146,6 +180,22 @@ STOCK_COLUMNS: dict[str, str] = {
     "DlyDistRetFlg": "string",
     "DlyVol": "float64",
 }
+#: Columns kept from ``StkDlySecurityData`` (brief 08 C.1): the primary set,
+#: the day's open/high/low/close and closing bid/ask, and the return-duration
+#: flag (so the missing-return diagnostic needs no second pass of the file).
+STOCK_COLUMNS: dict[str, str] = {
+    **PRIMARY_STOCK_COLUMNS,
+    "DlyRetDurFlg": "string",
+    "DlyOpen": "float64",
+    "DlyHigh": "float64",
+    "DlyLow": "float64",
+    "DlyClose": "float64",
+    "DlyBid": "float64",
+    "DlyAsk": "float64",
+}
+#: The stock file the brief 06 extract streamed, and its lookback in calendar
+#: days: that extract keeps its folder name (:attr:`CRSPSpec.extract_dir`).
+LEGACY_STOCK_FILE, LEGACY_LOOKBACK_DAYS = "StkDlySecurityPrimaryData", 550
 ADJ_FACTOR_COLUMNS: dict[str, str] = {
     "PERMNO": "int64",
     "DlyCalDt": "date32",
@@ -185,6 +235,8 @@ RETURN_DURATION_COLUMNS: dict[str, str] = {
     "DlyRetDurFlg": "string",
 }
 SECURITY_FILE = "StkDlySecurityData"
+#: ``MetaItemInfo`` items whose units the extract records (module docstring).
+UNIT_ITEMS: tuple[str, ...] = ("DlyCap", "DlyShrOut", "DlyVol")
 SECURITY_INFO_COLUMNS: dict[str, str] = {
     "PERMNO": "int64",
     "SecInfoStartDt": "date32",
@@ -192,6 +244,21 @@ SECURITY_INFO_COLUMNS: dict[str, str] = {
     "ShareClass": "string",
     "Ticker": "string",
     "PERMCO": "int64",
+}
+
+#: Optional daily-frame columns (:data:`nec_moe.features.DAILY_COLUMNS`) and
+#: the stock-file column each comes from. ``retx`` (the return without
+#: distributions) builds the split- and distribution-consistent price index;
+#: ``cap`` is ``DlyCap``, in ``CRSPSpec.cap_unit_dollars``.
+OPTIONAL_DAILY_SOURCES: dict[str, str] = {
+    "retx": "DlyRetx",
+    "cap": "DlyCap",
+    "open": "DlyOpen",
+    "high": "DlyHigh",
+    "low": "DlyLow",
+    "close": "DlyClose",
+    "bid": "DlyBid",
+    "ask": "DlyAsk",
 }
 
 #: ``DlyRetMissFlg`` / ``DelRetMissType`` value meaning "not missing" (flag
@@ -244,18 +311,31 @@ class CRSPSpec:
 
     ``start``/``end`` are the panel window, unchanged from the free-data
     panel so the two are comparable; the window itself is part of the open
-    question Q16. The extract reaches ``extract_lookback_days`` calendar days
-    before ``start`` (550 days, about 378 trading days, cover the longest
-    warm-up of the default ``StageBSpec``: a 250-day beta plus margin) and
-    ``extract_lead_days`` after ``end`` (covers the forward horizon);
-    :func:`build_crsp_panel` checks both against the actual calendar.
+    question Q16. The extract reaches :attr:`lookback_days` calendar days
+    before ``start`` and ``extract_lead_days`` after ``end`` (covers the
+    forward horizon); :func:`build_crsp_panel` checks both against the
+    actual calendar. The lookback is ``extract_lookback_days`` when set,
+    else **derived from the longest feature window** (brief 08 C.1): the
+    trading days :func:`~nec_moe.features.price_history_trading_days` gives
+    for the default :class:`~nec_moe.features.FeatureSpec` (about five years:
+    the beta correlation and the seasonality windows), turned into calendar
+    days by :func:`trading_to_calendar_days` with ``lookback_margin_days``
+    added. The extra history feeds features only; ``start`` is unchanged.
+
+    ``stock_file`` is ``StkDlySecurityData`` (brief 08 C.1). The extract's
+    folder name and ``extract.json`` record the stock file and lookback, so
+    changing either writes a new extract rather than overwriting one, and
+    :func:`load_extract` refuses an extract built with other values.
+
+    ``cap_unit_dollars`` is the unit of ``DlyCap`` in dollars (1000: CRSP's
+    $ thousands; see the module docstring on its verification).
     ``chunk_bytes`` is the size of one streamed block of the large files, the
     unit the extraction resumes at.
     """
 
     crsp_dir: str = str(REPO_DATA_DIR)
     release: str = "ciz202512"
-    stock_file: str = "StkDlySecurityPrimaryData"
+    stock_file: str = "StkDlySecurityData"
     adj_factor_file: str = "StkDlyCumulativeAdjFactor"
     market_indno: int = 1000500
     universe: Literal["sp500"] = "sp500"
@@ -265,8 +345,10 @@ class CRSPSpec:
     post_delisting_return: Literal["cash", "market"] = "cash"
     member_count_min: int = 500
     member_count_max: int = 510
-    extract_lookback_days: int = 550
+    extract_lookback_days: int | None = None  # None: derived (see docstring)
+    lookback_margin_days: int = 30  # calendar days added to the derived lookback
     extract_lead_days: int = 60
+    cap_unit_dollars: float = 1000.0
     chunk_bytes: int = 256 * 2**20
 
     def validate(self) -> CRSPSpec:
@@ -284,8 +366,14 @@ class CRSPSpec:
                 f"member count band ({self.member_count_min}, "
                 f"{self.member_count_max}) is not a valid band"
             )
-        if self.extract_lookback_days < 0 or self.extract_lead_days < 0:
-            raise ValueError("extract_lookback_days and extract_lead_days must be >= 0")
+        if (self.extract_lookback_days is not None and self.extract_lookback_days < 0) or (
+            self.extract_lead_days < 0 or self.lookback_margin_days < 0
+        ):
+            raise ValueError(
+                "extract_lookback_days, lookback_margin_days and extract_lead_days must be >= 0"
+            )
+        if self.cap_unit_dollars <= 0:
+            raise ValueError(f"cap_unit_dollars must be > 0, got {self.cap_unit_dollars}")
         if self.chunk_bytes < 1:
             raise ValueError("chunk_bytes must be >= 1")
         return self
@@ -300,8 +388,29 @@ class CRSPSpec:
         return Path(self.crsp_dir) / "derived"
 
     @property
+    def lookback_days(self) -> int:
+        """Calendar days the extract reaches before ``start`` (see the docstring)."""
+        if self.extract_lookback_days is not None:
+            return self.extract_lookback_days
+        trading = price_history_trading_days(FeatureSpec())
+        return trading_to_calendar_days(
+            trading, FeatureSpec().trading_days_per_year, self.lookback_margin_days
+        )
+
+    @property
+    def stock_columns(self) -> dict[str, str]:
+        """The columns kept from ``stock_file``."""
+        return PRIMARY_STOCK_COLUMNS if self.stock_file == LEGACY_STOCK_FILE else STOCK_COLUMNS
+
+    @property
     def extract_dir(self) -> Path:
-        return self.derived_dir / f"crsp_extract_{self.release}_{self.start}_{self.end}"
+        """The extract folder. The brief 06 extract (primary stock file, 550
+        days) keeps its name; any other stock file or lookback gets both in
+        the name, so a new extract never overwrites an old one."""
+        name = f"crsp_extract_{self.release}_{self.start}_{self.end}"
+        if (self.stock_file, self.lookback_days) != (LEGACY_STOCK_FILE, LEGACY_LOOKBACK_DAYS):
+            name += f"_{self.stock_file}_lb{self.lookback_days}d"
+        return self.derived_dir / name
 
     @property
     def panel_path(self) -> Path:
@@ -311,9 +420,24 @@ class CRSPSpec:
     def extract_bounds(self) -> tuple[pd.Timestamp, pd.Timestamp]:
         """Calendar dates the extract covers: the window plus lookback and lead."""
         return (
-            pd.Timestamp(self.start) - pd.Timedelta(days=self.extract_lookback_days),
+            pd.Timestamp(self.start) - pd.Timedelta(days=self.lookback_days),
             pd.Timestamp(self.end) + pd.Timedelta(days=self.extract_lead_days),
         )
+
+
+def trading_to_calendar_days(trading_days: int, trading_days_per_year: int, margin: int) -> int:
+    """Calendar days that hold ``trading_days`` trading days, plus ``margin``.
+
+    ``ceil(trading_days * 365.25 / trading_days_per_year) + margin``; the
+    margin absorbs holidays and calendar irregularities, and
+    :func:`build_crsp_panel` still checks the actual trading days.
+    """
+    if trading_days < 0 or trading_days_per_year < 1 or margin < 0:
+        raise ValueError(
+            f"invalid conversion: {trading_days} trading days, "
+            f"{trading_days_per_year} per year, margin {margin}"
+        )
+    return math.ceil(trading_days * CALENDAR_DAYS_PER_YEAR / trading_days_per_year) + margin
 
 
 # --------------------------------------------------------------------------- #
@@ -334,8 +458,26 @@ def _arrow() -> Any:
     return pa, pc, pacsv, pq
 
 
-def crsp_file_source(spec: CRSPSpec, name: str) -> tuple[Path, str | None]:
-    """``(path, None)`` for an extracted ``.dat`` file, else ``(zip, member)``."""
+class ReleaseLocation(Protocol):
+    """Where one release's files live: ``crsp_dir`` (``Quant Model/Data/``)
+    and ``release`` (``ciz202512``, ``cfz202607``, ...). :class:`CRSPSpec` and
+    :class:`nec_moe.compustat.CompustatSpec` both are one."""
+
+    @property
+    def crsp_dir(self) -> str: ...
+
+    @property
+    def release(self) -> str: ...
+
+
+def crsp_file_source(spec: ReleaseLocation, name: str) -> tuple[Path, str | None]:
+    """``(path, None)`` for an extracted ``.dat`` file, else ``(zip, member)``.
+
+    The same convention for every release (``ciz202512``, ``cfz202607``):
+    ``Data/crspdata/<release>_ascii/<name>.dat``, else the member
+    ``crspdata/<release>_ascii/<name>.dat`` of ``Data/<release>_ascii.zip``.
+    Copies unpacked under other folder names are not looked for.
+    """
     plain = Path(spec.crsp_dir) / "crspdata" / f"{spec.release}_ascii" / f"{name}.dat"
     if plain.exists():
         return plain, None
@@ -343,13 +485,13 @@ def crsp_file_source(spec: CRSPSpec, name: str) -> tuple[Path, str | None]:
     if archive.exists():
         return archive, f"crspdata/{spec.release}_ascii/{name}.dat"
     raise FileNotFoundError(
-        f"CRSP file {name}.dat of release {spec.release} not found: neither "
+        f"file {name}.dat of release {spec.release} not found: neither "
         f"{plain} nor {archive} exists (crsp_dir={spec.crsp_dir})"
     )
 
 
 @contextlib.contextmanager
-def open_crsp_file(spec: CRSPSpec, name: str) -> Iterator[IO[bytes]]:
+def open_crsp_file(spec: ReleaseLocation, name: str) -> Iterator[IO[bytes]]:
     """A binary stream of one CRSP file, from the extracted copy or the zip."""
     path, member = crsp_file_source(spec, name)
     if member is None:
@@ -360,7 +502,7 @@ def open_crsp_file(spec: CRSPSpec, name: str) -> Iterator[IO[bytes]]:
             yield fh
 
 
-def _file_size(spec: CRSPSpec, name: str) -> int:
+def _file_size(spec: ReleaseLocation, name: str) -> int:
     path, member = crsp_file_source(spec, name)
     if member is None:
         return path.stat().st_size
@@ -385,7 +527,9 @@ def _csv_options(column_types: dict[str, str], column_names: list[str] | None = 
     return read, parse, convert
 
 
-def _read_table(spec: CRSPSpec, name: str, column_types: dict[str, str]) -> pd.DataFrame:
+def _read_table(
+    spec: ReleaseLocation, name: str, column_types: dict[str, str]
+) -> pd.DataFrame:
     """Read a whole (small) CRSP file, only the listed columns, typed."""
     _, _, pacsv, _ = _arrow()
     read, parse, convert = _csv_options(column_types)
@@ -466,30 +610,42 @@ def _write_json(path: Path, obj: dict[str, Any]) -> None:
     tmp.replace(path)  # atomic: a crash never leaves a half-written manifest
 
 
+class _Streamable(ReleaseLocation, Protocol):
+    @property
+    def chunk_bytes(self) -> int: ...
+
+
 def _stream_extract(
-    spec: CRSPSpec,
+    spec: _Streamable,
     name: str,
     out_dir: Path,
     column_types: dict[str, str],
-    permnos: list[int],
-    lo: pd.Timestamp,
-    hi: pd.Timestamp,
+    keys: list[int] | list[str],
+    lo: pd.Timestamp | None,
+    hi: pd.Timestamp | None,
     verbose: bool,
+    *,
+    key_col: str = "PERMNO",
+    date_col: str | None = "DlyCalDt",
 ) -> dict[str, Any]:
-    """Keep the rows of ``name`` for ``permnos`` dated in ``[lo, hi]``.
+    """Keep the rows of ``name`` whose ``key_col`` is in ``keys`` (and, with a
+    ``date_col``, dated in ``[lo, hi]``).
 
     The file is read in blocks of ``spec.chunk_bytes`` cut at a line end; each
     block's kept rows go to their own parquet part, and ``manifest.json``
     records the byte offset reached after every block. A rerun with the same
-    inputs continues from that offset; changed inputs start over.
+    inputs continues from that offset; changed inputs start over. ``keys``
+    are integers (PERMNOs) or strings (GVKEYs, whose leading zeros matter).
     """
     pa, pc, pacsv, pq = _arrow()
     out_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = out_dir / "manifest.json"
     size = _file_size(spec, name)
+    bounds = [None if lo is None else str(lo.date()), None if hi is None else str(hi.date())]
     key = hashlib.sha256(
         json.dumps(
-            [spec.release, name, permnos, str(lo.date()), str(hi.date()), spec.chunk_bytes]
+            [spec.release, name, list(keys), *bounds, spec.chunk_bytes, key_col, date_col,
+             sorted(column_types)]
         ).encode()
     ).hexdigest()
     state: dict[str, Any] = {}
@@ -505,9 +661,8 @@ def _stream_extract(
         state = {"file": name, "key": key, "source_size": size, "offset": 0,
                  "parts": 0, "rows_read": 0, "rows_kept": 0, "complete": False}
 
-    value_set = pa.array(permnos, type=pa.int64())
-    lo32 = pa.scalar(lo.date(), type=pa.date32())
-    hi32 = pa.scalar(hi.date(), type=pa.date32())
+    key_type = pa.string() if column_types[key_col] == "string" else pa.int64()
+    value_set = pa.array(list(keys), type=key_type)
     with open_crsp_file(spec, name) as fh:
         header = fh.readline()
         names = header.decode().rstrip("\r\n").split("|")
@@ -529,13 +684,15 @@ def _stream_extract(
                 pa.BufferReader(block), read_options=read,
                 parse_options=parse, convert_options=convert,
             )
-            mask = pc.and_(
-                pc.is_in(table["PERMNO"], value_set=value_set),
-                pc.and_(
-                    pc.greater_equal(table["DlyCalDt"], lo32),
-                    pc.less_equal(table["DlyCalDt"], hi32),
-                ),
-            )
+            mask = pc.is_in(table[key_col], value_set=value_set)
+            if date_col is not None and lo is not None and hi is not None:
+                mask = pc.and_(
+                    mask,
+                    pc.and_(
+                        pc.greater_equal(table[date_col], pa.scalar(lo.date(), type=pa.date32())),
+                        pc.less_equal(table[date_col], pa.scalar(hi.date(), type=pa.date32())),
+                    ),
+                )
             kept = table.filter(mask)
             if kept.num_rows:
                 pq.write_table(kept, out_dir / f"part-{state['parts']:05d}.parquet")
@@ -552,15 +709,55 @@ def _stream_extract(
     return state
 
 
+def read_item_metadata(spec: ReleaseLocation, items: tuple[str, ...]) -> dict[str, list[str]]:
+    """The raw ``MetaItemInfo`` lines that name each of ``items``, verbatim.
+
+    Header-agnostic on purpose: the units of ``DlyCap``, ``DlyShrOut`` and
+    ``DlyVol`` must be read off the release's own metadata (brief 08 C.1),
+    and this code has not seen that file's layout. A line belongs to an item
+    when one of its ``|``-separated fields equals the item name. The header
+    line comes back under ``"header"``. Metadata only, no security data.
+    """
+    out: dict[str, list[str]] = {item: [] for item in items}
+    with open_crsp_file(spec, "MetaItemInfo") as fh:
+        lines = fh.read().decode(errors="replace").splitlines()
+    if not lines:
+        return {"header": [], **out}
+    for line in lines[1:]:
+        fields = {f.strip() for f in line.split("|")}
+        for item in items:
+            if item in fields:
+                out[item].append(line)
+    return {"header": [lines[0]], **out}
+
+
+def company_permnos(security_info: pd.DataFrame, members: list[int]) -> list[int]:
+    """Every PERMNO that ever shares a PERMCO with one of ``members``.
+
+    Market equity is a company's, the sum of ``DlyCap`` over all its share
+    classes (brief 08 D), and a member's sibling class need not be a member
+    itself, so the extract keeps those siblings' rows too (for ``ME`` only;
+    they never become panel rows).
+    """
+    info = security_info[["PERMNO", "PERMCO"]].dropna()
+    permcos = set(info.loc[info["PERMNO"].isin(members), "PERMCO"].astype("int64"))
+    siblings = info.loc[info["PERMCO"].astype("int64").isin(permcos), "PERMNO"]
+    return sorted({int(p) for p in siblings} | {int(p) for p in members})
+
+
 def extract_crsp(spec: CRSPSpec, *, verbose: bool = True) -> Path:
     """Write the columnar extract the panel is built from, inside ``Data/derived/``.
 
     Keeps the PERMNOs that were members of ``membership_indno`` at any point in
-    ``[start, end]``, from ``start - extract_lookback_days`` to ``end +
-    extract_lead_days``: their stock rows and cumulative adjustment factors
-    (streamed once, resumable), their membership spells, delisting records and
+    ``[start, end]``, plus every other PERMNO of their companies (PERMCO;
+    :func:`company_permnos`), from ``start - lookback_days`` to ``end +
+    extract_lead_days``: their stock rows (``spec.stock_columns`` of
+    ``stock_file``) and cumulative adjustment factors (streamed once,
+    resumable), the members' spells and delisting records, the companies'
     security-info history, and the ``market_indno`` series. ``extract.json``
-    records the provenance. Returns the extract directory.
+    records the provenance, the stock file, the lookback and the
+    ``MetaItemInfo`` rows of :data:`UNIT_ITEMS` (when that file exists).
+    Returns the extract directory.
     """
     spec.validate()
     root = spec.extract_dir
@@ -579,14 +776,19 @@ def extract_crsp(spec: CRSPSpec, *, verbose: bool = True) -> Path:
     delists = read_delists(spec)
     delists[delists["PERMNO"].isin(members)].to_parquet(root / "delists.parquet", index=False)
     info = read_security_info(spec)
-    info[info["PERMNO"].isin(members)].to_parquet(root / "security_info.parquet", index=False)
+    stocks = company_permnos(info, members)
+    info[info["PERMNO"].isin(stocks)].to_parquet(root / "security_info.parquet", index=False)
+    try:
+        item_metadata: dict[str, list[str]] | None = read_item_metadata(spec, UNIT_ITEMS)
+    except FileNotFoundError:
+        item_metadata = None
 
     streams = {}
     for name, sub, types in (
-        (spec.stock_file, "stock", STOCK_COLUMNS),
+        (spec.stock_file, "stock", spec.stock_columns),
         (spec.adj_factor_file, "adjfac", ADJ_FACTOR_COLUMNS),
     ):
-        state = _stream_extract(spec, name, root / sub, types, members, lo, hi, verbose)
+        state = _stream_extract(spec, name, root / sub, types, stocks, lo, hi, verbose)
         streams[sub] = {"file": name, "rows_read": state["rows_read"],
                         "rows_kept": state["rows_kept"]}
     _write_json(
@@ -599,9 +801,13 @@ def extract_crsp(spec: CRSPSpec, *, verbose: bool = True) -> Path:
             "universe": spec.universe,
             "start": spec.start,
             "end": spec.end,
+            "stock_file": spec.stock_file,
+            "lookback_days": spec.lookback_days,
             "extract_lo": str(lo.date()),
             "extract_hi": str(hi.date()),
             "n_permnos": len(members),
+            "n_company_permnos": len(stocks) - len(members),
+            "item_metadata": item_metadata,
             "streams": streams,
             "complete": True,
         },
@@ -660,27 +866,75 @@ def _read_parts(folder: Path, column_types: dict[str, str]) -> pd.DataFrame:
     return _to_pandas(pa.concat_tables([pq.read_table(p) for p in parts]))
 
 
+class ExtractMismatch(ValueError):
+    """An extract on disk was built with another stock file or lookback."""
+
+
+def extract_identity(info: dict[str, Any]) -> dict[str, Any]:
+    """The stock file, lookback and calendar bounds an ``extract.json`` records.
+
+    Extracts written before brief 08 lack the ``stock_file`` and
+    ``lookback_days`` keys; theirs are read off the stock stream's file and
+    the distance from ``start`` to ``extract_lo``, which they do record.
+    """
+    stock_file = info.get("stock_file", info.get("streams", {}).get("stock", {}).get("file"))
+    lookback = info.get("lookback_days")
+    if lookback is None and "extract_lo" in info and "start" in info:
+        lookback = int((pd.Timestamp(info["start"]) - pd.Timestamp(info["extract_lo"])).days)
+    return {
+        "stock_file": stock_file,
+        "lookback_days": lookback,
+        "extract_lo": info.get("extract_lo"),
+        "extract_hi": info.get("extract_hi"),
+    }
+
+
 def load_extract(spec: CRSPSpec) -> CRSPExtract:
+    """Load the extract of ``spec``; refuse one built with other settings.
+
+    The stock file, the lookback and the calendar bounds recorded in
+    ``extract.json`` must equal ``spec``'s (:class:`ExtractMismatch` lists
+    every difference): a panel must never be built from an extract it does
+    not describe. With ``StkDlySecurityData`` the return-duration flags come
+    with the stock rows; otherwise from the separate ``retdur/`` stream.
+    """
     root = spec.extract_dir
     info_path = root / "extract.json"
     if not info_path.exists():
         raise FileNotFoundError(
-            f"no complete CRSP extract at {root}: run scripts/extract_crsp.py first"
+            f"no complete CRSP extract at {root}: run scripts/extract_crsp_v2.py first"
         )
     info = json.loads(info_path.read_text())
     if not info.get("complete"):
-        raise RuntimeError(f"the extract at {root} is incomplete: rerun scripts/extract_crsp.py")
+        raise RuntimeError(
+            f"the extract at {root} is incomplete: rerun scripts/extract_crsp_v2.py"
+        )
+    lo, hi = spec.extract_bounds
+    want = {
+        "stock_file": spec.stock_file,
+        "lookback_days": spec.lookback_days,
+        "extract_lo": str(lo.date()),
+        "extract_hi": str(hi.date()),
+    }
+    have = extract_identity(info)
+    diff = {k: (have[k], v) for k, v in want.items() if have[k] != v}
+    if diff:
+        raise ExtractMismatch(
+            f"the extract at {root} does not match the spec: "
+            + "; ".join(f"{k}: extract {a!r}, spec {b!r}" for k, (a, b) in diff.items())
+        )
     market = pd.read_parquet(root / "market.parquet")["DlyTotRet"]
     market.index = pd.DatetimeIndex(market.index).astype("datetime64[ns]")
+    stock = _read_parts(root / "stock", spec.stock_columns)
     retdur = root / "retdur" / "manifest.json"
-    durations = (
-        _read_parts(root / "retdur", RETURN_DURATION_COLUMNS)
-        if retdur.exists() and json.loads(retdur.read_text()).get("complete")
-        else None
-    )
+    durations = None
+    if "DlyRetDurFlg" in stock.columns:
+        durations = stock[list(RETURN_DURATION_COLUMNS)]
+    elif retdur.exists() and json.loads(retdur.read_text()).get("complete"):
+        durations = _read_parts(root / "retdur", RETURN_DURATION_COLUMNS)
     return CRSPExtract(
         info=info,
-        stock=_read_parts(root / "stock", STOCK_COLUMNS),
+        stock=stock,
         adj=_read_parts(root / "adjfac", ADJ_FACTOR_COLUMNS),
         market=market.sort_index(),
         spells=pd.read_parquet(root / "membership.parquet"),
@@ -780,6 +1034,11 @@ def crsp_daily_frames(
             },
             index=idx,
         )
+        # the price, quote and size columns of StkDlySecurityData (brief 08
+        # C.1), where the extract carries them: the Q26 features read them
+        for col, src in OPTIONAL_DAILY_SOURCES.items():
+            if src in g.columns:
+                daily[col] = g[src].astype(float)
         is_delisting = (flag == DELISTING_ROW).to_numpy()
         counts["delisting_rows_not_last"] += int(is_delisting[:-1].sum())
         if is_delisting[-1]:
@@ -793,6 +1052,7 @@ def crsp_daily_frames(
                 {
                     "ret": np.nan, "volume": np.nan, "dollar_volume": np.nan,
                     "share_factor": np.nan, "tradable": False, "fill_ret": fill,
+                    **{c: np.nan for c in OPTIONAL_DAILY_SOURCES if c in daily.columns},
                 },
                 index=after,
             )

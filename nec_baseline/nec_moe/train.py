@@ -434,6 +434,10 @@ class Trainer:
     ) -> None:
         """Break expert symmetry on regime/vol-sorted slices (design doc §4.3).
 
+        A **within-fold** pre-training on slices of the same training block,
+        not a warm start from another fold's trained weights: every fold still
+        begins from fresh initial weights (brief 09 E.2).
+
         Seed diversity alone cannot escape the symmetric-mixture local optimum
         (both experts collapse to the pooled regression) on a genuinely
         symmetric task. This is the doc's prescribed stronger device: sort

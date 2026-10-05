@@ -1505,6 +1505,20 @@ def walk_forward_evaluate(
     train ``steps`` steps on the purged training window, freeze, and score the
     test block causally.
 
+    **The training protocol** (Q16, brief 09 E). A fixed step budget per
+    fold, ``steps``, with no per-fold early stopping; every trading day's rows
+    of the training block are used (nothing is thinned to every ``h``-th
+    day). Every fold starts from **fresh** weights, never from the previous
+    fold's trained ones (no cross-fold warm start; Ash & Adams 2020): the
+    global RNG is reseeded with ``seed`` before ``make_trainer`` is called,
+    so the same seed and fold give the same starting weights whatever ran
+    before. Within a fold, a seed fixes the base (its own generator), the
+    experts' initialisation (seeded from ``TrainConfig.seed``) and the
+    minibatch order (``Trainer._next_fit_index``), independently of the
+    arm, so arms on one seed list are paired (common random numbers). The
+    within-fold expert ``warmstart_key`` slice pre-training is a different
+    thing and is left as it is.
+
     With ``backtest_quantiles`` set, each fold also gets a quantile long-short
     backtest (:func:`long_short_book`) with turnover and a cost drag of
     ``cost_rate`` per unit traded notional, on the horizon-consistent book
@@ -1582,6 +1596,9 @@ def walk_forward_evaluate(
             _restore_base(trainer, train, fold, base_cache, seed, base_file)
             expert_train, excluded = _gate_training_block(trainer, train)
         else:
+            # a fresh start (E.2): the factory draws from a known RNG state,
+            # so nothing trained in an earlier fold can reach this one
+            torch.manual_seed(seed)
             trainer = make_trainer()
             _check_protocol_base(trainer.cfg, folds)
             # Order matters (brief 02 §4, brief 03 §1): the gate is fitted on

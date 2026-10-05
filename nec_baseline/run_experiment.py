@@ -199,7 +199,10 @@ class Experiment:
     sigma_init: float | None = None # None = auto (std of the training target)
     sigma_freeze_steps: int = 100
     seeds: tuple[int, ...] = (0,)   # >1 seed => mean ± std in evaluate mode
-    warmstart: bool = True          # expert warm-start (keep on; handbook I.11)
+    # expert warm-start (keep on; handbook I.11): pre-training on vol-sorted
+    # slices of the SAME fold's training block. Not a cross-fold warm start:
+    # every fold starts from fresh weights (brief 09 E.2)
+    warmstart: bool = True
     warmstart_channel: int | None = None  # seq channel of the vol proxy; None = auto
     chunk_len: int = 50             # HMM truncated-BPTT chunk (dates per step)
     # decay weights (Q16 (d)(e), brief 09 C; chosen by the pilot, so the

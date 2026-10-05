@@ -34,7 +34,7 @@ from __future__ import annotations
 import dataclasses
 import statistics
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pandas as pd
@@ -161,9 +161,14 @@ def baseline_arm(
 class ArmSummary:
     arm: str
     n_seeds: int
-    mean: dict[str, float]  # metric -> mean over seeds
-    std: dict[str, float]  # metric -> sample std over seeds (0.0 when n=1)
+    mean: dict[str, float]  # metric -> mean over the seeds that report it
+    std: dict[str, float]  # metric -> sample std over those seeds (0.0 when n=1)
     median_p: float  # replicate-median of the per-run IC p-values
+    # metrics that only some seeds report (e.g. an empty quantile bin of the
+    # Q24 diagnostic, whose expert labels follow each seed's canonical order):
+    # metric -> how many seeds the mean and std are over. Every key reported
+    # by any seed is summarised; none is dropped
+    n_reporting: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -179,6 +184,8 @@ class SweepReport:
             for k in sorted(a.mean):
                 row[k] = a.mean[k]
                 row[f"{k}_std"] = a.std[k]
+                if k in a.n_reporting:
+                    row[f"{k}_n_seeds"] = a.n_reporting[k]
             row["median_p"] = a.median_p
             row["n_seeds"] = a.n_seeds
             rows.append(row)
@@ -433,12 +440,10 @@ def run_sweep(
     summaries = []
     for arm in arms:
         runs = per_arm[arm.name]
-        keys = sorted(runs[0])
-        mean = {k: statistics.fmean(r[k] for r in runs) for k in keys}
-        std = {
-            k: statistics.stdev([r[k] for r in runs]) if len(runs) > 1 else 0.0
-            for k in keys
-        }
+        keys = sorted(set().union(*runs))
+        values = {k: [r[k] for r in runs if k in r] for k in keys}
+        mean = {k: statistics.fmean(v) for k, v in values.items()}
+        std = {k: statistics.stdev(v) if len(v) > 1 else 0.0 for k, v in values.items()}
         summaries.append(
             ArmSummary(
                 arm=arm.name,
@@ -446,6 +451,7 @@ def run_sweep(
                 mean=mean,
                 std=std,
                 median_p=statistics.median(r["p"] for r in runs),
+                n_reporting={k: len(v) for k, v in values.items() if len(v) < len(runs)},
             )
         )
     return SweepReport(tag=tag, arms=tuple(summaries))

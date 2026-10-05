@@ -42,6 +42,7 @@ from nec_moe import (
     walk_forward_folds,
 )
 from nec_moe.config import DataConfig
+from nec_moe.features import FeatureSpec
 from nec_moe.train import DeadParameterWarning
 
 
@@ -73,7 +74,10 @@ def test_D1_point_in_time_ranks_use_only_that_dates_members():
     dates = pd.bdate_range("2019-01-02", periods=330)
     permnos = [str(10001 + i) for i in range(7)]
     daily = {p: _daily(10 + i, dates) for i, p in enumerate(permnos)}
-    spec = StageBSpec(seq_len=10, min_names_per_date=5)
+    # the legacy set: its ranks are re-ranked by the filter (a Q26 panel is
+    # built over the members directly)
+    spec = StageBSpec(seq_len=10, min_names_per_date=5,
+                      features=FeatureSpec(feature_set="legacy14"))
     mkt = market_frame(pd.Series(np.random.default_rng(99).normal(0, 0.01, len(dates)),
                                  index=dates), spec)
     # the last PERMNO joins the index late: before 2020-01-02 it is not a member

@@ -1080,9 +1080,20 @@ def build_crsp_panel(
     stage_b: StageBSpec | None = None,
     *,
     extract: CRSPExtract | None = None,
+    compustat: Any = None,
+    compustat_spec: Any = None,
     verbose: bool = True,
 ) -> CRSPBuild:
     """Build the point-in-time CRSP panel for ``[spec.start, spec.end]``.
+
+    With the Q26 feature set (the default, brief 08 D) the build also needs
+    the Compustat extract: ``compustat`` (a
+    :class:`nec_moe.compustat.CompustatExtract`) and ``compustat_spec``
+    (its :class:`~nec_moe.compustat.CompustatSpec`; loaded with the defaults
+    when both are ``None``). Every member's daily frame then carries its
+    company market equity, GICS sector, report dates and point-in-time
+    fundamentals (:func:`nec_moe.compustat.attach_q26_inputs`), and the
+    panel's rows are the date's members only, ranked among themselves.
 
     Reads the extract (``extract`` may be a wider one, e.g. the default
     window's, for a sub-window build), builds every member's daily frame,
@@ -1127,6 +1138,17 @@ def build_crsp_panel(
     ever = sorted(int(p) for p in universe.members_union(start, end))
 
     frames, mkt_ret, counts = crsp_daily_frames(extract, spec, stage_b, ever)
+    q26_report: dict[str, Any] | None = None
+    if stage_b.feature_set == "q26":
+        from .compustat import CompustatSpec, attach_q26_inputs, load_compustat_extract
+
+        if compustat_spec is None:
+            compustat_spec = CompustatSpec(start=spec.start, end=spec.end)
+        if compustat is None:
+            compustat = load_compustat_extract(compustat_spec)
+        q26_report = attach_q26_inputs(
+            frames, extract, compustat, compustat_spec, stage_b.features, spec.cap_unit_dollars
+        )
     metadata = {
         "crsp_release": spec.release,
         "market_indno": spec.market_indno,
@@ -1136,6 +1158,11 @@ def build_crsp_panel(
         "end": spec.end,
         "post_delisting_return": spec.post_delisting_return,
         "stage_b": dataclasses.asdict(stage_b),
+        "crsp_stock_file": spec.stock_file,
+        "compustat_release": (
+            getattr(compustat_spec, "release", None) if stage_b.feature_set == "q26" else None
+        ),
+        "sector_source": "gics" if stage_b.feature_set == "q26" else None,
     }
     mkt = market_frame(mkt_ret, stage_b)
     candidates = assemble_panel(
@@ -1159,6 +1186,8 @@ def build_crsp_panel(
     report = _build_report(
         spec, extract, universe, window, member_counts, panel, counts, fill_rows, ever
     )
+    if q26_report is not None:
+        report["q26_inputs"] = q26_report
     split = missing_return_split(extract, frames, mkt, stage_b, window)
     if split["totals"]["panel_rows"] != len(panel):
         raise AssertionError(

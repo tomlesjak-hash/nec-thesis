@@ -666,8 +666,12 @@ class Trainer:
         With ``checkpoint_path`` set, saves every
         ``TrainConfig.checkpoint_every`` steps and once at the end; resuming
         requires the *same* panel (the checkpoint stores the sampler, not the
-        data).
+        data). A Q26 panel built for another expert input mode is refused
+        (:func:`nec_moe.features.check_panel_input_mode`, brief 08 D.4.6).
         """
+        from .features import check_panel_input_mode  # late: features is data-side
+
+        check_panel_input_mode(data, self.cfg.experts.input_mode)
         t = self.cfg.train
         steps = t.steps if steps is None else steps
         ckpt = Path(checkpoint_path) if checkpoint_path is not None else None

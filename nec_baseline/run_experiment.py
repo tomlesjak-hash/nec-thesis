@@ -58,6 +58,7 @@ from nec_moe import (  # noqa: E402
     DataConfig,
     EncoderConfig,
     ExpertConfig,
+    FeatureSpec,
     MarkovGateConfig,
     MLPBaseline,
     NECConfig,
@@ -153,6 +154,10 @@ class Experiment:
     # the target (Q25): "market_neutral" (decided; the forward return minus the
     # date's cross-sectional mean) | "raw" | "residual" (trailing-beta residual)
     target_kind: str = "market_neutral"
+    # the snapshot inputs (Q26): "q26" (decided, 57 inputs; a CRSP build then
+    # also needs the Compustat extract, scripts/extract_compustat.py) |
+    # "legacy14". Every window is a FeatureSpec field (nec_moe.features)
+    feature_set: str = "q26"
     # synthetic data (data="synthetic"):
     synth_dates: int = 300
     synth_entities: int = 8
@@ -317,6 +322,8 @@ def _build_panel(exp: Experiment) -> tuple[Panel, int]:
             seq_len=exp.seq_len,
             horizon=exp.horizon if exp.horizon is not None else StageBSpec().horizon,
             target_kind=exp.target_kind,  # type: ignore[arg-type]
+            features=FeatureSpec(feature_set=exp.feature_set),  # type: ignore[arg-type]
+            input_mode=exp.input_mode,  # type: ignore[arg-type]
         )
         crsp_spec = dataclasses.replace(
             CRSPSpec(), start=exp.start, end=exp.end,

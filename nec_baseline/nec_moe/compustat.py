@@ -91,8 +91,10 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from .characteristics import FUNDAMENTAL_INPUTS
 from .crsp import (
     REPO_DATA_DIR,
+    CRSPExtract,
     _arrow,
     _csv_options,
     _read_parts,
@@ -126,6 +128,9 @@ __all__ = [
     "quarterly_fundamentals",
     "pit_events",
     "carry_forward",
+    "fundamental_inputs",
+    "company_market_equity",
+    "attach_q26_inputs",
     "keyset_count",
     "extract_compustat",
     "load_compustat_extract",
@@ -690,6 +695,249 @@ def carry_forward(
         vals[~fresh] = np.nan
         out.iloc[np.flatnonzero(has)] = vals
     return out
+
+
+# --------------------------------------------------------------------------- #
+# The fundamental characteristics of one GVKEY (brief 08 D.1, items 11-26)
+# --------------------------------------------------------------------------- #
+
+
+class _Known:
+    """The quarters known at an event, looked up by fiscal quarter index."""
+
+    def __init__(self, known: pd.DataFrame) -> None:
+        self.rows = {int(fq): row for fq, row in zip(known["fq_index"],
+                                                     known.to_dict("records"), strict=True)}
+        self.latest = int(known["fq_index"].max())
+
+    def get(self, item: str, lag: int = 0) -> float:
+        row = self.rows.get(self.latest - lag)
+        if row is None:
+            return np.nan
+        v = row.get(item)
+        return float(v) if v is not None and pd.notna(v) else np.nan
+
+    def total(self, item: str, n: int, lag: int = 0) -> float:
+        """Sum over ``n`` consecutive quarters ending ``lag`` back; missing
+        unless all ``n`` are known and present (trailing flows, D.1)."""
+        vals = [self.get(item, lag + k) for k in range(n)]
+        return float(np.sum(vals)) if not np.isnan(vals).any() else np.nan
+
+    def book_equity(self, lag: int = 0) -> float:
+        """SEQQ + TXDITCQ (0 if missing) - PSTKQ (0 if missing), with SEQQ
+        replaced by CEQQ + PSTKQ, then ATQ - LTQ, when missing (D.1, JKP)."""
+        seq = self.get("SEQQ", lag)
+        if np.isnan(seq):
+            seq = self.get("CEQQ", lag) + self.get("PSTKQ", lag)
+        if np.isnan(seq):
+            seq = self.get("ATQ", lag) - self.get("LTQ", lag)
+        txditc, pstk = self.get("TXDITCQ", lag), self.get("PSTKQ", lag)
+        return seq + (0.0 if np.isnan(txditc) else txditc) - (0.0 if np.isnan(pstk) else pstk)
+
+
+def _ratio(num: float, den: float) -> float:
+    return num / den if den > 0 and not np.isnan(num) else np.nan
+
+
+def _growth(now: float, before: float) -> float:
+    return now / before - 1.0 if before > 0 and not np.isnan(now) else np.nan
+
+
+def _total_accruals_base(k: _Known, lag: int) -> float:
+    """WC + NCO + FIN of one quarter (Richardson et al. 2005)."""
+    g = lambda item: k.get(item, lag)  # noqa: E731
+    wc = (g("ACTQ") - g("CHEQ")) - (g("LCTQ") - g("DLCQ"))
+    nco = (g("ATQ") - g("ACTQ") - g("IVAOQ")) - (g("LTQ") - g("LCTQ") - g("DLTTQ"))
+    fin = (g("IVSTQ") + g("IVAOQ")) - (g("DLTTQ") + g("DLCQ") + g("PSTKQ"))
+    return wc + nco + fin
+
+
+def _surprise(k: _Known, item: str, fs: FeatureSpec) -> float:
+    """(x_q - x_{q-4}) / std of that difference over the last
+    ``surprise_std_quarters`` quarters (at least ``surprise_min_quarters``)."""
+    lag = fs.growth_lag_quarters
+    diffs = np.array([k.get(item, j) - k.get(item, j + lag)
+                      for j in range(fs.surprise_std_quarters)])
+    if np.isnan(diffs[0]) or np.sum(~np.isnan(diffs)) < fs.surprise_min_quarters:
+        return np.nan
+    sd = float(np.nanstd(diffs, ddof=1))
+    return float(diffs[0]) / sd if sd > 0 else np.nan
+
+
+def _main_values(k: _Known, fs: FeatureSpec) -> dict[str, float]:
+    n, lag = fs.trailing_quarters, fs.growth_lag_quarters
+    at = k.get("ATQ")
+    ni_ttm = k.total("IBQ", n)
+    ocf_ttm = k.total("OANCFQ", n)
+    gross = [k.get("SALEQ", j) - k.get("COGSQ", j) for j in range(n)]
+    gp_ttm = float(np.sum(gross)) if not np.isnan(gross).any() else np.nan
+    streak = np.nan
+    if not np.isnan(k.get("IBQ") - k.get("IBQ", lag)):
+        streak = 0.0
+        for j in range(fs.earnings_streak_max):
+            now, before = k.get("IBQ", j), k.get("IBQ", j + lag)
+            if np.isnan(now) or np.isnan(before) or not now > before:
+                break
+            streak += 1.0
+    debt = k.get("DLTTQ") + k.get("DLCQ")
+    debt_before = k.get("DLTTQ", fs.debt_growth_lag_quarters) + k.get(
+        "DLCQ", fs.debt_growth_lag_quarters
+    )
+    noa = (at - k.get("CHEQ")) - (
+        at - k.get("DLCQ") - k.get("DLTTQ") - k.get("MIBQ") - k.get("PSTKQ") - k.get("CEQQ")
+    )
+    at_before = k.get("ATQ", lag)
+    ta_change = _total_accruals_base(k, 0) - _total_accruals_base(k, lag)
+    return {
+        "be": k.book_equity(0),
+        "ni_ttm": ni_ttm,
+        "netdebt": debt - k.get("CHEQ"),
+        "niq_be": _ratio(k.get("IBQ"), k.book_equity(1)),
+        "ocf_at": _ratio(ocf_ttm, at),
+        "gp_at": _ratio(gp_ttm, at),
+        "ni_inc8q": streak,
+        "at_gr1": _growth(at, at_before),
+        "sale_gr1": _growth(k.total("SALEQ", n), k.total("SALEQ", n, lag)),
+        "oaccruals_at": _ratio(ni_ttm - ocf_ttm, at),
+        "taccruals_at": _ratio(ta_change, (at + at_before) / 2.0),
+        "debt_gr3": _growth(debt, debt_before),
+        "noa_at": _ratio(noa, at_before),
+        "cash_at": _ratio(k.get("CHEQ"), at),
+    }
+
+
+def fundamental_inputs(
+    quarters: pd.DataFrame, dates: pd.DatetimeIndex, fs: FeatureSpec
+) -> pd.DataFrame:
+    """One GVKEY's point-in-time fundamental inputs on ``dates``.
+
+    ``quarters`` are that GVKEY's rows of :func:`quarterly_fundamentals`.
+    At each availability date the inputs are computed from the quarters
+    known by then (:func:`pit_events`) and carried forward with the
+    staleness cap (:func:`carry_forward`, ``fs.fundamental_max_staleness_days``
+    from the newest quarter's availability). The surprises (``niq_su``,
+    ``saleq_su``) run on their own clock, ``avail_rdq``. Columns are
+    :data:`nec_moe.characteristics.FUNDAMENTAL_INPUTS`; ``be``, ``ni_ttm``
+    and ``netdebt`` become ratios to market equity on the day, in the
+    characteristics. A definition that does not apply (no COGSQ for a bank)
+    is missing, never zero.
+    """
+    main, surprise = [], []
+    for event, known in pit_events(quarters, "avail"):
+        k = _Known(known)
+        main.append({"event": event, "asof_avail": k.rows[k.latest]["avail"],
+                     **_main_values(k, fs)})
+    for event, known in pit_events(quarters, "avail_rdq"):
+        k = _Known(known)
+        surprise.append({"event": event, "asof_avail": k.rows[k.latest]["avail_rdq"],
+                         "niq_su": _surprise(k, "IBQ", fs),
+                         "saleq_su": _surprise(k, "SALEQ", fs)})
+    cap = fs.fundamental_max_staleness_days
+    main_cols = ["event", "asof_avail", "be", "ni_ttm", "netdebt", "niq_be", "ocf_at",
+                 "gp_at", "ni_inc8q", "at_gr1", "sale_gr1", "oaccruals_at", "taccruals_at",
+                 "debt_gr3", "noa_at", "cash_at"]
+    a = carry_forward(pd.DataFrame(main, columns=main_cols), dates, cap)
+    b = carry_forward(pd.DataFrame(surprise, columns=["event", "asof_avail", "niq_su",
+                                                      "saleq_su"]), dates, cap)
+    return pd.concat([a, b], axis=1)
+
+
+# --------------------------------------------------------------------------- #
+# Attaching the Q26 inputs to the CRSP daily frames
+# --------------------------------------------------------------------------- #
+
+
+def company_market_equity(extract: CRSPExtract, cap_unit_dollars: float) -> pd.DataFrame:
+    """Company market equity in $ millions, by date (rows) and PERMNO (columns).
+
+    ``ME`` of a PERMNO on t is the sum of ``DlyCap`` over every PERMNO of its
+    PERMCO with a row on t (the extract holds all of a member's share
+    classes, :func:`nec_moe.crsp.company_permnos`), times
+    ``cap_unit_dollars / 1e6``. The PERMCO is the one
+    ``StkSecurityInfoHist`` dates to t; a row without one is its own
+    company. A share class with a row but no cap makes the sum missing,
+    not smaller.
+    """
+    stock = extract.stock[["PERMNO", "DlyCalDt", "DlyCap"]].dropna(subset=["DlyCalDt"])
+    info = extract.security_info[["PERMNO", "SecInfoStartDt", "SecInfoEndDt", "PERMCO"]]
+    info = info.dropna(subset=["SecInfoStartDt"]).sort_values("SecInfoStartDt")
+    rows = pd.merge_asof(
+        stock.sort_values("DlyCalDt"), info, left_on="DlyCalDt", right_on="SecInfoStartDt",
+        by="PERMNO", direction="backward",
+    )
+    dated = rows["PERMCO"].notna() & (rows["DlyCalDt"] <= rows["SecInfoEndDt"])
+    rows["company"] = np.where(dated, rows["PERMCO"].fillna(0), -rows["PERMNO"]).astype("int64")
+    total = rows.groupby(["company", "DlyCalDt"])["DlyCap"].agg(
+        lambda x: x.sum() if x.notna().all() else np.nan
+    )
+    rows["me"] = total.reindex(pd.MultiIndex.from_arrays(
+        [rows["company"], rows["DlyCalDt"]])).to_numpy() * cap_unit_dollars / 1e6
+    return rows.pivot_table(index="DlyCalDt", columns="PERMNO", values="me", aggfunc="first")
+
+
+def _report_dates(quarters: pd.DataFrame, gvkeys: set[str]) -> pd.DatetimeIndex:
+    q = quarters[quarters["KYGVKEY"].isin(gvkeys)]
+    return pd.DatetimeIndex(q["rdq"].dropna().sort_values().unique())
+
+
+def attach_q26_inputs(
+    frames: dict[str, pd.DataFrame],
+    extract: CRSPExtract,
+    compustat: CompustatExtract,
+    cspec: CompustatSpec,
+    fs: FeatureSpec,
+    cap_unit_dollars: float,
+) -> dict[str, Any]:
+    """Add ``me``, ``sector``, ``rdq_date`` and the fundamental inputs to every
+    PERMNO's daily frame (in place), point in time. Returns aggregate counts.
+
+    - ``me``: :func:`company_market_equity`;
+    - the GVKEY of each date: :func:`gvkey_on_dates` (none on an ambiguous
+      date); ``sector``: :func:`sector_on_dates` of that GVKEY;
+    - fundamentals: :func:`fundamental_inputs` of the date's GVKEY;
+    - ``rdq_date``: every report date of a GVKEY ever validly linked to the
+      PERMNO, placed on the first trading day on or after it (a report date
+      d is known at t when d <= t).
+    """
+    calendar = pd.DatetimeIndex(extract.market.index)
+    quarters, q_report = quarterly_fundamentals(compustat, cspec, calendar)
+    by_gvkey = {gv: g for gv, g in quarters.groupby("KYGVKEY")}
+    me = company_market_equity(extract, cap_unit_dollars)
+    links = valid_links(compustat.links, cspec)
+    cache: dict[str, pd.DataFrame] = {}
+    counts = {"permno_days": 0, "no_gvkey_days": 0, "no_sector_days": 0,
+              "no_fundamentals_days": 0}
+    for label, daily in frames.items():
+        permno = int(label)
+        idx = pd.DatetimeIndex(daily.index)
+        daily["me"] = me[permno].reindex(idx).to_numpy() if permno in me.columns else np.nan
+        gvkeys = gvkey_on_dates(compustat.links, cspec, permno, idx)
+        daily["sector"] = sector_on_dates(compustat.gics, gvkeys).to_numpy()
+        fund = pd.DataFrame(np.nan, index=idx, columns=list(FUNDAMENTAL_INPUTS))
+        for gv in gvkeys.dropna().unique():
+            if gv not in by_gvkey:
+                continue
+            if gv not in cache:
+                cache[gv] = fundamental_inputs(by_gvkey[gv], calendar, fs)
+            on = (gvkeys == gv).to_numpy()
+            fund.iloc[np.flatnonzero(on)] = cache[gv].reindex(idx[on]).to_numpy()
+        for c in FUNDAMENTAL_INPUTS:
+            daily[c] = fund[c].to_numpy()
+        ever = set(links.loc[links["LPERMNO"] == permno, "KYGVKEY"])
+        marks = pd.Series(pd.NaT, index=idx, dtype="datetime64[ns]")
+        for d in _report_dates(quarters, ever):
+            pos = idx.searchsorted(d, side="left")
+            if pos < len(idx):
+                marks.iloc[pos] = d  # the latest report date wins a shared day
+        daily["rdq_date"] = marks.to_numpy()
+        tradable = daily["tradable"].to_numpy(dtype=bool) if "tradable" in daily else \
+            np.ones(len(idx), dtype=bool)
+        counts["permno_days"] += int(tradable.sum())
+        counts["no_gvkey_days"] += int((gvkeys.isna().to_numpy() & tradable).sum())
+        counts["no_sector_days"] += int((np.isnan(daily["sector"].to_numpy()) & tradable).sum())
+        counts["no_fundamentals_days"] += int((fund.isna().all(axis=1).to_numpy()
+                                               & tradable).sum())
+    return {**counts, "quarters": q_report}
 
 
 # --------------------------------------------------------------------------- #

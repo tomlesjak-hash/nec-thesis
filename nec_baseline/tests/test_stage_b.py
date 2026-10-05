@@ -29,7 +29,11 @@ from nec_moe import (
     walk_forward_evaluate,
 )
 from nec_moe.config import EncoderConfig, ExpertConfig, NECConfig, TrainConfig
-from nec_moe.features import SEQUENCE_FEATURES, SNAPSHOT_FEATURES
+from nec_moe.features import SEQUENCE_FEATURES, SNAPSHOT_FEATURES, FeatureSpec
+
+#: these tests pin the legacy 14-feature set (brief 08 D keeps it for that);
+#: the Q26 set is tested in test_q26_features.py
+LEGACY = FeatureSpec(feature_set="legacy14")
 
 N_DAYS = 420
 IDX = pd.bdate_range("2020-01-01", periods=N_DAYS)
@@ -56,7 +60,7 @@ def _universe(n: int = 6) -> dict[str, pd.DataFrame]:
 
 
 def test_feature_values_hand_checked():
-    spec = StageBSpec()
+    spec = StageBSpec(features=LEGACY)
     daily = _daily(10)
     f = stock_features(daily, market_frame(_market(), spec), spec)
     r = daily["ret"]
@@ -86,7 +90,7 @@ def test_feature_values_hand_checked():
 def test_dollar_volume_is_raw_price_times_raw_volume():
     """Brief 06 A.4.5 (and audit D-2): dollar volume at t is the dollars
     actually traded each day of the window, no adjustment applied."""
-    spec = StageBSpec()
+    spec = StageBSpec(features=LEGACY)
     daily = _daily(11)
     f = stock_features(daily, market_frame(_market(), spec), spec)
     d = IDX[200]
@@ -98,7 +102,7 @@ def test_dollar_volume_is_raw_price_times_raw_volume():
 def test_drawdown_compounds_only_inside_its_window():
     """A missing return outside the 60-day window leaves the drawdown alone;
     one inside it makes the drawdown missing, never computed as if zero."""
-    spec = StageBSpec()
+    spec = StageBSpec(features=LEGACY)
     daily = _daily(12)
     mkt = market_frame(_market(), spec)
     base = stock_features(daily, mkt, spec)["drawdown_60d"]
@@ -113,7 +117,7 @@ def test_drawdown_compounds_only_inside_its_window():
 def test_no_lookahead():
     """Every non-target feature at t is unchanged when all data after t is
     deleted (the CRSP-fixture version is in test_crsp.py)."""
-    spec = StageBSpec()
+    spec = StageBSpec(features=LEGACY)
     daily, mkt_ret = _daily(13), _market()
     full = stock_features(daily, market_frame(mkt_ret), spec)
     cols = [c for c in full.columns if c != spec.stock_target]
@@ -128,7 +132,7 @@ def test_no_lookahead():
 
 
 def test_panel_contract_ordering_and_window_alignment():
-    spec = StageBSpec(cs_rank=False)  # raw units so cross-checks are exact
+    spec = StageBSpec(cs_rank=False, features=LEGACY)  # raw units so cross-checks are exact
     panel = assemble_panel(_universe(), market_frame(_market(), spec), spec)
 
     panel.full_batch().validate_schema(panel.schema)
@@ -148,7 +152,7 @@ def test_panel_contract_ordering_and_window_alignment():
 def test_tradable_false_days_are_never_rows_but_their_returns_count():
     """A non-tradable day (a delisting-return row, a fill day) is not a row,
     and its return still reaches the targets of the rows before it."""
-    spec = StageBSpec(seq_len=10, cs_rank=False)
+    spec = StageBSpec(seq_len=10, cs_rank=False, features=LEGACY)
     daily = _universe()
     daily["10001"]["tradable"] = True
     daily["10001"].iloc[300, daily["10001"].columns.get_loc("tradable")] = False
@@ -161,7 +165,7 @@ def test_tradable_false_days_are_never_rows_but_their_returns_count():
 
 
 def test_window_keeps_only_rows_inside_it():
-    spec = StageBSpec(seq_len=10)
+    spec = StageBSpec(seq_len=10, features=LEGACY)
     panel = assemble_panel(
         _universe(), market_frame(_market(), spec), spec,
         window=(str(IDX[200].date()), str(IDX[260].date())),
@@ -172,7 +176,7 @@ def test_window_keeps_only_rows_inside_it():
 
 
 def test_cross_sectional_ranks():
-    spec = StageBSpec(cs_rank=True)
+    spec = StageBSpec(cs_rank=True, features=LEGACY)
     panel = assemble_panel(_universe(), market_frame(_market(), spec), spec)
     assert float(panel.x_snap.min()) >= -0.5 and float(panel.x_snap.max()) <= 0.5
     block = panel.x_snap[panel.date == panel.date[0]]
@@ -185,7 +189,7 @@ def test_cross_sectional_ranks():
 def test_assemble_panel_records_whether_it_rank_normalized():
     """The flag filter_point_in_time relies on to re-rank (audit D-1)."""
     for flag in (True, False):
-        spec = StageBSpec(cs_rank=flag)
+        spec = StageBSpec(cs_rank=flag, features=LEGACY)
         panel = assemble_panel(_universe(), market_frame(_market(), spec), spec)
         assert panel.schema.rank_normalized is flag
 
@@ -193,7 +197,7 @@ def test_assemble_panel_records_whether_it_rank_normalized():
 def test_real_format_panel_runs_through_harness():
     """Plumbing: a real-format panel trains and evaluates end to end. The
     data is a random walk, so NO performance is asserted."""
-    spec = StageBSpec(seq_len=10)
+    spec = StageBSpec(seq_len=10, features=LEGACY)
     panel = assemble_panel(_universe(), market_frame(_market(), spec), spec)
     cfg = NECConfig(
         data=data_config_from_panel(panel),
@@ -220,7 +224,7 @@ def test_real_format_panel_runs_through_harness():
 
 
 def test_data_config_from_panel_builds_model():
-    spec = StageBSpec(seq_len=10)
+    spec = StageBSpec(seq_len=10, features=LEGACY)
     panel = assemble_panel(_universe(), market_frame(_market(), spec), spec)
     model = NECModel(NECConfig(data=data_config_from_panel(panel)))
     out = model(panel.x_seq[:32], panel.x_snap[:32])

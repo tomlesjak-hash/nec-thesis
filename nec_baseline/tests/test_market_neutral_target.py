@@ -36,6 +36,7 @@ from nec_moe import (
 )
 from nec_moe.config import target_horizon
 from nec_moe.evaluation import _leg_weights, _quantile_legs, long_short_book
+from nec_moe.features import FeatureSpec
 from nec_moe.train import DeadParameterWarning
 
 N_DAYS = 260
@@ -129,7 +130,9 @@ def test_the_mean_counts_rows_dropped_for_a_missing_characteristic():
     daily = _universe()
     gap_day = IDX[150]
     daily["10003"].loc[gap_day, "volume"] = np.nan  # its volume z-score goes missing
-    panel = assemble_panel(daily, _mkt(), SPEC)
+    # the legacy set drops such rows (the Q26 set never does)
+    spec = dataclasses.replace(SPEC, features=FeatureSpec(feature_set="legacy14"))
+    panel = assemble_panel(daily, _mkt(spec), spec)
     raw = _raw_by_date(daily, SPEC)
     assert panel.date_labels is not None and panel.entity_labels is not None
     code = panel.date_labels.index(str(gap_day.date()))
@@ -222,7 +225,7 @@ def test_registry_records_target_kind(tmp_path: Path):
     with pytest.raises(ValueError, match="target_kind"):
         reg.log("t", {"x": 1.0}, config={
             "data_source": "s", "post_delisting_return": None, "hidden_init": None,
-            "portfolio_scheme": None, "gate_weight": None,
+            "portfolio_scheme": None, "gate_weight": None, "feature_set": None,
         })
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeadParameterWarning)

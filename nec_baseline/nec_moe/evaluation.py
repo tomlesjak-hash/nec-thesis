@@ -55,6 +55,7 @@ from .diagnostics import (
     pairwise_expert_distance,
     persistence_metrics,
 )
+from .features import check_panel_input_mode
 from .priors import PriorContext
 from .train import Trainer
 from .utils import atomic_torch_save
@@ -1351,6 +1352,7 @@ def walk_forward_evaluate(
             trainer.on_heartbeat = _heartbeat(run, fold.fold)
         t0 = time.perf_counter()
         if trainer.model.prior.stateful:
+            check_panel_input_mode(expert_train, trainer.cfg.experts.input_mode)
             trainer.fit_sequence(
                 expert_train.time_sequence(), steps=remaining, checkpoint_path=fit_ckpt
             )

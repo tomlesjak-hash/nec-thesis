@@ -130,11 +130,20 @@ def filter_point_in_time(panel: Panel, universe: Universe) -> Panel:
         member[code, cols] = True
     keep = member[panel.date, panel.entity]
     dropped = int((~keep).sum())
-    if dropped:
-        print(
-            f"[universe] point-in-time filter dropped {dropped}/{len(panel)} "
-            "rows (names not in the index on those dates)"
+    if not dropped:
+        # every row is a member already (a Q26 panel built with its universe
+        # is): its ranks describe that cross-section, nothing to redo
+        return panel
+    if meta.get("feature_set") == "q26":
+        raise ValueError(
+            f"{dropped} rows of this Q26 panel are not members on their dates: its "
+            "ranks, sector aggregates and fills were taken over them and cannot be "
+            "redone from the ranks; build it with assemble_panel(..., universe=universe)"
         )
+    print(
+        f"[universe] point-in-time filter dropped {dropped}/{len(panel)} "
+        "rows (names not in the index on those dates)"
+    )
     filtered = panel._take(keep)
     if panel.schema.rank_normalized:
         filtered = dataclasses.replace(

@@ -48,6 +48,7 @@ from nec_moe import (  # noqa: E402
 from nec_moe.config import EncoderConfig, ExpertConfig, TrainConfig  # noqa: E402
 from nec_moe.crsp import crsp_daily_frames, crsp_file_source, open_crsp_file  # noqa: E402
 from nec_moe.features import (  # noqa: E402
+    FeatureSpec,
     _split_invariant_volume_z,
     market_frame,
     stock_features,
@@ -56,8 +57,11 @@ from nec_moe.train import DeadParameterWarning  # noqa: E402
 
 # the raw target: the delisting and fill rules below are rules about the raw
 # forward return; the market-neutral target built on it (Q25) is tested on
-# its own, as builds["cash_mn"]
-STAGE_B = StageBSpec(seq_len=10, horizon=5, min_names_per_date=4, target_kind="raw")
+# its own, as builds["cash_mn"]. The legacy feature set: these are CRSP rules,
+# and the Q26 build (which needs the Compustat fixture too) is tested in
+# test_q26_features.py
+STAGE_B = StageBSpec(seq_len=10, horizon=5, min_names_per_date=4, target_kind="raw",
+                     features=FeatureSpec(feature_set="legacy14"))
 H = STAGE_B.horizon
 
 
@@ -533,6 +537,9 @@ def test_data_source_and_fill_reach_every_registry_row(builds, tmp_path: Path):
 # --------------------------------------------------------------------------- #
 
 REAL = CRSPSpec()
+#: the brief 06 integration check, on the legacy feature set (CRSP only); the
+#: Q26 build with Compustat has its own real-data test (test_q26_features.py)
+STAGE_B_REAL = StageBSpec(features=FeatureSpec(feature_set="legacy14"))
 
 
 def _real_files() -> bool:
@@ -584,7 +591,7 @@ def test_real_delisting_returns_are_already_in_dlyret():
 @needs_extract
 def test_real_one_year_panel_builds():
     spec = dataclasses.replace(REAL, start="2019-01-01", end="2019-12-31")
-    b = build_crsp_panel(spec, StageBSpec(), extract=load_extract(REAL), verbose=False)
+    b = build_crsp_panel(spec, STAGE_B_REAL, extract=load_extract(REAL), verbose=False)
     rep = b.report
     assert rep["data_source"] == "crsp_ciz202512"
     assert 240 <= rep["dates"] <= 260 and rep["rows"] > 400 * rep["dates"]

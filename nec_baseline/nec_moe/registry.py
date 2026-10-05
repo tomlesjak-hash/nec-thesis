@@ -34,8 +34,8 @@ from pathlib import Path
 from typing import Any
 
 __all__ = [
-    "PROVENANCE_KEYS", "TrialRecord", "TrialRegistry", "gate_weight_of", "panel_target_kind",
-    "trial_provenance",
+    "PROVENANCE_KEYS", "TrialRecord", "TrialRegistry", "gate_weight_of", "panel_feature_set",
+    "panel_target_kind", "trial_provenance",
 ]
 
 _SELECTION_SUFFIX = "#selection"
@@ -43,7 +43,7 @@ _SELECTION_SUFFIX = "#selection"
 #: Config keys every logged trial must carry (see the module docstring).
 PROVENANCE_KEYS: tuple[str, ...] = (
     "data_source", "post_delisting_return", "hidden_init", "portfolio_scheme",
-    "target_kind", "gate_weight",
+    "target_kind", "gate_weight", "feature_set",
 )
 
 #: Target-name prefixes of the Stage B target kinds (``StageBSpec.target``),
@@ -69,6 +69,24 @@ def panel_target_kind(panel: Any) -> str | None:
     return None
 
 
+def panel_feature_set(panel: Any) -> str | None:
+    """The panel's ``feature_set`` (Q26): from its build metadata, else from
+    its snapshot columns (the legacy 14 or the Q26 57); ``None`` otherwise
+    (synthetic panels)."""
+    from .characteristics import Q26_FEATURES
+    from .features import SNAPSHOT_FEATURES
+
+    metadata = getattr(panel, "metadata", None) or {}
+    if metadata.get("feature_set") is not None:
+        return str(metadata["feature_set"])
+    names = tuple(getattr(getattr(panel, "schema", None), "snapshot_features", ()))
+    if names == SNAPSHOT_FEATURES:
+        return "legacy14"
+    if names == Q26_FEATURES:
+        return "q26"
+    return None
+
+
 def gate_weight_of(cfg: Any) -> str | None:
     """The fitted gate's ``gate_weight`` (Q27) for a model config, or ``None``
     when the model has no Hamilton gate (other priors, baselines)."""
@@ -88,8 +106,9 @@ def trial_provenance(
     experts' ``hidden_init`` from ``cfg`` (``None`` without a config, e.g. for
     a baseline model, which has no experts); the long-short book's
     ``portfolio_scheme`` the run was configured with (audit E-3); the
-    panel's ``target_kind`` (:func:`panel_target_kind`, brief 08 A); and the
-    gate's ``gate_weight`` from ``cfg`` (:func:`gate_weight_of`, brief 08 B).
+    panel's ``target_kind`` (:func:`panel_target_kind`, brief 08 A); the
+    gate's ``gate_weight`` from ``cfg`` (:func:`gate_weight_of`, brief 08 B);
+    and the panel's ``feature_set`` (:func:`panel_feature_set`, brief 08 D).
     """
     metadata = getattr(panel, "metadata", None) or {}
     experts = getattr(cfg, "experts", None)
@@ -100,6 +119,7 @@ def trial_provenance(
         "portfolio_scheme": portfolio_scheme,
         "target_kind": panel_target_kind(panel),
         "gate_weight": gate_weight_of(cfg),
+        "feature_set": panel_feature_set(panel),
     }
 
 

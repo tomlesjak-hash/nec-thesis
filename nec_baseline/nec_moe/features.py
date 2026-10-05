@@ -52,7 +52,7 @@ from __future__ import annotations
 
 import dataclasses
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
 import numpy as np
@@ -60,6 +60,13 @@ import pandas as pd
 import torch
 from numpy.lib.stride_tricks import sliding_window_view
 
+from .characteristics import (
+    JKP_FEATURES,
+    MARKET_FEATURES,
+    Q26_FEATURES,
+    cross_section,
+    stock_characteristics,
+)
 from .config import DataConfig
 from .data import FeatureSchema, Panel
 
@@ -80,6 +87,7 @@ __all__ = [
     "forward_daily_returns",
     "feature_warmup",
     "assemble_panel",
+    "check_panel_input_mode",
     "data_config_from_panel",
 ]
 
@@ -299,6 +307,13 @@ class StageBSpec:
     min_names_per_date: int = 5  # drop dates with too thin a cross-section
     target_kind: Literal["market_neutral", "raw", "residual"] = "market_neutral"
     beta_window: int = 250  # trailing window for the market beta (residual only)
+    # the snapshot features (Q26): FeatureSpec.feature_set picks "q26" (the
+    # decision, 57 inputs) or "legacy14"; every window is a field there
+    features: FeatureSpec = field(default_factory=FeatureSpec)
+    # the experts' input mode the panel is built for (brief 08 D.4.6): only
+    # "snapshot_plus_hidden" drops a q26 row whose sequence window is
+    # incomplete; must match ExpertConfig.input_mode (checked when training)
+    input_mode: Literal["snapshot", "snapshot_plus_hidden"] = "snapshot"
 
     def validate(self) -> StageBSpec:
         if self.seq_len < 2 or self.horizon < 1 or self.min_names_per_date < 2:
@@ -315,7 +330,19 @@ class StageBSpec:
                 f"beta_window={self.beta_window} is too short to estimate a "
                 "market beta (need >= 20 trailing days)"
             )
+        if self.input_mode not in ("snapshot", "snapshot_plus_hidden"):
+            raise ValueError(f"unknown input_mode {self.input_mode!r}")
+        self.features.validate()
         return self
+
+    @property
+    def feature_set(self) -> str:
+        return self.features.feature_set
+
+    @property
+    def snapshot_features(self) -> tuple[str, ...]:
+        """The panel's snapshot columns: the 57 Q26 inputs or the legacy 14."""
+        return Q26_FEATURES if self.feature_set == "q26" else SNAPSHOT_FEATURES
 
     @property
     def target(self) -> str:
@@ -366,12 +393,20 @@ _SEQUENCE_CHANNEL_WINDOW = 20
 
 
 def feature_warmup(spec: StageBSpec) -> int:
-    """Trading days of history a row needs before its first valid date.
+    """Trading days of history the features need before the window's first date.
 
-    The longest of: the snapshot windows, the sequence window of channels that
-    are themselves 20-day statistics, and the residual target's beta window.
+    The longest of: the snapshot windows (for ``q26``, the longest price
+    window, :func:`price_history_trading_days`; rows are not dropped for a
+    missing ``q26`` characteristic, but the extract must reach this far back
+    for the early rows to have their values), the sequence window of
+    channels that are themselves 20-day statistics, and the residual
+    target's beta window.
     """
-    need = max(_LONGEST_SNAPSHOT_WINDOW, spec.seq_len - 1 + _SEQUENCE_CHANNEL_WINDOW)
+    snapshot = (
+        price_history_trading_days(spec.features)
+        if spec.feature_set == "q26" else _LONGEST_SNAPSHOT_WINDOW
+    )
+    need = max(snapshot, spec.seq_len - 1 + _SEQUENCE_CHANNEL_WINDOW)
     if spec.target_kind == "residual":
         need = max(need, spec.beta_window)
     return need
@@ -538,6 +573,13 @@ def stock_features(
     f["rel_ret_1d"] = f["ret_1d"] - f["mkt_ret_1d"]
     f["rel_ret_20d"] = f["ret_20d"] - f["mkt_ret_20d"]
     f["rel_vol_20d"] = f["vol_20d"] / f["mkt_vol_20d"]
+    if spec.feature_set == "q26":
+        # the Q26 characteristics (ret_5d and ret_20d replace the legacy
+        # full-window ones with their minimum-count versions), plus sector
+        # and market equity for the cross-section
+        ch = stock_characteristics(daily, f["mkt_ret_1d"], spec.features)
+        for c in ch.columns:
+            f[c] = ch[c]
 
     # the target — the ONLY forward-looking column(s). The market-neutral
     # target is the raw one here; assemble_panel demeans it per date
@@ -560,18 +602,31 @@ def stock_features(
 # --------------------------------------------------------------------------- #
 
 
+def _window_ok(f: pd.DataFrame, spec: StageBSpec) -> pd.Series:
+    """Every sequence channel present on each of the row's last ``seq_len`` rows."""
+    seq_ok_today = f[list(SEQUENCE_FEATURES)].notna().all(axis=1)
+    return seq_ok_today.astype(float).rolling(spec.seq_len).sum() == spec.seq_len
+
+
 def _valid_rows(
     f: pd.DataFrame, spec: StageBSpec, tradable: pd.Series | None = None
 ) -> pd.Series:
-    """Rows usable as samples: a tradable day with snapshot + target + a full
-    trailing seq window."""
-    snap_ok = f[list(SNAPSHOT_FEATURES)].notna().all(axis=1)
+    """Rows usable as samples.
+
+    ``legacy14``: a tradable day with every snapshot feature, the target and
+    a full trailing sequence window. ``q26`` (D.4.6): a tradable day with
+    the target; the sequence window is required only for
+    ``input_mode="snapshot_plus_hidden"``, and a missing characteristic never
+    drops a row (it is filled and flagged in the cross-section).
+    """
     target_ok = f[spec.stock_target].notna()
-    seq_ok_today = f[list(SEQUENCE_FEATURES)].notna().all(axis=1)
-    window_ok = (
-        seq_ok_today.astype(float).rolling(spec.seq_len).sum() == spec.seq_len
-    )
-    ok = snap_ok & target_ok & window_ok
+    if spec.feature_set == "q26":
+        ok = target_ok.copy()
+        if spec.input_mode == "snapshot_plus_hidden":
+            ok &= _window_ok(f, spec)
+    else:
+        snap_ok = f[list(SNAPSHOT_FEATURES)].notna().all(axis=1)
+        ok = snap_ok & target_ok & _window_ok(f, spec)
     if tradable is not None:
         ok &= tradable.reindex(f.index, fill_value=False).astype(bool)
     return ok
@@ -638,9 +693,33 @@ def assemble_panel(
     over the same rows, so they still sum to the target. The panel's
     metadata records ``target_kind`` and, for this kind,
     ``target_demeaned_over`` (``"universe"`` or ``"entities"``).
+
+    **The Q26 inputs** (``spec.features.feature_set="q26"``, brief 08 D). Rows
+    are the date's rows with a target on a tradable day (and, for
+    ``input_mode="snapshot_plus_hidden"``, a complete sequence window); with
+    ``universe`` given, only that date's members are rows at all, because
+    every rank and sector aggregate is taken over the date's universe rows
+    (:func:`nec_moe.characteristics.cross_section`), and the point-in-time
+    filter afterwards finds nothing to drop. A row's sequence window that
+    reaches before the stock's history, or holds a missing value, is
+    zero-filled (only possible in ``"snapshot"`` mode, where the experts do
+    not read it); the metadata counts such rows. The metadata also records
+    ``feature_set``, ``input_mode`` and the aggregate coverage of the
+    characteristics before the fill.
     """
     spec = (spec if spec is not None else StageBSpec()).validate()
     calendar = pd.DatetimeIndex(mkt.index)
+    q26 = spec.feature_set == "q26"
+    if q26 and not spec.cs_rank:
+        raise ValueError("feature_set='q26' inputs are per-date ranks by definition: cs_rank=True")
+    member_sets = (
+        [universe.members_asof(d) for d in calendar] if universe is not None else None
+    )
+
+    def member_mask(t: str) -> np.ndarray | None:
+        if member_sets is None:
+            return None
+        return np.fromiter((t in m for m in member_sets), dtype=bool, count=len(calendar))
 
     frames: dict[str, pd.DataFrame] = {}
     valid: dict[str, pd.Series] = {}
@@ -648,6 +727,9 @@ def assemble_panel(
         f = stock_features(d, mkt, spec)
         frames[t] = f
         valid[t] = _valid_rows(f, spec, d["tradable"] if "tradable" in d.columns else None)
+        if q26 and member_sets is not None:
+            on = pd.Series(member_mask(t), index=calendar).reindex(f.index, fill_value=False)
+            valid[t] &= on.astype(bool)
 
     # every entity's forward daily returns, aligned to its own rows
     fwd_daily_all = {t: forward_daily_returns(daily[t], frames[t], spec) for t in frames}
@@ -655,17 +737,11 @@ def assemble_panel(
     # market-neutral target: per-date equal-weighted means over eligible rows
     mean_y = mean_daily = None
     if spec.target_kind == "market_neutral":
-        member_sets = (
-            [universe.members_asof(d) for d in calendar] if universe is not None else None
-        )
         sum_y = np.zeros(len(calendar))
         sum_d = np.zeros((len(calendar), spec.horizon))
         cnt = np.zeros(len(calendar))
         for t, f in frames.items():
-            member = (
-                np.fromiter((t in m for m in member_sets), dtype=bool, count=len(calendar))
-                if member_sets is not None else None
-            )
+            member = member_mask(t)
             d = daily[t]
             ok = _target_eligible(
                 f, spec, d["tradable"] if "tradable" in d.columns else None, calendar, member
@@ -699,6 +775,9 @@ def assemble_panel(
 
     rows_snap, rows_seq, rows_y, rows_date, rows_ent = [], [], [], [], []
     rows_daily: list[np.ndarray] = []
+    rows_char: list[pd.DataFrame] = []
+    char_cols = [*_Q26_RAW, "sector", "me"]
+    seq_incomplete = 0
     for ent_code, t in enumerate(tickers):
         f = frames[t]
         keep = valid[t] & f.index.isin(kept_dates)
@@ -713,35 +792,59 @@ def assemble_panel(
         rows_daily.append(fwd_daily.astype(np.float32))
         # trailing windows over the entity's own rows (positions, not calendar)
         seq_mat = f[list(SEQUENCE_FEATURES)].to_numpy(dtype=np.float32)
-        windows = sliding_window_view(seq_mat, spec.seq_len, axis=0)  # (P, d, T)
         pos = np.flatnonzero(keep.to_numpy())
-        win_idx = pos - (spec.seq_len - 1)
-        assert (win_idx >= 0).all()  # guaranteed by _valid_rows' window check
-        rows_seq.append(np.swapaxes(windows[win_idx], 1, 2))  # (n, T, d_seq)
-        rows_snap.append(f.loc[keep, list(SNAPSHOT_FEATURES)].to_numpy(np.float32))
+        if q26:
+            # rows are kept without a full window (D.4.6): pad the front, and
+            # zero-fill what is missing (never read by snapshot-mode experts)
+            pad = np.full((spec.seq_len - 1, seq_mat.shape[1]), np.nan, dtype=np.float32)
+            windows = sliding_window_view(np.concatenate([pad, seq_mat]), spec.seq_len, axis=0)
+            seq = np.swapaxes(windows[pos], 1, 2)
+            seq_incomplete += int(np.isnan(seq).any(axis=(1, 2)).sum())
+            rows_seq.append(np.nan_to_num(seq, nan=0.0))
+            chars = f.loc[keep, char_cols].copy()
+            chars["date"] = [date_codes[d] for d in f.index[keep]]
+            chars["year"] = pd.DatetimeIndex(f.index[keep]).year
+            rows_char.append(chars)
+        else:
+            windows = sliding_window_view(seq_mat, spec.seq_len, axis=0)  # (P, d, T)
+            win_idx = pos - (spec.seq_len - 1)
+            assert (win_idx >= 0).all()  # guaranteed by _valid_rows' window check
+            rows_seq.append(np.swapaxes(windows[win_idx], 1, 2))  # (n, T, d_seq)
+            rows_snap.append(f.loc[keep, list(SNAPSHOT_FEATURES)].to_numpy(np.float32))
         rows_y.append(y_rows.astype(np.float32))
         rows_date.append(np.array([date_codes[d] for d in f.index[keep]]))
         rows_ent.append(np.full(int(keep.sum()), ent_code))
 
-    x_snap = torch.from_numpy(np.concatenate(rows_snap))
     x_seq = torch.from_numpy(np.concatenate(rows_seq))
     y = torch.from_numpy(np.concatenate(rows_y))
     y_daily = torch.from_numpy(np.concatenate(rows_daily))
     date = torch.from_numpy(np.concatenate(rows_date)).long()
     entity = torch.from_numpy(np.concatenate(rows_ent)).long()
 
-    if spec.cs_rank:
-        x_snap = _cross_sectional_rank(x_snap, date)
+    feature_report: dict[str, Any] = {}
+    if q26:
+        rows = pd.concat(rows_char, ignore_index=True)
+        inputs, feature_report = cross_section(rows, spec.features)
+        x_snap = torch.from_numpy(inputs.to_numpy(dtype=np.float32))
+    else:
+        x_snap = torch.from_numpy(np.concatenate(rows_snap))
+        if spec.cs_rank:
+            x_snap = _cross_sectional_rank(x_snap, date)
 
     order = torch.argsort(date * (entity.max() + 1) + entity)  # date-major
     schema = FeatureSchema(
         sequence_features=SEQUENCE_FEATURES,
-        snapshot_features=SNAPSHOT_FEATURES,
+        snapshot_features=spec.snapshot_features,
         target=spec.target,
         rank_normalized=spec.cs_rank,
     )
     meta = dict(metadata or {})
     meta["target_kind"] = spec.target_kind
+    meta["feature_set"] = spec.feature_set
+    meta["input_mode"] = spec.input_mode
+    if q26:
+        meta["features"] = {**feature_report, "seq_window_incomplete_rows": seq_incomplete,
+                            "rows_restricted_to_universe": universe is not None}
     if spec.target_kind == "market_neutral":
         meta["target_demeaned_over"] = "universe" if universe is not None else "entities"
     return Panel(
@@ -780,6 +883,27 @@ def _cross_sectional_rank(x_snap: torch.Tensor, date: torch.Tensor) -> torch.Ten
         out[rows] = ranks / max(n - 1, 1) - 0.5
         start += n
     return out
+
+
+#: The per-stock columns :func:`nec_moe.characteristics.cross_section` reads:
+#: the 40 characteristics except the two industry signals it computes itself.
+_Q26_RAW: tuple[str, ...] = (*JKP_FEATURES, *MARKET_FEATURES)
+
+
+def check_panel_input_mode(panel: Panel, input_mode: str) -> None:
+    """Refuse a Q26 panel built for another expert input mode (D.4.6).
+
+    A panel built for ``"snapshot"`` keeps rows whose sequence window is
+    incomplete (zero-filled); experts in ``"snapshot_plus_hidden"`` mode read
+    that window, so they must be trained on a panel that dropped those rows.
+    """
+    meta = panel.metadata or {}
+    if meta.get("feature_set") == "q26" and meta.get("input_mode") != input_mode:
+        raise ValueError(
+            f"this panel was built for input_mode={meta.get('input_mode')!r}, the "
+            f"experts use {input_mode!r}: rebuild it with StageBSpec(input_mode="
+            f"{input_mode!r}) (brief 08 D.4.6)"
+        )
 
 
 def data_config_from_panel(panel: Panel) -> DataConfig:

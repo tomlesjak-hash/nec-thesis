@@ -1434,10 +1434,12 @@ file). Every trial the panel produces carries `data_source="crsp_ciz202512"`, th
 - **Q26 inputs (brief 08):** each PERMNO's company market equity (every share class),
   GICS sector, report dates and point-in-time fundamentals come from the Compustat
   extract through the CCM link on each date. A row is never dropped for a missing
-  characteristic: it is ranked without it, filled with 0 and flagged. Two
-  definitions need every balance-sheet component (`taccruals_at`, `noa_at`: a missing
-  `IVAOQ`, `IVSTQ`, `MIBQ` or `PSTKQ` leaves them missing, per "missing, not zero"); the
-  coverage report shows how often that happens, which is worth a look before training.
+  characteristic: it is ranked without it, filled with 0 and flagged. In `taccruals_at`
+  and `noa_at`, `IVAOQ`, `IVSTQ`, `MIBQ` and `PSTKQ` count as 0 when blank
+  (`FeatureSpec.zero_if_missing_items`; decided 2026-10-05 after the first coverage report
+  showed `taccruals_at` present on 5% of rows under the strict rule); every other item stays
+  strictly missing, so a definition that does not apply (a bank's current assets) is still
+  missing.
 
 ## II.5 Bringing your own data
 

@@ -262,6 +262,12 @@ class FeatureSpec:
     surprise_std_quarters: int = 8  # niq_su / saleq_su: std over 8 quarters ...
     surprise_min_quarters: int = 6  # ... with at least 6
     earnings_streak_max: int = 8  # ni_inc8q
+    # balance-sheet items read as 0 when missing in taccruals_at and noa_at
+    # (Tom's decision 2026-10-05, after the first coverage report: Compustat
+    # leaves them blank when a firm has none, as Richardson et al. and JKP
+    # treat them). Every other item stays strictly missing, so a definition
+    # that does not apply (a bank's current assets) is still missing.
+    zero_if_missing_items: tuple[str, ...] = ("IVAOQ", "IVSTQ", "MIBQ", "PSTKQ")
 
     def validate(self) -> FeatureSpec:
         if self.feature_set not in ("q26", "legacy14"):

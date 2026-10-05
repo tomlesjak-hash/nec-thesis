@@ -564,6 +564,32 @@ def test_book_equity_fallbacks():
     assert k.book_equity() == 5.0
 
 
+def test_zero_if_missing_items_in_accruals_and_noa(fund):
+    """IVAOQ, IVSTQ, MIBQ and PSTKQ count as 0 when blank (Tom, 2026-10-05);
+    a core item (ACTQ) left blank still makes total accruals missing."""
+    _, q = fund
+    g = q[q["KYGVKEY"] == "001001"].copy()
+    t = g.set_index(["FYEARQ", "FQTR"]).loc[(2019, 2), "avail"] + pd.offsets.BDay(2)
+    full = cs.fundamental_inputs(g, CAL, FS).loc[t]
+    blank = g.copy()
+    for item in ("IVAOQ", "IVSTQ", "MIBQ", "PSTKQ"):
+        blank[item] = np.nan
+    got = cs.fundamental_inputs(blank, CAL, FS).loc[t]
+    assert not np.isnan(got["taccruals_at"]) and not np.isnan(got["noa_at"])
+    zeroed = g.copy()
+    for item in ("IVAOQ", "IVSTQ", "MIBQ", "PSTKQ"):
+        zeroed[item] = 0.0
+    want = cs.fundamental_inputs(zeroed, CAL, FS).loc[t]
+    assert got["taccruals_at"] == pytest.approx(want["taccruals_at"])
+    assert got["noa_at"] == pytest.approx(want["noa_at"])
+    assert got["taccruals_at"] != pytest.approx(full["taccruals_at"])  # the items mattered
+    core = g.copy()
+    core["ACTQ"] = np.nan
+    assert np.isnan(cs.fundamental_inputs(core, CAL, FS).loc[t, "taccruals_at"])
+    strict = dataclasses.replace(FS, zero_if_missing_items=())
+    assert np.isnan(cs.fundamental_inputs(blank, CAL, strict).loc[t, "taccruals_at"])
+
+
 def test_trailing_flows_need_four_consecutive_quarters(fund):
     _, q = fund
     g = q[q["KYGVKEY"] == "001003"].copy()

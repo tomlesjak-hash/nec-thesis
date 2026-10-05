@@ -753,6 +753,14 @@ class _Known:
         v = row.get(item)
         return float(v) if v is not None and pd.notna(v) else np.nan
 
+    def get_or_zero(self, item: str, lag: int, zero_items: tuple[str, ...]) -> float:
+        """:meth:`get`, but 0 for a missing ``zero_items`` item of a quarter
+        that is known (an unknown quarter stays missing)."""
+        v = self.get(item, lag)
+        if np.isnan(v) and item in zero_items and (self.latest - lag) in self.rows:
+            return 0.0
+        return v
+
     def total(self, item: str, n: int, lag: int = 0) -> float:
         """Sum over ``n`` consecutive quarters ending ``lag`` back; missing
         unless all ``n`` are known and present (trailing flows, D.1)."""
@@ -779,9 +787,11 @@ def _growth(now: float, before: float) -> float:
     return now / before - 1.0 if before > 0 and not np.isnan(now) else np.nan
 
 
-def _total_accruals_base(k: _Known, lag: int) -> float:
-    """WC + NCO + FIN of one quarter (Richardson et al. 2005)."""
-    g = lambda item: k.get(item, lag)  # noqa: E731
+def _total_accruals_base(k: _Known, lag: int, zero_items: tuple[str, ...]) -> float:
+    """WC + NCO + FIN of one quarter (Richardson et al. 2005); the
+    ``zero_items`` (IVAOQ, IVSTQ, MIBQ, PSTKQ by default) count as 0 when
+    missing, every other item must be present."""
+    g = lambda item: k.get_or_zero(item, lag, zero_items)  # noqa: E731
     wc = (g("ACTQ") - g("CHEQ")) - (g("LCTQ") - g("DLCQ"))
     nco = (g("ATQ") - g("ACTQ") - g("IVAOQ")) - (g("LTQ") - g("LCTQ") - g("DLTTQ"))
     fin = (g("IVSTQ") + g("IVAOQ")) - (g("DLTTQ") + g("DLCQ") + g("PSTKQ"))
@@ -819,11 +829,13 @@ def _main_values(k: _Known, fs: FeatureSpec) -> dict[str, float]:
     debt_before = k.get("DLTTQ", fs.debt_growth_lag_quarters) + k.get(
         "DLCQ", fs.debt_growth_lag_quarters
     )
+    z = fs.zero_if_missing_items
     noa = (at - k.get("CHEQ")) - (
-        at - k.get("DLCQ") - k.get("DLTTQ") - k.get("MIBQ") - k.get("PSTKQ") - k.get("CEQQ")
+        at - k.get("DLCQ") - k.get("DLTTQ") - k.get_or_zero("MIBQ", 0, z)
+        - k.get_or_zero("PSTKQ", 0, z) - k.get("CEQQ")
     )
     at_before = k.get("ATQ", lag)
-    ta_change = _total_accruals_base(k, 0) - _total_accruals_base(k, lag)
+    ta_change = _total_accruals_base(k, 0, z) - _total_accruals_base(k, lag, z)
     return {
         "be": k.book_equity(0),
         "ni_ttm": ni_ttm,

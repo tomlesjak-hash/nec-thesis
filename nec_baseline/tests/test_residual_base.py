@@ -226,7 +226,8 @@ def test_base_cache_shares_across_gate_arms_and_splits_on_config():
     change must produce a different one."""
     panel = _panel(80, 6)
     cache = BaseCache()
-    cfg = small_base_config()
+    # a validation tail, so changing early_stopping_patience alone is valid
+    cfg = small_base_config(val_fraction=0.2)
     soft = cache.get_or_fit(panel, cfg, window=(0, 60), seed=0)
     hmm = cache.get_or_fit(panel, cfg, window=(0, 60), seed=0)
     assert soft is hmm  # identical object, not merely equal
@@ -297,7 +298,8 @@ def test_base_validation_split_is_a_tail_of_training_only():
     given — never from anything later."""
     panel = _panel(80, 6)
     train, _ = panel.split_by_date(0.75)
-    fit = fit_base(train, small_base_config(early_stopping_patience=3), seed=0)
+    fit = fit_base(train, small_base_config(early_stopping_patience=3, val_fraction=0.2),
+                   seed=0)
     assert math.isfinite(fit.val_loss) and fit.steps_run >= 1
     assert all(not p.requires_grad for p in fit.model.parameters())
     assert not fit.model.training  # returned frozen AND in eval mode

@@ -24,10 +24,10 @@ expected to capture most of that, so the residual left for the experts is
 small by construction and a null result is a real possible outcome.
 
 **Leakage discipline.** ``fit_base`` sees one panel — the fold's training
-block — and cuts its early-stopping validation set from the *tail* of that
-block. No out-of-sample date is read, and the split is chronological, so the
-validation tail is also the part of the training block closest in time to the
-test block.
+block — and, only when ``val_fraction > 0``, cuts an early-stopping
+validation set from the *tail* of that block. No out-of-sample date is read,
+and the split is chronological. The default is no tail (brief 09 B.3, audit
+B-2): the base trains on the whole block for its fixed step budget.
 """
 
 from __future__ import annotations
@@ -88,25 +88,32 @@ class BaseFit:
 
     model: BaseModel
     train_loss: float  # final mean squared error on the fitting slice
-    val_loss: float  # best validation MSE (the early-stopping criterion)
+    # best validation MSE (the early-stopping criterion); NaN when the base
+    # has no validation tail (val_fraction = 0, the default)
+    val_loss: float
     steps_run: int  # may be < cfg.steps when early stopping fired
     stopped_early: bool
 
     def metrics(self) -> dict[str, float]:
-        """Registry-safe summary, prefixed so it cannot collide with the mixture's."""
-        return {
+        """Registry-safe summary, prefixed so it cannot collide with the mixture's
+        (``base_val_mse`` only when there was a validation tail)."""
+        out = {
             "base_train_mse": self.train_loss,
-            "base_val_mse": self.val_loss,
             "base_steps_run": float(self.steps_run),
             "base_stopped_early": float(self.stopped_early),
         }
+        if math.isfinite(self.val_loss):
+            out["base_val_mse"] = self.val_loss
+        return out
 
 
 def fit_base(panel: Panel, cfg: BaseConfig, *, seed: int) -> BaseFit:
     """Fit ``f0`` on a training block and return it **frozen**.
 
-    The validation set is the chronological tail of ``panel`` (a
-    ``val_fraction`` share of its dates); the returned model is the best
+    With ``val_fraction = 0`` (the default) the base trains on all of
+    ``panel`` for ``cfg.steps`` steps and has no validation loss. With
+    ``val_fraction > 0`` the validation set is the chronological tail of
+    ``panel`` (that share of its dates); the returned model is the best
     validation checkpoint when ``early_stopping_patience`` is set, else the
     final one. ``panel`` must be a training block — this function has no way
     to know otherwise, so the caller owns that discipline (the walk-forward
@@ -120,27 +127,34 @@ def fit_base(panel: Panel, cfg: BaseConfig, *, seed: int) -> BaseFit:
     that fits the base and one that reuses it from the cache hand the expert
     stage the same RNG state.
     """
-    train, val = panel.split_by_date(1.0 - cfg.val_fraction)
-    if len(train) == 0 or len(val) == 0:
-        raise ValueError(
-            f"base val_fraction={cfg.val_fraction} leaves an empty split on a "
-            f"panel of {len(panel)} rows / "
-            f"{int(torch.unique(panel.date).numel())} dates"
-        )
+    if cfg.val_fraction == 0.0:
+        if cfg.early_stopping_patience is not None:
+            raise ValueError(
+                "early_stopping_patience needs a validation tail: set "
+                "val_fraction > 0, or leave patience None to train the full budget"
+            )
+        train, val = panel, None
+    else:
+        train, val = panel.split_by_date(1.0 - cfg.val_fraction)
+        if len(train) == 0 or len(val) == 0:
+            raise ValueError(
+                f"base val_fraction={cfg.val_fraction} leaves an empty split on a "
+                f"panel of {len(panel)} rows / "
+                f"{int(torch.unique(panel.date).numel())} dates"
+            )
     with torch.random.fork_rng(devices=[]):
         torch.manual_seed(seed)  # dropout inside the fork only
         return _fit_base(panel, train, val, cfg, seed)
 
 
 def _fit_base(
-    panel: Panel, train: Panel, val: Panel, cfg: BaseConfig, seed: int
+    panel: Panel, train: Panel, val: Panel | None, cfg: BaseConfig, seed: int
 ) -> BaseFit:
     model = BaseModel(panel.x_snap.shape[1], cfg)
     model.net.reset_parameters_seeded(seed)  # the base's own generator
     opt = torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
 
     gen = torch.Generator().manual_seed(seed)
-    x_val, y_val = val.x_snap, val.y
     best_val, best_state, since_best = math.inf, None, 0
     train_loss = math.nan
     steps_run, stopped_early = 0, False
@@ -155,10 +169,10 @@ def _fit_base(
         train_loss = float(loss.detach())
         steps_run = step + 1
 
-        if cfg.early_stopping_patience is not None:
+        if cfg.early_stopping_patience is not None and val is not None:
             model.eval()
             with torch.no_grad():
-                v = float(torch.mean((model(x_val) - y_val) ** 2))
+                v = float(torch.mean((model(val.x_snap) - val.y) ** 2))
             if v < best_val:
                 best_val, since_best = v, 0
                 best_state = {k: t.detach().clone() for k, t in model.state_dict().items()}
@@ -171,12 +185,15 @@ def _fit_base(
     if best_state is not None:
         model.load_state_dict(best_state)
     model.eval()
-    with torch.no_grad():
-        final_val = float(torch.mean((model(x_val) - y_val) ** 2))
+    val_loss = math.nan
+    if val is not None:
+        with torch.no_grad():
+            final_val = float(torch.mean((model(val.x_snap) - val.y) ** 2))
+        val_loss = min(best_val, final_val)
     return BaseFit(
         model=model.freeze(),
         train_loss=train_loss,
-        val_loss=min(best_val, final_val),
+        val_loss=val_loss,
         steps_run=steps_run,
         stopped_early=stopped_early,
     )

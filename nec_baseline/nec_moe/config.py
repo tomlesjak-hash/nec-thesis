@@ -27,6 +27,8 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 __all__ = [
+    "FOLD_SCHEMES",
+    "FoldConfig",
     "DataConfig",
     "EncoderConfig",
     "GateConfig",
@@ -86,6 +88,63 @@ def target_horizon(target: str) -> int | None:
     """
     m = _HORIZON_IN_TARGET.search(target)
     return int(m.group(1)) if m else None
+
+
+#: How the walk-forward evaluation splits its dates (brief 09 B).
+FOLD_SCHEMES: tuple[str, ...] = ("calendar_year", "count")
+
+
+@dataclass(frozen=True)
+class FoldConfig:
+    """The evaluation protocol's folds (Q16, decided 2026-10-05; brief 09 B).
+
+    ``fold_scheme`` (default ``"calendar_year"``):
+
+    - ``"calendar_year"``: one **main** fold per test year ``Y`` from
+      ``first_test_year`` to ``last_test_year`` (2010-2024, 15 folds). Each
+      trains on every date from the sample start to the last trading day of
+      ``Y - 1``, minus the last ``purge`` dates (the target horizon, read from
+      the panel), and tests on every trading day of ``Y``: an annual refit on
+      an expanding window (Gu, Kelly & Xiu 2020). The **pilot** folds use
+      the same rule with each of ``pilot_validation_years`` (2007, 2008,
+      2009) as the validation year; the pilot never touches a date at or
+      after ``first_test_year`` (:func:`nec_moe.evaluation.pilot_slice`).
+    - ``"count"``: the earlier count-based split
+      (:func:`nec_moe.evaluation.walk_forward_folds`): the last ``n_folds *
+      test_dates_per_fold`` dates as consecutive test blocks. Kept for
+      development and for panels without a calendar.
+    """
+
+    fold_scheme: Literal["calendar_year", "count"] = "calendar_year"
+    first_test_year: int = 2010
+    last_test_year: int = 2024
+    pilot_validation_years: tuple[int, ...] = (2007, 2008, 2009)
+
+    def validate(self) -> FoldConfig:
+        if self.fold_scheme not in FOLD_SCHEMES:
+            raise ValueError(
+                f"unknown fold_scheme {self.fold_scheme!r}; use one of {FOLD_SCHEMES}"
+            )
+        if self.last_test_year < self.first_test_year:
+            raise ValueError(
+                f"last_test_year={self.last_test_year} is before "
+                f"first_test_year={self.first_test_year}"
+            )
+        years = self.pilot_validation_years
+        if not years or len(set(years)) != len(years) or list(years) != sorted(years):
+            raise ValueError(
+                f"pilot_validation_years must be distinct and increasing, got {years}"
+            )
+        if max(years) >= self.first_test_year:
+            raise ValueError(
+                f"pilot validation year {max(years)} is not before first_test_year="
+                f"{self.first_test_year}: the pilot may only see pre-test data"
+            )
+        return self
+
+    @property
+    def test_years(self) -> tuple[int, ...]:
+        return tuple(range(self.first_test_year, self.last_test_year + 1))
 
 
 @dataclass(frozen=True)
@@ -355,9 +414,15 @@ class BaseConfig:
 
     ``hidden_dims`` carries depth and width together (see
     :func:`pyramid_dims`). ``val_fraction`` is the *tail* of the training
-    block held out for early stopping — never out-of-sample data. The base
-    seed is the run seed plus ``seed_offset``, so a base can be re-seeded
-    independently of the experts.
+    block held out for early stopping — never out-of-sample data. Its
+    default is **0** (brief 09 B.3, resolving audit B-2): in the main study
+    the base trains on its full training block for its fixed step budget,
+    with early stopping off, so the most recent and most heavily weighted
+    data is never withheld; in the pilot, validation is the separate
+    validation year. A positive ``val_fraction`` (with
+    ``early_stopping_patience``) remains for the count-based development
+    folds. The base seed is the run seed plus ``seed_offset``, so a base can
+    be re-seeded independently of the experts.
     """
 
     enabled: bool = False  # residual mode off: existing behaviour preserved
@@ -369,7 +434,9 @@ class BaseConfig:
     steps: int = 1000
     batch_size: int = 128
     early_stopping_patience: int | None = None  # None = train the full budget
-    val_fraction: float = 0.2  # tail of the TRAINING block only
+    # tail of the TRAINING block held out for early stopping; 0 = none (the
+    # main study and the pilot, brief 09 B.3)
+    val_fraction: float = 0.0
     seed_offset: int = 0
 
 
@@ -637,15 +704,21 @@ class NECConfig:
             )
         if b.weight_decay < 0:
             raise bad(f"base weight_decay must be >= 0, got {b.weight_decay}")
-        if not 0.0 < b.val_fraction < 1.0:
+        if not 0.0 <= b.val_fraction < 1.0:
             raise bad(
-                f"base val_fraction must be in (0, 1) — it is a tail of the "
-                f"TRAINING block — got {b.val_fraction}"
+                f"base val_fraction must be in [0, 1) — it is a tail of the "
+                f"TRAINING block, 0 for none — got {b.val_fraction}"
             )
         if b.early_stopping_patience is not None and b.early_stopping_patience < 1:
             raise bad(
                 f"base early_stopping_patience must be >= 1 or None, got "
                 f"{b.early_stopping_patience}"
+            )
+        if b.early_stopping_patience is not None and b.val_fraction == 0.0:
+            raise bad(
+                "base early_stopping_patience needs a validation tail "
+                "(val_fraction > 0); with val_fraction = 0 the base trains its "
+                "full step budget"
             )
         if x.correction_mode and not b.enabled:
             raise bad(

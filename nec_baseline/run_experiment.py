@@ -59,6 +59,7 @@ from nec_moe import (  # noqa: E402
     EncoderConfig,
     ExpertConfig,
     FeatureSpec,
+    FoldConfig,
     MarkovGateConfig,
     MLPBaseline,
     NECConfig,
@@ -76,11 +77,13 @@ from nec_moe import (  # noqa: E402
     TrainConfig,
     Trainer,
     TrialRegistry,
+    WalkForwardFold,
     base_and_correction,
     base_single_gaussian_nll,
     baseline_arm,
     build_context,
     build_crsp_panel,
+    calendar_year_folds,
     corrected_claims,
     data_config_from_panel,
     data_fingerprint,
@@ -167,6 +170,9 @@ class Experiment:
     synth_entities: int = 8
     synth_regime_process: str = "iid"      # "iid" | "markov" (sticky regimes)
     synth_vol_levels: tuple[float, float] = (0.5, 2.5)  # regime separability
+    # business-day date labels from this date (None: no calendar), so the
+    # calendar-year folds can run on synthetic data
+    synth_calendar_start: str | None = None
 
     # ---------------- model ----------------
     prior: str = "soft"             # soft|uniform|hard|topk|gumbel|hmm
@@ -214,7 +220,9 @@ class Experiment:
     base_steps: int = 1000
     base_batch_size: int = 128
     base_early_stopping_patience: int | None = None
-    base_val_fraction: float = 0.2    # tail of the TRAINING block only
+    # tail of the TRAINING block held out for early stopping. 0 (no tail) is
+    # required by the calendar-year main and pilot folds (brief 09 B.3)
+    base_val_fraction: float = 0.0
     base_seed_offset: int = 0
     # alpha of the correction-magnitude penalty. Ye & Borde do not report
     # theirs: select on the training block, log every candidate as a trial,
@@ -269,8 +277,17 @@ class Experiment:
                                     #   recorded in run.json)
 
     # ---------------- evaluation (mode="evaluate") ----------------
-    n_folds: int = 3
-    test_dates_per_fold: int = 40
+    # folds (Q16, brief 09 B): "calendar_year" = one fold per test year
+    # first_test_year..last_test_year, each trained on everything before it
+    # (expanding, purged; 2010-2024 = 15 folds) | "count" = the last
+    # n_folds * test_dates_per_fold dates as test blocks (development)
+    fold_scheme: str = "calendar_year"
+    first_test_year: int = 2010
+    last_test_year: int = 2024
+    # the pilot's validation years (scripts/run_pilot.py); never >= first_test_year
+    pilot_validation_years: tuple[int, ...] = (2007, 2008, 2009)
+    n_folds: int = 3                # count scheme only
+    test_dates_per_fold: int = 40   # count scheme only
     include_ridge: bool = True      # baseline rows in the comparison table
     include_mlp: bool = True
     backtest_quantiles: int | None = 5   # None disables the long-short backtest
@@ -317,6 +334,7 @@ def _build_panel(exp: Experiment) -> tuple[Panel, int]:
             beta_scale=2.0,
             noise_std=0.4,
             seed=0,
+            calendar_start=exp.synth_calendar_start,
         )
         panel: Panel = SyntheticRegimePanel(spec).generate(exp.synth_dates, exp.synth_entities)
     elif exp.data == "panel_file":
@@ -669,15 +687,37 @@ def _quick(exp: Experiment, panel: Panel, purge: int, run: Run) -> dict:
     return results
 
 
+def fold_config(exp: Experiment) -> FoldConfig:
+    return FoldConfig(
+        fold_scheme=exp.fold_scheme,  # type: ignore[arg-type]
+        first_test_year=exp.first_test_year,
+        last_test_year=exp.last_test_year,
+        pilot_validation_years=tuple(exp.pilot_validation_years),
+    ).validate()
+
+
+def main_folds(exp: Experiment, panel: Panel, purge: int) -> list[WalkForwardFold]:
+    """Evaluate mode's folds: the calendar-year main folds (brief 09 B.1), or
+    the count-based development split."""
+    fc = fold_config(exp)
+    if fc.fold_scheme == "calendar_year":
+        return calendar_year_folds(
+            panel, first_test_year=fc.first_test_year, last_test_year=fc.last_test_year,
+            purge_dates=purge,
+        )
+    return walk_forward_folds(
+        panel.date, n_folds=exp.n_folds, test_dates_per_fold=exp.test_dates_per_fold,
+        purge_dates=purge,
+    )
+
+
 def _evaluate(exp: Experiment, panel: Panel, purge: int, run: Run) -> dict:
     # One cache for the whole sweep, seeded with the sigma probe: the base of
     # the earliest training window is fitted once here and reused by fold 0
     # of every arm rather than refitted.
     cache = BaseCache()
-    first = walk_forward_folds(
-        panel.date, n_folds=exp.n_folds,
-        test_dates_per_fold=exp.test_dates_per_fold, purge_dates=purge,
-    )[0]
+    folds = main_folds(exp, panel, purge)
+    first = folds[0]
     first_train = panel.subset_dates(first.train_dates)
     window = (int(first.train_dates.min()), int(first.train_dates.max()))
     sigma = _auto_sigma(exp, panel, first_train, cache, window)
@@ -698,8 +738,7 @@ def _evaluate(exp: Experiment, panel: Panel, purge: int, run: Run) -> dict:
     out = run.figures_dir
     resume_dir = run.checkpoints_dir  # always: a Ctrl+C leaves resumable state
     report = run_sweep(panel, arms, seeds=exp.seeds, registry=registry, tag=exp.tag,
-                       steps=exp.steps, n_folds=exp.n_folds,
-                       test_dates_per_fold=exp.test_dates_per_fold, purge_dates=purge,
+                       steps=exp.steps, folds=folds, purge_dates=purge,
                        backtest_quantiles=exp.backtest_quantiles,
                        cost_rate=exp.cost_rate, resume_dir=resume_dir,
                        base_cache=cache, hac_lags=exp.ic_hac_lags,

@@ -36,6 +36,7 @@ def _exp(tmp_path: Path, **kw) -> rx.Experiment:
         expert_dropout=0.0, steps=10, sigma_freeze_steps=0, seeds=(0,), n_folds=2,
         test_dates_per_fold=10, include_ridge=True, include_mlp=False,
         backtest_quantiles=3, calibration=False,
+        fold_scheme="count",  # a synthetic panel without a calendar
     )
     return rx.Experiment(**(base | kw))
 

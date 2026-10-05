@@ -261,6 +261,11 @@ class SyntheticSpec:
     betas are sign-flipped (momentum in calm, reversal in stress). Regime is
     inferable from the window: channel 0 of ``x_seq`` has per-regime volatility
     ``vol_levels[z]``.
+
+    ``calendar_start`` (default ``None``: no calendar) gives the panel
+    ``date_labels`` on consecutive business days from that date, so
+    calendar-year folds (brief 09 B) can be built and tested on synthetic
+    data. Only the labels change; the generated numbers do not.
     """
 
     n_regimes: int = 2
@@ -274,6 +279,7 @@ class SyntheticSpec:
     beta_scale: float = 2.0
     noise_std: float = 0.5
     seed: int = 0
+    calendar_start: str | None = None  # business-day date labels from here
 
     def validate(self) -> SyntheticSpec:
         if self.n_regimes < 2:
@@ -376,6 +382,13 @@ class SyntheticRegimePanel:
             snapshot_features=tuple(f"snap_{i}" for i in range(s.d_snap)),
             target="y_synth",
         )
+        labels = None
+        if s.calendar_start is not None:
+            import pandas as pd
+
+            labels = tuple(
+                str(d.date()) for d in pd.bdate_range(s.calendar_start, periods=n_dates)
+            )
         return SyntheticPanel(
             x_seq=x_seq.float(),
             x_snap=x_snap.float(),
@@ -389,4 +402,5 @@ class SyntheticRegimePanel:
             transition=trans,
             spec=s,
             data_source="synthetic",
+            date_labels=labels,
         )

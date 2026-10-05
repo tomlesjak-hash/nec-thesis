@@ -63,6 +63,11 @@ from .utils import atomic_torch_save
 __all__ = [
     "WalkForwardFold",
     "walk_forward_folds",
+    "calendar_year_folds",
+    "pilot_folds",
+    "pilot_slice",
+    "assert_pre_test_panel",
+    "PreTestViolation",
     "rank_ic_by_date",
     "IcSummary",
     "ic_summary",
@@ -93,12 +98,21 @@ __all__ = [
 
 @dataclass(frozen=True)
 class WalkForwardFold:
-    """One expanding-window fold: purged train dates + a contiguous test block."""
+    """One expanding-window fold: purged train dates + a contiguous test block.
+
+    ``kind`` says which protocol built it: ``"count"``
+    (:func:`walk_forward_folds`), ``"main"`` (a calendar test year,
+    :func:`calendar_year_folds`) or ``"pilot"`` (a validation year,
+    :func:`pilot_folds`); ``test_year`` is the calendar year of a main or
+    pilot fold's test (validation) block, ``None`` for count folds.
+    """
 
     fold: int
     train_dates: Tensor  # (n_train,) int64, strictly < min(test) - purge
     test_dates: Tensor  # (n_test,) int64, contiguous block
     purged_dates: Tensor  # (purge,) int64 dropped between train and test
+    test_year: int | None = None
+    kind: str = "count"
 
 
 def walk_forward_folds(
@@ -140,6 +154,177 @@ def walk_forward_folds(
             )
         )
     return folds
+
+
+class PreTestViolation(ValueError):
+    """The pilot was handed a date at or after the first test year (brief 09 B.2)."""
+
+
+def _dates_and_years(panel: Panel) -> tuple[Tensor, Tensor]:
+    """The panel's unique date codes, ascending, and each one's calendar year."""
+    if panel.date_labels is None:
+        raise ValueError(
+            "calendar-year folds need the panel's date_labels (calendar dates); "
+            "this panel has none. Synthetic panels get them from "
+            "SyntheticSpec.calendar_start, or use fold_scheme='count'"
+        )
+    dates = torch.unique(panel.date, sorted=True)
+    labels = panel.date_labels
+    years = torch.tensor([int(str(labels[int(d)])[:4]) for d in dates], dtype=torch.long)
+    return dates, years
+
+
+def assert_pre_test_panel(panel: Panel, first_test_year: int) -> None:
+    """Raise :class:`PreTestViolation` if ``panel`` holds any date at or after
+    ``first_test_year``. The pilot calls it on the panel slice it receives,
+    not only on the fold dates (brief 09 B.2), so a test-period date cannot
+    reach a pilot fit or a pilot score by any route."""
+    dates, years = _dates_and_years(panel)
+    late = years >= first_test_year
+    if bool(late.any()):
+        first = panel.date_labels[int(dates[late][0])]  # type: ignore[index]
+        raise PreTestViolation(
+            f"the pilot refuses dates at or after {first_test_year}: this panel "
+            f"holds {int(late.sum())} such date(s), from {first}. Slice it with "
+            "pilot_slice() first"
+        )
+
+
+def pilot_slice(panel: Panel, first_test_year: int, purge_dates: int) -> Panel:
+    """The part of ``panel`` the pilot may use: every date before
+    ``first_test_year`` **minus the last** ``purge_dates`` **of them**.
+
+    The second cut is the conservative reading of brief 09 B.2: a row dated
+    ``t`` carries a target over ``(t, t + h]``, so the last ``h`` dates before
+    the test period have labels made of test-period returns (the purging
+    rule of López de Prado 2018, ch. 7). Selecting settings on them would let
+    the pilot see the test period through the labels. ``purge_dates`` is the
+    target's horizon, as for the folds.
+    """
+    if purge_dates < 0:
+        raise ValueError(f"purge_dates must be >= 0, got {purge_dates}")
+    dates, years = _dates_and_years(panel)
+    keep = dates[years < first_test_year]
+    if purge_dates:
+        keep = keep[:-purge_dates]
+    if keep.numel() == 0:
+        raise ValueError(f"no date before {first_test_year} is left for the pilot")
+    out = panel.subset_dates(keep)
+    assert_pre_test_panel(out, first_test_year)
+    return out
+
+
+def calendar_year_folds(
+    panel: Panel,
+    *,
+    first_test_year: int,
+    last_test_year: int,
+    purge_dates: int,
+) -> list[WalkForwardFold]:
+    """The main study's folds (brief 09 B.1): one per test year ``Y``.
+
+    Training dates: every date from the sample start up to the last trading
+    day of ``Y - 1``, minus the last ``purge_dates`` (the target horizon:
+    their labels reach into ``Y``). Test dates: every trading day of ``Y``.
+    An expanding window refitted once a year, as in Gu, Kelly & Xiu (2020).
+    """
+    if purge_dates < 0:
+        raise ValueError(f"purge_dates must be >= 0, got {purge_dates}")
+    if last_test_year < first_test_year:
+        raise ValueError(f"no test years: {first_test_year}..{last_test_year}")
+    dates, years = _dates_and_years(panel)
+    folds = []
+    for i, year in enumerate(range(first_test_year, last_test_year + 1)):
+        test = dates[years == year]
+        before = dates[years < year]
+        if test.numel() == 0:
+            raise ValueError(f"test year {year} has no trading day in this panel")
+        n_train = before.numel() - purge_dates
+        if n_train < 1:
+            raise ValueError(
+                f"test year {year}: {before.numel()} earlier date(s) leave no training "
+                f"date after the {purge_dates}-date purge"
+            )
+        folds.append(WalkForwardFold(
+            fold=i, train_dates=before[:n_train], test_dates=test,
+            purged_dates=before[n_train:], test_year=year, kind="main",
+        ))
+    return folds
+
+
+def pilot_folds(
+    panel: Panel,
+    *,
+    validation_years: tuple[int, ...],
+    first_test_year: int,
+    purge_dates: int,
+) -> list[WalkForwardFold]:
+    """The pilot's folds (brief 09 B.1): one per validation year ``V``, with
+    the main folds' rule (train from the sample start to the end of ``V - 1``
+    minus the purge; validate on ``V``).
+
+    Refuses (:class:`PreTestViolation`) a panel holding any date at or after
+    ``first_test_year`` (B.2): pass :func:`pilot_slice` output.
+    """
+    if any(v >= first_test_year for v in validation_years):
+        raise PreTestViolation(
+            f"pilot validation years {validation_years} reach first_test_year="
+            f"{first_test_year}"
+        )
+    assert_pre_test_panel(panel, first_test_year)
+    dates, years = _dates_and_years(panel)
+    folds = []
+    for i, year in enumerate(validation_years):
+        val = dates[years == year]
+        before = dates[years < year]
+        if val.numel() == 0:
+            raise ValueError(f"validation year {year} has no trading day in this panel")
+        n_train = before.numel() - purge_dates
+        if n_train < 1:
+            raise ValueError(f"validation year {year}: no training date after the purge")
+        folds.append(WalkForwardFold(
+            fold=i, train_dates=before[:n_train], test_dates=val,
+            purged_dates=before[n_train:], test_year=year, kind="pilot",
+        ))
+    return folds
+
+
+def _resolve_folds(
+    panel: Panel,
+    folds: list[WalkForwardFold] | None,
+    n_folds: int | None,
+    test_dates_per_fold: int | None,
+    purge_dates: int,
+    min_train_dates: int,
+) -> list[WalkForwardFold]:
+    """Explicit folds (calendar-year, pilot), or the count-based split."""
+    if folds is not None:
+        if not folds:
+            raise ValueError("an empty fold list")
+        return list(folds)
+    if n_folds is None or test_dates_per_fold is None:
+        raise ValueError("pass folds=, or n_folds and test_dates_per_fold")
+    return walk_forward_folds(
+        panel.date, n_folds=n_folds, test_dates_per_fold=test_dates_per_fold,
+        purge_dates=purge_dates, min_train_dates=min_train_dates,
+    )
+
+
+def _check_protocol_base(trainer_cfg: Any, folds: list[WalkForwardFold]) -> None:
+    """Main and pilot folds train the base without a held-out tail (brief 09
+    B.3, audit B-2): ``val_fraction = 0`` and early stopping off. Refused
+    rather than overridden, so a config never silently means something else."""
+    kinds = {f.kind for f in folds}
+    base = trainer_cfg.base
+    if base.enabled and kinds & {"main", "pilot"} and (
+        base.val_fraction != 0.0 or base.early_stopping_patience is not None
+    ):
+        raise ValueError(
+            f"{sorted(kinds & {'main', 'pilot'})} folds train the base on the full "
+            "training block for its fixed step budget: set base.val_fraction=0 and "
+            f"early_stopping_patience=None (got {base.val_fraction}, "
+            f"{base.early_stopping_patience})"
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -543,6 +728,8 @@ class FoldResult:
     ic: IcSummary  # per-date rank-IC summary on the test block
     n_train: int
     n_test: int
+    # the calendar test year of a main (or pilot) fold; None for count folds
+    test_year: int | None = None
     portfolio: PortfolioSummary | None = None  # when backtest_quantiles is set
     # Decision D: canonical (sigma-sorted) order per fitted window; empty for
     # single-model baselines, which have no experts
@@ -719,6 +906,7 @@ class _FoldAccumulator:
                 ic=ic_summary(ics, self.hac_lags, self.hac_kernel),
                 n_train=len(train),
                 n_test=len(test),
+                test_year=fold.test_year,
                 portfolio=portfolio,
                 expert_order=expert_order,
                 live_param_count=live_param_count,
@@ -1176,7 +1364,8 @@ def fold_metrics_frame(result: WalkForwardResult) -> pd.DataFrame:
     rows = []
     for f in result.folds:
         row: dict[str, Any] = {
-            "fold": f.fold, "n_train": f.n_train, "n_test": f.n_test, "nll": f.nll,
+            "fold": f.fold, "test_year": f.test_year, "n_train": f.n_train,
+            "n_test": f.n_test, "nll": f.nll,
             "mean_ic": f.ic.mean_ic, "icir": f.ic.icir, "t_stat": f.ic.t_stat,
             "hac_lags": f.ic.hac_lags, "live_param_count": f.live_param_count,
             "gate_excluded_dates": f.gate_excluded_dates,
@@ -1212,10 +1401,11 @@ def walk_forward_evaluate(
     panel: Panel,
     make_trainer: Callable[[], Trainer],
     *,
-    n_folds: int,
-    test_dates_per_fold: int,
+    n_folds: int | None = None,
+    test_dates_per_fold: int | None = None,
     purge_dates: int,
     steps: int,
+    folds: list[WalkForwardFold] | None = None,
     warmstart_key: Callable[[Panel], Tensor] | None = None,
     min_train_dates: int = 1,
     backtest_quantiles: int | None = None,
@@ -1279,13 +1469,17 @@ def walk_forward_evaluate(
     the current fold. ``predictions_dir`` receives each fold's per-security
     predictions (``fold_<i>_predictions.pt``); the run store points it at
     ``Data/derived/runs/<run_id>/``, never at ``results/``.
+
+    **Folds** (brief 09 B): ``folds`` (e.g. :func:`calendar_year_folds`, the
+    main study's 15 annual folds) replaces the count-based split of
+    ``n_folds`` / ``test_dates_per_fold``. Main and pilot folds train the
+    base on the full training block, with no validation tail and no early
+    stopping, and refuse a base config that asks for either
+    (:func:`_check_protocol_base`); the experts always train their fixed
+    ``steps``.
     """
-    folds = walk_forward_folds(
-        panel.date,
-        n_folds=n_folds,
-        test_dates_per_fold=test_dates_per_fold,
-        purge_dates=purge_dates,
-        min_train_dates=min_train_dates,
+    folds = _resolve_folds(
+        panel, folds, n_folds, test_dates_per_fold, purge_dates, min_train_dates
     )
     resume = Path(resume_dir) if resume_dir is not None else None
     if resume is not None:
@@ -1321,6 +1515,7 @@ def walk_forward_evaluate(
             expert_train, excluded = _gate_training_block(trainer, train)
         else:
             trainer = make_trainer()
+            _check_protocol_base(trainer.cfg, folds)
             # Order matters (brief 02 §4, brief 03 §1): the gate is fitted on
             # this fold's training block and frozen, THEN the base is fitted on
             # the same block and frozen, and only then do the experts train
@@ -1423,9 +1618,10 @@ def walk_forward_evaluate_baseline(
     panel: Panel,
     make_model: Callable[[], BaselineModel],
     *,
-    n_folds: int,
-    test_dates_per_fold: int,
+    n_folds: int | None = None,
+    test_dates_per_fold: int | None = None,
     purge_dates: int,
+    folds: list[WalkForwardFold] | None = None,
     min_train_dates: int = 1,
     backtest_quantiles: int | None = None,
     cost_rate: float = 0.0,
@@ -1443,14 +1639,10 @@ def walk_forward_evaluate_baseline(
     via the shared accumulator — byte-identical scoring: a baseline row and an
     NEC row in the thesis comparison table are graded by the same code.
     ``make_model`` returns a fresh :class:`~nec_moe.baselines.BaselineModel`
-    per window.
+    per window. ``folds`` as in :func:`walk_forward_evaluate`.
     """
-    folds = walk_forward_folds(
-        panel.date,
-        n_folds=n_folds,
-        test_dates_per_fold=test_dates_per_fold,
-        purge_dates=purge_dates,
-        min_train_dates=min_train_dates,
+    folds = _resolve_folds(
+        panel, folds, n_folds, test_dates_per_fold, purge_dates, min_train_dates
     )
     acc = _FoldAccumulator(
         backtest_quantiles, cost_rate, resolve_hac_lags(panel, hac_lags), hac_kernel,

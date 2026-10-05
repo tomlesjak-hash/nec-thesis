@@ -26,6 +26,7 @@ def _tiny(**overrides) -> Experiment:
         lr=3e-3,
         sigma_freeze_steps=20,
         seeds=(0,),
+        fold_scheme="count",  # a synthetic panel without a calendar
     )
     base.update(overrides)
     return Experiment(**base)

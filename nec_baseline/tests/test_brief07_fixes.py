@@ -363,6 +363,7 @@ def _current_design(tmp_path: Path, mode: str, **kw) -> rx.Experiment:
         base_steps=40, base_batch_size=64, expert_hidden_dims=(8, 4), encoder_hidden=8,
         seeds=(0, 1), n_folds=2, test_dates_per_fold=15, include_ridge=False,
         include_mlp=False, backtest_quantiles=3, figures=False, calibration=False,
+        fold_scheme="count",  # a synthetic panel without a calendar
         **kw,
     )
 

@@ -46,6 +46,7 @@ from .baselines import BaselineModel
 from .config import NECConfig
 from .data import Panel
 from .evaluation import (
+    WalkForwardFold,
     WalkForwardResult,
     fold_metrics_frame,
     walk_forward_evaluate,
@@ -285,9 +286,10 @@ def run_sweep(
     registry: TrialRegistry,
     tag: str,
     steps: int,
-    n_folds: int,
-    test_dates_per_fold: int,
+    n_folds: int | None = None,
+    test_dates_per_fold: int | None = None,
     purge_dates: int,
+    folds: list[WalkForwardFold] | None = None,
     min_train_dates: int = 1,
     backtest_quantiles: int | None = None,
     cost_rate: float = 0.0,
@@ -303,7 +305,8 @@ def run_sweep(
 
     Split parameters are shared across all arms by construction — the folds are
     byte-identical, which is half of what makes the table a fair comparison
-    (the shared fold accumulator is the other half).
+    (the shared fold accumulator is the other half). ``folds`` (e.g. the main
+    study's calendar-year folds, brief 09 B) replaces the count-based split.
 
     **Resume** (``resume_dir``): a completed (arm, seed) run already has a
     registry row under this tag — it is skipped and its logged metrics reused
@@ -374,6 +377,7 @@ def run_sweep(
                     n_folds=n_folds,
                     test_dates_per_fold=test_dates_per_fold,
                     purge_dates=purge_dates,
+                    folds=folds,
                     min_train_dates=min_train_dates,
                     backtest_quantiles=backtest_quantiles,
                     cost_rate=cost_rate,
@@ -399,6 +403,7 @@ def run_sweep(
                     n_folds=n_folds,
                     test_dates_per_fold=test_dates_per_fold,
                     purge_dates=purge_dates,
+                    folds=folds,
                     min_train_dates=min_train_dates,
                     backtest_quantiles=backtest_quantiles,
                     cost_rate=cost_rate,

@@ -1488,6 +1488,7 @@ def walk_forward_evaluate(
     portfolio_scheme: str = "nonoverlapping",
     run: Run | None = None,
     predictions_dir: str | Path | None = None,
+    provenance_extra: dict[str, Any] | None = None,
 ) -> WalkForwardResult:
     """Fit-once-per-window walk-forward evaluation (Decision D protocol).
 
@@ -1570,7 +1571,7 @@ def walk_forward_evaluate(
         backtest_quantiles, cost_rate, resolve_hac_lags(panel, hac_lags), hac_kernel,
         portfolio_scheme, panel.horizon,
     )
-    provenance = trial_provenance(panel, None, portfolio_scheme)
+    provenance = trial_provenance(panel, None, portfolio_scheme) | (provenance_extra or {})
     for fold in folds:
         done_file = resume / f"fold_{fold.fold}.pt" if resume is not None else None
         if done_file is not None and done_file.exists():

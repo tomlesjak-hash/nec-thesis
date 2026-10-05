@@ -307,6 +307,7 @@ def run_sweep(
     hac_kernel: str = "uniform",
     portfolio_scheme: str = "nonoverlapping",
     run: Run | None = None,
+    provenance_extra: dict | None = None,
 ) -> SweepReport:
     """Run every arm over every seed through the shared harness; log; summarize.
 
@@ -337,6 +338,9 @@ def run_sweep(
     summaries go to ``metrics/<arm>_seed<seed>_{folds.csv,pooled.json}``,
     and its per-security predictions to the run's ``Data/derived/runs/``
     folder.
+
+    ``provenance_extra`` is merged into every trial row's config (the run's
+    own provenance, e.g. the pilot-selection hash of brief 09 F.3).
     """
     if not arms or not seeds:
         raise ValueError("need at least one arm and one seed")
@@ -401,6 +405,7 @@ def run_sweep(
                     portfolio_scheme=portfolio_scheme,
                     run=run,
                     predictions_dir=per_security,
+                    provenance_extra=provenance_extra,
                 )
             else:
                 assert build_baseline is not None
@@ -426,7 +431,7 @@ def run_sweep(
             registry.log(
                 tag, metrics,
                 config={**trial_provenance(panel, None, portfolio_scheme),
-                        **(arm.config_record or {})},
+                        **(arm.config_record or {}), **(provenance_extra or {})},
                 seed=seed,
             )
             per_arm[arm.name].append(metrics)

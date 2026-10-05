@@ -1025,6 +1025,22 @@ class MarkovSwitchingRegimePrior(PrecomputedRegimePrior):
                                 only_after=self.fit_max_date)
         self.extend_causal_table(dates[self.cfg.order :], self._gate_log_prior(filtered))
 
+    def predictive_log_density(self, panel: Panel) -> tuple[Tensor, np.ndarray]:
+        """``(dates, log p(m_t | F_{t-1}))`` over ``panel``'s dates under the
+        **frozen** parameters: the one-step predictive log density of the
+        market series, the gate's own forecasting score (Nystrup, Madsen &
+        Lindström 2017), by which the pilot chooses the gate's memory (brief
+        09 F.2). The filter starts at ``panel``'s first date, so pass the
+        training block and the dates to score. Nothing is re-estimated."""
+        if self.fit_result is None:
+            raise ValueError("predictive_log_density before fit: nothing is frozen yet")
+        dates, series = date_level_series(panel, self.cfg)
+        if self.fit_result.backend == "native":
+            _, log_c = bw.filter_series(series, self.native_params())
+            return dates, log_c
+        applied = self._build_model(series).filter(self.fit_result.params)
+        return dates[self.cfg.order :], np.asarray(applied.llf_obs, dtype=float)
+
     def _apply_native(self, dates: Tensor, series: np.ndarray) -> None:
         """The frozen native filter over the extended series (no estimation).
 

@@ -223,6 +223,13 @@ def test_run_experiment_evaluates_on_calendar_year_folds(tmp_path):
         backtest_quantiles=None, figures=False, calibration=False,
     )
     assert exp.fold_scheme == "calendar_year" and exp.base_val_fraction == 0.0
+    # the test period may only be scored under a pilot selection (brief 09
+    # F.3): a minimal synthetic one whose chosen settings are this run's
+    from nec_moe import write_selection
+
+    path, _ = write_selection({"chosen": {"lr": exp.lr, "steps": exp.steps}},
+                              tmp_path / "pilot")
+    exp = dataclasses.replace(exp, pilot_selection_file=str(path))
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeadParameterWarning)
         result = rx.main(exp)

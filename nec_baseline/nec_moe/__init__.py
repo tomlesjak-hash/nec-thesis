@@ -161,6 +161,14 @@ from .multiple_testing import (
     sharpe_ratio,
 )
 from .networks import ACTIVATION_REGISTRY, MLPBlock, build_activation
+from .pilot import (
+    PilotGrid,
+    load_pilot_grid,
+    load_selection,
+    regime_balanced_loss,
+    run_pilot,
+    write_selection,
+)
 from .plots import (
     plot_gate_utilization,
     plot_ic_series,
@@ -287,6 +295,12 @@ __all__ = [
     "WalkForwardFold",
     "walk_forward_folds",
     "fold_decay_weights",
+    "PilotGrid",
+    "run_pilot",
+    "load_pilot_grid",
+    "write_selection",
+    "load_selection",
+    "regime_balanced_loss",
     "EXPERT_DECAYS",
     "calendar_decay_weights",
     "regime_clock_weights",

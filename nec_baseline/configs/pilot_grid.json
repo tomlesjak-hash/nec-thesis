@@ -1,0 +1,29 @@
+{
+  "_about": "The pilot's preset grids (brief 09 F.1; Q16). Defaults, not decisions: edit before running scripts/run_pilot.py. Half-lives: null = infinity (equal weights, the reference arm). The experts' and the gate's half-lives are given as calendar years of the stress regime and turned into regime-days as stress_share * years * trading_days_per_year (theory notes section 5): with stress_share 0.3, 10 and 5 years are 756 and 378 regime-days.",
+  "grid": {
+    "base_half_life_days": [null, 2520.0, 1260.0],
+    "expert_half_life_years": [null, 10.0, 5.0],
+    "gate_half_life_years": [null, 10.0, 5.0],
+    "stress_share": 0.3,
+    "trading_days_per_year": 252,
+    "lr": [0.0003, 0.001],
+    "weight_decay": [1e-05, 0.0001],
+    "batch_size": [1024, 4096],
+    "steps": [3000, 10000, 30000],
+    "base_steps": [1000],
+    "seeds": [0, 1, 2],
+    "search": "factorial",
+    "gate_worst_days": 20,
+    "gate_tie_tol": 1e-06,
+    "step_drift_factor": 2.0
+  },
+  "_experiment_about": "Experiment fields fixed for every pilot run (anything not listed keeps run_experiment.Experiment's default). Only the decided design is set here: the frozen Hamilton gate (Q19), the residual base with corrections (Q7), the 2000-2024 panel. K, widths and depth (Q18, Q8/Q17) stay at their current defaults.",
+  "experiment": {
+    "data": "panel_file",
+    "prior": "markov",
+    "freeze_gate": true,
+    "base_enabled": true,
+    "correction_mode": true,
+    "fold_scheme": "calendar_year"
+  }
+}

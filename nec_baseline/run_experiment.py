@@ -120,6 +120,11 @@ from nec_moe.evaluation import (  # noqa: E402
     _restore_gate,
     _save_predictions,
 )
+from nec_moe.pilot import (  # noqa: E402
+    encode_settings,
+    load_selection,
+    selection_deviations,
+)
 from nec_moe.utils import atomic_torch_save  # noqa: E402
 
 # =========================================================================== #
@@ -195,6 +200,7 @@ class Experiment:
     objective: str = "mixture_nll"  # OBJECTIVE_REGISTRY key; only one registered (Q20 open)
     steps: int = 600                # optimizer steps (per fold in evaluate mode)
     lr: float = 1e-3
+    weight_decay: float = 1e-4      # the experts' AdamW weight decay
     batch_size: int = 256
     sigma_init: float | None = None # None = auto (std of the training target)
     sigma_freeze_steps: int = 100
@@ -324,6 +330,13 @@ class Experiment:
     # (rebalance every h dates) | "staggered" (Jegadeesh-Titman cohorts).
     # The default is NOT a decision; every trial records it.
     portfolio_scheme: str = "nonoverlapping"
+    # the pre-registration lock (Q15, brief 09 F.3): the pilot's selection
+    # file (scripts/run_pilot.py writes results/pilot/pilot_selection.json).
+    # A run that scores any date from first_test_year on refuses to start
+    # without it; its hash goes into every trial row; settings that differ
+    # from its chosen ones are refused unless force_deviation (recorded).
+    pilot_selection_file: str | None = None
+    force_deviation: bool = False
 
     # ---------------- extras ----------------
     figures: bool = True
@@ -489,7 +502,8 @@ def _nec_config(exp: Experiment, panel: Panel, sigma_init: float) -> NECConfig:
                         seed_offset=exp.base_seed_offset,
                         decay_half_life_days=exp.base_decay_half_life_days),
         train=TrainConfig(objective=exp.objective,
-                          lr=exp.lr, batch_size=exp.batch_size, steps=exp.steps,
+                          lr=exp.lr, weight_decay=exp.weight_decay,
+                          batch_size=exp.batch_size, steps=exp.steps,
                           sigma_init=sigma_init,
                           sigma_freeze_steps=exp.sigma_freeze_steps,
                           sequence_ordered=(exp.prior == "hmm"),
@@ -724,7 +738,8 @@ def _quick(exp: Experiment, panel: Panel, purge: int, run: Run) -> dict:
     _save_predictions(run.per_security_dir, 0, test, pred, b_pred_all)
     registry.log(exp.tag, trial, config={"mode": "quick",
                  **dataclasses.asdict(exp),
-                 **trial_provenance(panel, trainer.cfg, exp.portfolio_scheme)},
+                 **trial_provenance(panel, trainer.cfg, exp.portfolio_scheme),
+                 **run_provenance(exp, run)},
                  seed=exp.seeds[0])
     return results
 
@@ -785,7 +800,8 @@ def _evaluate(exp: Experiment, panel: Panel, purge: int, run: Run) -> dict:
                        cost_rate=exp.cost_rate, resume_dir=resume_dir,
                        base_cache=cache, hac_lags=exp.ic_hac_lags,
                        hac_kernel=exp.ic_hac_kernel,
-                       portfolio_scheme=exp.portfolio_scheme, run=run)
+                       portfolio_scheme=exp.portfolio_scheme, run=run,
+                       provenance_extra=run_provenance(exp, run))
     frame = report.to_frame().round(4)
     print("\n[evaluate] mean ± seed-std per arm:\n", frame.to_string())
     run.write_metrics("report", frame)
@@ -797,6 +813,70 @@ def _evaluate(exp: Experiment, panel: Panel, purge: int, run: Run) -> dict:
         if exp.backtest_quantiles:
             plot_sweep_report(report, metric="net_ir", path=out / "sweep_net_ir.png")
     return {"report": report}
+
+
+class PreRegistrationRequired(ValueError):
+    """A run would score the test period without the pilot's selection file
+    (brief 09 F.3, Q15)."""
+
+
+def scored_dates(exp: Experiment, panel: Panel, purge: int) -> torch.Tensor:
+    """The date codes this run scores predictions on: quick mode's test
+    split, or every fold's test block."""
+    if exp.mode == "quick":
+        return _quick_split(exp, panel, purge)[2].test_dates
+    return torch.cat([f.test_dates for f in main_folds(exp, panel, purge)])
+
+
+def touches_test_period(exp: Experiment, panel: Panel, purge: int) -> bool:
+    """Does the run score any date from ``first_test_year`` on? A panel
+    without a calendar (the plain synthetic generator) has no test period."""
+    if panel.date_labels is None:
+        return False
+    labels = panel.date_labels
+    return any(int(str(labels[int(d)])[:4]) >= exp.first_test_year
+               for d in scored_dates(exp, panel, purge))
+
+
+def selection_lock(exp: Experiment, panel: Panel, purge: int) -> dict[str, Any]:
+    """The pre-registration lock (brief 09 F.3). Refuses a run that scores
+    the test period without ``pilot_selection_file``, and a run whose
+    settings differ from the selection's chosen ones unless
+    ``force_deviation``. Returns what the run records: the file, its
+    SHA-256 (recomputed from the file) and any forced deviations."""
+    needed = touches_test_period(exp, panel, purge)
+    if exp.pilot_selection_file is None:
+        if needed:
+            raise PreRegistrationRequired(
+                f"this run scores dates from {exp.first_test_year} on (the test period) "
+                "but no pilot_selection_file is set. Run scripts/run_pilot.py first, "
+                "then pass its results/pilot/pilot_selection.json: the settings are "
+                "chosen once on 2007-2009 and frozen (Q15)"
+            )
+        return {"pilot_selection_file": None, "pilot_selection_hash": None,
+                "pilot_deviations": {}}
+    selection, digest = load_selection(_repo_path(exp.pilot_selection_file))
+    deviations = selection_deviations(selection, dataclasses.asdict(exp))
+    if deviations and not exp.force_deviation:
+        detail = "; ".join(f"{k}: chosen {c!r}, given {g!r}" for k, (c, g) in deviations.items())
+        raise ValueError(
+            f"settings differ from the pilot selection ({detail}). Use the chosen "
+            "settings, or set force_deviation=True (recorded in run.json and every "
+            "trial row)"
+        )
+    if deviations:
+        print(f"[lock] WARNING - forced deviation from the pilot selection: {deviations}")
+    return {"pilot_selection_file": str(exp.pilot_selection_file),
+            "pilot_selection_hash": digest,
+            "pilot_deviations": encode_settings({k: list(v) for k, v in deviations.items()})}
+
+
+def run_provenance(exp: Experiment, run: Run) -> dict[str, Any]:
+    """The run-level provenance every trial row carries: the pilot-selection
+    hash (the pre-registration lock, F.3) and whether a deviation was forced."""
+    info = run.info()
+    return {"pilot_selection_hash": info.get("pilot_selection_hash"),
+            "force_deviation": bool(info.get("pilot_deviations"))}
 
 
 def _snapshot(exp: Experiment) -> dict[str, Any]:
@@ -881,7 +961,9 @@ def main(exp: Experiment) -> dict:
         _repo_path(exp.per_security_dir) if exp.per_security_dir is not None else None,
     )
     panel, purge = _build_panel(exp)
+    lock = selection_lock(exp, panel, purge)  # before anything is created
     run = _open_run(exp, store, panel)
+    run.record(**lock)
     with run.logging(), graceful_interrupts():
         n_dates = len(torch.unique(panel.date))
         print(f"[run] {run.run_id} (campaign {run.campaign!r}) -> {run.dir}")

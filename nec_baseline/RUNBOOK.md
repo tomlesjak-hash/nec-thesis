@@ -175,7 +175,7 @@ prints every setting that differs, one per line (`steps: 600 -> 1000`). The two
 
 ## 8. Licensed data: what goes where
 
-CRSP is licensed: nothing derived from it may leave `Quant Model/Data/`.
+CRSP and Compustat are licensed: nothing derived from them may leave `Quant Model/Data/`.
 
 - **Per-stock outputs** (each stock's predictions) are written to
   `Data/derived/runs/<run_id>/`, never to `results/`. That folder is inside `Data/` and is
@@ -189,6 +189,40 @@ CRSP is licensed: nothing derived from it may leave `Quant Model/Data/`.
 on a real panel. Every such run is a look at the test data, which the pre-registration (Q15)
 has to count. The code records it and does not stop you. Until the pre-registration is
 written, keep real-panel runs to what you have decided to do.
+
+---
+
+## 8a. Building the real data (brief 08): extracts, panel, coverage
+
+The model now uses the market-neutral target (Q25), the 57 Q26 inputs (Q26) and the
+window-average gate weight (Q27). The Q26 inputs need a new CRSP extract (with open, high,
+low, close, bid and ask, and about five years of history before 2015) and the Compustat
+extract (link history, GICS sectors, quarterly fundamentals with report and filing dates).
+Run these four commands once, in this order, from `nec_baseline/`. Each one can be stopped
+with Ctrl+C and restarted with the same command; the two extracts continue where they
+stopped. Use `caffeinate -i` in front of each on the Mac.
+
+```bash
+python3.14 scripts/extract_crsp_v2.py           # 1. CRSP: streams the 42 GB StkDlySecurityData once
+python3.14 scripts/extract_compustat.py         # 2. Compustat: needs step 1's extract
+python3.14 scripts/build_pit_panel.py           # 3. the Q26 panel (needs steps 1 and 2)
+python3.14 scripts/feature_coverage_report.py   # 4. coverage, aggregate only, to results/
+```
+
+What each writes, all inside `Data/derived/` except step 4:
+
+| step | writes | notes |
+|---|---|---|
+| 1 | `crsp_extract_ciz202512_2015-01-01_2024-12-31_StkDlySecurityData_lb1887d/` | a **new** folder: the brief 06 extract (`crsp_extract_ciz202512_2015-01-01_2024-12-31/`) is not touched. `extract.json` records the stock file and the lookback; a panel build refuses an extract made with other ones. It also copies the `MetaItemInfo` rows of `DlyCap`, `DlyShrOut` and `DlyVol`, so their units can be checked by eye. |
+| 2 | `compustat_cfz202607_2015-01-01_2024-12-31/` | reads `Data/crspdata/cfz202607_ascii/` or `Data/cfz202607_ascii.zip`, never the `crspdata 3/` copies. Prints the link-ambiguity count, the period-end check, the keyset-8 ("PRE") firm-quarter count and the filing types. |
+| 3 | `pit_panel_crsp_2015-01-01_2024-12-31_q26_market_neutral.pt` (+ `.report.json`, coverage `.csv`) | the old `pit_panel_crsp_2015-01-01_2024-12-31.pt` is left alone. `run_experiment.py`'s `panel_file` default now points at the new file. |
+| 4 | `results/feature_coverage/<date>/coverage.json`, `present_share_by_year.csv`, `rates_by_year.csv` | per year: the share of rows with each characteristic before the 0-fill, the two flag rates, the share without a sector; the keyset-8 count. No return, no model result; it refuses to write anything that names a security. |
+
+Step 4 reads step 3's panel if it exists and otherwise builds it in memory, so step 3 can be
+skipped if you only want the report. Things to look at in the report before training on the
+panel: the period-end mapping counts (`not_in_fiscalmarketdata` should be about 0), the
+share of quarters with a filing date, the link ambiguities (should be 0), and the coverage
+of `taccruals_at` and `noa_at` (they need every balance-sheet component; see HANDBOOK II.4).
 
 ---
 
@@ -206,5 +240,9 @@ written, keep real-panel runs to what you have decided to do.
 | resume despite a change | add `--force` |
 | read a run's results | `python3.14 scripts/runs.py show <run_id>` |
 | compare two runs | `python3.14 scripts/runs.py diff <a> <b>` |
+| rebuild the CRSP extract (brief 08) | `python3.14 scripts/extract_crsp_v2.py` |
+| build the Compustat extract | `python3.14 scripts/extract_compustat.py` |
+| build the Q26 panel | `python3.14 scripts/build_pit_panel.py` |
+| feature coverage report | `python3.14 scripts/feature_coverage_report.py` |
 
 No command here deletes anything. Old runs stay until you remove their folders yourself.

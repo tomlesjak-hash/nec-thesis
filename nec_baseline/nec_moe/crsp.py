@@ -1,5 +1,16 @@
 """CRSP daily data (CIZ format): the source of the Stage B panel (brief 06 section A).
 
+Commands (from ``nec_baseline/``; RUNBOOK.md section 8 has the full order)
+---------------------------------------------------------------------------
+- ``python3.14 scripts/extract_crsp_v2.py``: this module's extract,
+  ``Data/derived/crsp_extract_ciz202512_<start>_<end>_StkDlySecurityData_lb<days>d/``;
+- ``python3.14 scripts/extract_compustat.py``: the Compustat extract
+  (:mod:`nec_moe.compustat`), ``Data/derived/compustat_cfz202607_<start>_<end>/``;
+- ``python3.14 scripts/build_pit_panel.py``: the panel,
+  ``Data/derived/pit_panel_crsp_<start>_<end>_<feature_set>_<target_kind>.pt``;
+- ``python3.14 scripts/feature_coverage_report.py``: aggregate coverage to
+  ``results/feature_coverage/``.
+
 LICENCE — read before touching anything this module reads or writes
 -------------------------------------------------------------------
 CRSP is licensed to the university and redistribution is prohibited.
@@ -414,7 +425,17 @@ class CRSPSpec:
 
     @property
     def panel_path(self) -> Path:
+        """The brief 06 panel file (legacy features, raw target)."""
         return self.derived_dir / f"pit_panel_crsp_{self.start}_{self.end}.pt"
+
+    def panel_path_for(self, stage_b: StageBSpec) -> Path:
+        """The panel file of a build with ``stage_b``: the feature set and the
+        target kind are in the name, so a new build never overwrites a panel
+        built with other settings (the brief 06 file keeps its name)."""
+        return self.derived_dir / (
+            f"pit_panel_crsp_{self.start}_{self.end}_{stage_b.feature_set}_"
+            f"{stage_b.target_kind}.pt"
+        )
 
     @property
     def extract_bounds(self) -> tuple[pd.Timestamp, pd.Timestamp]:
@@ -1089,11 +1110,12 @@ def build_crsp_panel(
     With the Q26 feature set (the default, brief 08 D) the build also needs
     the Compustat extract: ``compustat`` (a
     :class:`nec_moe.compustat.CompustatExtract`) and ``compustat_spec``
-    (its :class:`~nec_moe.compustat.CompustatSpec`; loaded with the defaults
-    when both are ``None``). Every member's daily frame then carries its
-    company market equity, GICS sector, report dates and point-in-time
-    fundamentals (:func:`nec_moe.compustat.attach_q26_inputs`), and the
-    panel's rows are the date's members only, ranked among themselves.
+    (its :class:`~nec_moe.compustat.CompustatSpec`; the default window's
+    extract, which covers every sub-window of it, when both are ``None``).
+    Every member's daily frame then carries its company market equity, GICS
+    sector, report dates and point-in-time fundamentals
+    (:func:`nec_moe.compustat.attach_q26_inputs`), and the panel's rows are
+    the date's members only, ranked among themselves.
 
     Reads the extract (``extract`` may be a wider one, e.g. the default
     window's, for a sub-window build), builds every member's daily frame,
@@ -1143,7 +1165,7 @@ def build_crsp_panel(
         from .compustat import CompustatSpec, attach_q26_inputs, load_compustat_extract
 
         if compustat_spec is None:
-            compustat_spec = CompustatSpec(start=spec.start, end=spec.end)
+            compustat_spec = CompustatSpec()
         if compustat is None:
             compustat = load_compustat_extract(compustat_spec)
         q26_report = attach_q26_inputs(

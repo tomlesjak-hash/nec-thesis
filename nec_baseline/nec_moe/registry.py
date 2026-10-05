@@ -43,7 +43,8 @@ _SELECTION_SUFFIX = "#selection"
 #: Config keys every logged trial must carry (see the module docstring).
 PROVENANCE_KEYS: tuple[str, ...] = (
     "data_source", "post_delisting_return", "hidden_init", "portfolio_scheme",
-    "target_kind", "gate_weight", "feature_set",
+    "target_kind", "gate_weight", "feature_set", "crsp_stock_file", "compustat_release",
+    "sector_source",
 )
 
 #: Target-name prefixes of the Stage B target kinds (``StageBSpec.target``),
@@ -108,7 +109,9 @@ def trial_provenance(
     ``portfolio_scheme`` the run was configured with (audit E-3); the
     panel's ``target_kind`` (:func:`panel_target_kind`, brief 08 A); the
     gate's ``gate_weight`` from ``cfg`` (:func:`gate_weight_of`, brief 08 B);
-    and the panel's ``feature_set`` (:func:`panel_feature_set`, brief 08 D).
+    the panel's ``feature_set`` (:func:`panel_feature_set`, brief 08 D); and,
+    from the build metadata, the CRSP stock file, the Compustat release and
+    the sector source (``"gics"``) (brief 08 E.1).
     """
     metadata = getattr(panel, "metadata", None) or {}
     experts = getattr(cfg, "experts", None)
@@ -120,6 +123,12 @@ def trial_provenance(
         "target_kind": panel_target_kind(panel),
         "gate_weight": gate_weight_of(cfg),
         "feature_set": panel_feature_set(panel),
+        # the data layer (brief 08 E.1): which CRSP stock file, which
+        # CRSP/Compustat Merged release, which sector scheme; None where the
+        # panel's build did not record one (synthetic, pre-brief-08 files)
+        "crsp_stock_file": metadata.get("crsp_stock_file"),
+        "compustat_release": metadata.get("compustat_release"),
+        "sector_source": metadata.get("sector_source"),
     }
 
 

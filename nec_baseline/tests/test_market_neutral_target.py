@@ -226,6 +226,7 @@ def test_registry_records_target_kind(tmp_path: Path):
         reg.log("t", {"x": 1.0}, config={
             "data_source": "s", "post_delisting_return": None, "hidden_init": None,
             "portfolio_scheme": None, "gate_weight": None, "feature_set": None,
+            "crsp_stock_file": None, "compustat_release": None, "sector_source": None,
         })
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeadParameterWarning)

@@ -144,7 +144,9 @@ class Experiment:
     post_delisting_return: str = "cash"   # "cash" | "market"; not a decision (CRSPSpec)
     # panel file (data="panel_file") — e.g. the prebuilt CRSP PIT panel
     # (scripts/build_pit_panel.py; relative to this file):
-    panel_file: str = "../Data/derived/pit_panel_crsp_2015-01-01_2024-12-31.pt"
+    panel_file: str = (
+        "../Data/derived/pit_panel_crsp_2015-01-01_2024-12-31_q26_market_neutral.pt"
+    )
     # feature/target spec (CRSP builds; a panel file carries its own):
     seq_len: int = 20               # encoder window T
     # forward-return days. None = the panel's own target (a CRSP build then

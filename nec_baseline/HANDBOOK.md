@@ -477,6 +477,30 @@ Three structural facts:
 - **`gate_logits` is still an argument** (used for batch-size inference) so the
   interface is uniform — swapping prior families changes no call sites.
 
+### `markov` — the Hamilton gate, and the gate weight it serves (Q27)
+
+`nec_moe/markov_gate.py`: Hamilton's Markov switching model, fitted by maximum likelihood
+on each fold's training block, canonically ordered, frozen, and applied to later dates by
+the filter alone (brief 03). The table it serves is `MarkovGateConfig.gate_weight`, built
+from the filtered probability `ξ_t` and the frozen canonical transition matrix `A` by
+`gate_weight_probs`:
+
+| `gate_weight` | row served at t | reading |
+|---|---|---|
+| `"filtered"` | `ξ_t` | today's regime |
+| `"predicted"` | `ξ_t A` | tomorrow's regime |
+| `"window"` (default, decided) | `(1/h) Σ_{j=1..h} ξ_t A^j` | expected share of the target window `(t, t+h]` in each regime |
+
+`h` is the panel target's horizon (`DataConfig.horizon_periods`, read from the target
+name), never a second field; the gate refuses a panel whose horizon differs from the one
+it was built for. With `h = 1` the window weight is the predicted one; with `A = I` it is
+the filtered one. The same rule runs on training and test dates; `prob_floor` and the
+renormalisation come after it. The backprop-HMM baseline (`hmm` above) is **not**
+changed: its latent is per target window, so its `h`-step predict is already the
+consistent weight for it. Gates still to come (jump model, Wasserstein, TVTP) must supply
+a transition matrix before they can serve `"predicted"` or `"window"`. Every trial row
+records `gate_weight` (`None` without a Hamilton gate).
+
 ## I.9 `losses.py` — the fused objective, and the two levers
 
 ### `mixture_nll` — five lines that carry everything
@@ -513,6 +537,17 @@ SGD on this NLL **is generalized EM** (M8 §8.6): tight E-step at the current pa
 (the responsibilities in the forward), partial M-step (the gradient step). That
 equivalence is why EM's vocabulary — responsibilities, effective counts, collapse — is
 the right diagnostic language for a model trained by Adam.
+
+**Per row is the per-date model's composite likelihood (Q24, decided 2026-10-05).** The
+model has one regime per date, shared by all stocks; integrating out the other stocks
+leaves each stock's own distribution `Σ_k π_k(t) N(y_i; μ_k(x_i), s_k²)`, which is exactly
+one row's term. The mean over rows is therefore that model's independence (composite)
+likelihood: consistent, robust to stocks co-moving beyond the regime, and it keeps the
+frozen gate in charge of which data each expert learns from (one stock's evidence is
+small). Costs: efficiency and no Hessian standard errors, neither used here. The
+objective is unchanged; Appendix D of `Master Thesis/MoE_HMM_Gate_Formulation.pdf` has
+the theory. The softer specialisation it allows is watched by
+`diagnostics.expert_weight_diagnostics` (I.12).
 
 ### `LoadBalanceBuffer` + `load_balance_aux` — and the scope theorem
 
@@ -650,6 +685,17 @@ statistic: sort experts by ascending σ after *every* fit, before any cross-fit 
 `wasserstein_template_tracking` is a documented stub — the escalation path if σ-sorting
 proves unstable across refits (near-ties), per arXiv:2603.04441.
 
+`expert_weight_diagnostics(responsibilities, gate_prob, abs_residual)` (Q24): on the
+training rows, per expert (canonical order), the correlation of its responsibility with
+the gate's probability (`ew_corr_resp_gate_k`, 1 when they are equal) and with the
+absolute residual `|y − ŷ|` (`ew_corr_resp_absres_k`), and its mean responsibility in
+bins of the gate probability cut at `TrainConfig.expert_weight_quantiles` (quintiles;
+`ew_resp_gate_bin{j}_k`). `evaluation.expert_weight_report` runs it at the end of every
+fold's training; the numbers go to each fold's metrics, the sweep's pooled metrics and the
+quick mode's metrics. An expert whose weight follows the residual rather than the gate is
+absorbing outlying stock-days. An undefined correlation (a constant gate) is omitted, not
+written as 0.
+
 ## I.13 `evaluation.py` — the judging machinery
 
 ### Purged walk-forward splits
@@ -748,22 +794,45 @@ fixtures are CIZ-format files with the real headers and **invented numbers**
 without `Data/`. Committed reports quote aggregate statistics only.
 
 - `CRSPSpec`: `crsp_dir` (default `Quant Model/Data/`), `release="ciz202512"`,
-  `stock_file="StkDlySecurityPrimaryData"`, `market_indno=1000500` (CRSP VW index of the
-  S&P 500 universe, `DlyTotRet`; `1000200` is the wider-market alternative),
-  `membership_indno=1000500` (the S&P 500 spells; `1000502` has no constituents, see the
-  docstring's evidence), `start/end` 2015-01-01..2024-12-31, `post_delisting_return`
-  (`"cash"` | `"market"`, not a decision), the member-count band `500..510`, and the
-  extract's lookback/lead and block size. `data_source` is `"crsp_<release>"`.
-- File access: the extracted `Data/crspdata/<release>_ascii/<file>.dat` if present, else
-  streamed from `Data/<release>_ascii.zip`; never unzipped whole.
-- `extract_crsp(spec)` (script `scripts/extract_crsp.py`): streams the stock file and
-  `StkDlyCumulativeAdjFactor` once each in blocks, keeps the window's ever-members from
-  `start - extract_lookback_days` to `end + extract_lead_days`, writes parquet parts,
-  and records every block's byte offset, so a rerun resumes. Membership, market series,
-  delisting records and security-info history go alongside.
-- `build_crsp_panel(spec, stage_b)` → `CRSPBuild(panel, report, coverage)`: daily frames
-  per PERMNO on the market calendar, `assemble_panel` over every ever-member, then the
-  point-in-time filter with re-rank. Refuses an extract that is too short for the
+  `stock_file="StkDlySecurityData"` (brief 08: it has open, high, low, close, bid and ask;
+  `DlyNumTrd` is not used), `market_indno=1000500` (CRSP VW index of the S&P 500 universe,
+  `DlyTotRet`; `1000200` is the wider-market alternative), `membership_indno=1000500`
+  (the S&P 500 spells; `1000502` has no constituents, see the docstring's evidence),
+  `start/end` 2015-01-01..2024-12-31, `post_delisting_return` (`"cash"` | `"market"`, not
+  a decision), the member-count band `500..510`, the extract's lookback/lead,
+  `cap_unit_dollars` (1000: `DlyCap` in $ thousands, unverified, see below) and block
+  size. `data_source` is `"crsp_<release>"`.
+- **Lookback** (`lookback_days`): `extract_lookback_days` if set, else derived from the
+  longest feature window, `price_history_trading_days(FeatureSpec())` = 1,281 trading days
+  (seasonality's five years, beta's 1,260-day correlation), turned into calendar days by
+  `trading_to_calendar_days` plus `lookback_margin_days` (30): 1,887 days, so the extract
+  starts in late 2009. The training window does not move.
+- **Extract identity.** The folder name carries the stock file and lookback
+  (`crsp_extract_ciz202512_<start>_<end>_StkDlySecurityData_lb1887d/`; the brief 06
+  extract, primary file and 550 days, keeps its old name), `extract.json` records both,
+  and `load_extract` refuses an extract whose stock file, lookback or bounds differ from
+  the spec (`ExtractMismatch`, listing every difference).
+- File access (`crsp_file_source`, any release, CIZ or CCM): the extracted
+  `Data/crspdata/<release>_ascii/<file>.dat` if present, else streamed from
+  `Data/<release>_ascii.zip`; never unzipped whole.
+- `extract_crsp(spec)` (script `scripts/extract_crsp_v2.py`): streams the stock file and
+  `StkDlyCumulativeAdjFactor` once each in blocks, keeps the window's ever-members **and
+  every other share class of their companies** (PERMCO; for market equity only) from
+  `start - lookback_days` to `end + extract_lead_days`, writes parquet parts, and records
+  every block's byte offset, so a rerun resumes. Membership, market series, delisting
+  records, security-info history and the `MetaItemInfo` rows of `DlyCap`, `DlyShrOut`
+  and `DlyVol` (for the unit check) go alongside.
+- **Units.** Prices are dollars and `DlyVol` shares. `DlyCap` and `DlyShrOut` are taken
+  to be in thousands (CRSP's convention) until checked against `MetaItemInfo`; every Q26
+  input that uses them is a rank of a ratio or a log, so a constant unit error moves no
+  input.
+- `build_crsp_panel(spec, stage_b, compustat=..., compustat_spec=...)` →
+  `CRSPBuild(panel, report, coverage)`: daily frames per PERMNO on the market calendar
+  (with `retx`, `open`..`ask`, `cap`); for the Q26 set also each PERMNO's company ME,
+  GICS sector, report dates and point-in-time fundamentals
+  (`compustat.attach_q26_inputs`; the default window's Compustat extract is loaded when
+  none is passed); `assemble_panel` with the universe, then the point-in-time filter
+  (with re-rank for the legacy set; a Q26 panel is built over the members already). Refuses an extract that is too short for the
   features' warm-up or the horizon, and a member count outside the band. The report is
   aggregate only (rows, dates, members per date, delistings, fill rows, dual-class
   count).
@@ -780,13 +849,97 @@ compounded inside its own window; share volume put on one share basis with ratio
 membership bounds inclusive; entities are PERMNOs and `TickerLookup` gives a
 date-aware ticker for report labels only.
 
+### `compustat.py` — CCM link, GICS, point-in-time fundamentals (brief 08 C)
+
+Release `cfz202607` (CRSP/Compustat Merged), same licence and file conventions as CRSP.
+`CompustatSpec`: `release`, `keyset=1` (industrial, consolidated, standardised;
+keyset 8 "PRE" only counted), `link_types=("LC","LU")`, `link_prims=("P","C")`,
+`filing_types=("10-Q","10-K")`, `availability_lag_trading_days=1`,
+`fallback_lag_days=90`, `history_quarters` (derived: 12) and
+`history_margin_quarters=2`. Columns are read by name, case-insensitively.
+
+- **Link** (`linkhistory`): valid on d when `LINKDT ≤ d ≤ LINKENDDT`; `gvkey_on_dates`
+  gives a PERMNO's GVKEY per date, none when two are linked at once
+  (`link_ambiguities` reports those, never drops them silently).
+- **Sectors** (`gicshistory`, `GSECTORH`, dated by `INDFROM`/`INDTHRU`): through the link
+  on the date (`lpermno` only checked, `gics_lpermno_disagreements`); `sector_dummies`
+  gives 11 columns, all 0 without a sector.
+- **Quarters** (`quarterly_fundamentals`): keyset 1 rows of the period descriptor, income
+  statement, balance sheet and YTD cash flow (`ytd_to_quarterly`: Q1 its YTD value, Qk
+  the difference within the fiscal year, missing without the predecessor). Period ends
+  (`period_end_dates`): a `DATADATE` column if the release has one, else computed from
+  `FYEARQ`, `FQTR`, `fyrq` (Compustat's convention), cross-checked against
+  `fiscalmarketdataquarterly`.
+- **Availability**: one trading day after the later of `RDQ` and the first 10-Q/10-K
+  `FILEDATE` for that period end (`RDQ` alone or the filing alone when one is missing;
+  period end + 90 days with neither); the surprises use `RDQ` + 1 trading day
+  (`avail_rdq`). `pit_events` gives the quarters known at each availability date;
+  `carry_forward` holds values until the next one, for at most
+  `fundamental_max_staleness_days` (365) after the newest quarter's availability.
+- `fundamental_inputs(quarters, dates, fs)`: the 16 fundamental inputs of one GVKEY
+  (book equity, trailing earnings, net debt and the 13 ratios), point in time.
+- `extract_compustat(spec, permnos)` (script `scripts/extract_compustat.py`): the linked
+  GVKEYs' rows from `fundamentals_start` (2011-07-01 for the default window), resumable,
+  into `Data/derived/compustat_cfz202607_<start>_<end>/` with an aggregate report (link
+  ambiguities, the period-end check, the keyset-8 count, the filing types).
+
+### `characteristics.py` — the Q26 characteristics (brief 08 D)
+
+`stock_characteristics(daily, m, fs)` computes one stock's 40 characteristics (below)
+from its daily frame; `cross_section(rows, fs)` turns a date's universe rows into the 57
+inputs. Every window is a `FeatureSpec` field; a rolling statistic needs
+`ceil(min_obs_frac · window)` days (0.8), otherwise it is missing.
+
+| # | input | definition |
+|---|---|---|
+| 1-2 | `ret_5d`, `ret_20d` | sum of `r` over 5 / 20 days |
+| 3 | `mom_12_1` | sum of `r` from t−251 to t−21 |
+| 4 | `prc_highprc_252d` | `P_t / max(P, 252)`, `P` = cumulative product of `1 + DlyRetx` |
+| 5 | `rvol_21d` | std of `r`, 21 days |
+| 6 | `beta_bab` | corr of 3-day overlapping sums of `r_i` and `m` over 1,260 days (min 750) × std(`r_i`, 252) / std(`m`, 252) |
+| 7 | `log_me` | log of company ME |
+| 8 | `ami_126d` | mean of `|R|` / dollar volume ($M), 126 days, zero-volume days excluded |
+| 9 | `seas_2_5an` | mean simple return in the month of t+1, years 2-5 back |
+| 10 | `coskew_21d` | `mean(x y²) / (√mean(x²) · mean(y²))`, demeaned `r_i`, `m` |
+| 11-26 | `be_me` … `saleq_su` | fundamentals (`compustat.fundamental_inputs`), ratios to ME on the day |
+| 27 | `ivol_capm_21d` | residual std of OLS `r_i` on `m`, 21 days |
+| 28 | `vol_shock` | std(`r`, 5) / std(`r`, 60) |
+| 29-30 | `rskew_21d`, `rmax1_21d` | sample skewness of `r`; max of `R`; 21 days |
+| 31 | `volume_z` | split-invariant volume z-score, 20 days |
+| 32 | `qspread_21d` | mean `(ask − bid) / mid`, days with `0 < bid ≤ ask` |
+| 33 | `overnight_20d` | sum of `r − log(close/open)`, 20 days |
+| 34 | `ma50_gap` | `P_t / mean(P, 50) − 1` |
+| 35-36 | `earn_next5`, `days_since_earn` | report expected within 5 business days (past report + 364 days); trading days since report + 1 |
+| 37 | `var_ratio_60d` | var of 5-day sums / (5 · var of `r`), 60 days |
+| 38 | `ret_vol_corr_60d` | corr of `r` and log split-adjusted volume, 60 days |
+| 39-40 | `ind_mom_12_1`, `ret_20d_ind_rel` | the sector's `mom_12_1`; `ret_20d` minus the sector's (value-weighted) |
+
+Then per date (D.4): rank each characteristic over the rows that have it (ties averaged),
+`x = 2 (rank − 1)/(n − 1) − 1` (0 when n = 1); `be_me`, `ni_me`, `niq_be`, `ocf_at` also
+within their sector (universe rank below `min_sector_names` = 5 values); missing → 0; the
+flags `flag_price_missing` (any CRSP characteristic filled) and `flag_fund_missing` (any
+of 11-26 filled); 11 GICS dummies. `earn_next5`, the dummies and the flags are not
+ranked. 26 + 12 + 2 + 4 + 11 + 2 = 57 inputs.
+
 ### `features.py` — daily returns → Panel, under one timing rule
 
 **The rule** (stated once, tested mechanically): a row (date t, entity i) is a
 prediction made *at the close of t*. Every feature uses information through t; the
-forward target `fwd_ret_{h}d` (the sum of the next h daily log returns) is the **only**
-forward-looking column; cross-sectional rank-normalization uses only date-t's own
-cross-section. `test_no_lookahead` truncates the series at t and asserts every feature
+forward target is the **only** forward-looking column; cross-sectional ranking uses only
+date-t's own cross-section.
+
+**The target** (`StageBSpec.target_kind`, Q25): `"market_neutral"` (default) is
+`fwd_mn_ret_{h}d = fwd_ret_{h}d − mean_j fwd_ret_{h}d[j]`, the equal-weighted mean over the
+date's universe rows with a valid target on a tradable day, taken in `assemble_panel`
+before any row is dropped for a missing feature; `y_daily` is demeaned day by day over
+the same rows, so it still sums to the target. It sums to zero on every date and a
+return common to every stock cancels from it. The long-short book is dollar neutral, so
+it is unchanged by a common return (tested). `"raw"` (`fwd_ret_{h}d`) and `"residual"`
+(trailing-beta residual) remain options.
+
+**The feature set** (`StageBSpec.features.feature_set`, Q26): `"q26"` (default, the 57
+inputs of `characteristics.py` above) or `"legacy14"` (the table below, for comparison
+and the older tests). `test_no_lookahead` truncates the series at t and asserts every feature
 at t is identical — copy its pattern whenever you add a feature.
 
 The input is one **daily frame** per entity (`DAILY_COLUMNS`: `ret`, `volume`,
@@ -813,8 +966,13 @@ Sequence channels (`d_seq=4`, natural units, per-row trailing window of `seq_len
 `ret_1d`, `rel_ret_1d`, `vol_20d`, `volume_z_20d` — the observable regime signals the
 encoder reads.
 
-Assembly mechanics worth knowing: `_valid_rows` demands a tradable day, a full trailing
-window, all snapshot features and the target; windows are built with
+Assembly mechanics worth knowing: for `q26`, `_valid_rows` demands a tradable day and the
+target only (and, for `StageBSpec.input_mode="snapshot_plus_hidden"`, a full sequence
+window; a panel built for the other mode is refused at training); with the universe
+given, only the date's members are rows, so every rank and sector aggregate is over the
+universe, and an incomplete sequence window is zero-filled and counted. For `legacy14`,
+`_valid_rows` demands a tradable day, a full trailing window, all snapshot features and
+the target; windows are built with
 `sliding_window_view` over each entity's rows (the CRSP layer puts every stock on the
 market calendar, so a day without a CRSP row is a missing return and invalidates the
 windows that hold it); dates keep only cross-sections with ≥ `min_names_per_date` names;
@@ -967,6 +1125,11 @@ repairs NLL *and* ECE on the untouched test block.
 | `test_smoke.py` | end-to-end training + regime recovery (AUC > 0.8) + a broken-gradient guard that must fail |
 | `test_stage_b.py`, `test_stage_c.py`, `test_universe.py` | feature values by hand, the no-lookahead probe, panel contract; context parsers against fixtures that reproduce real-file quirks; inclusive membership spells; coverage math |
 | `test_crsp.py` | every CRSP construction rule on an invented-number CIZ fixture (delisting return reaches the target, the post-delisting fill, missing never zero, split-invariant volume, inclusive bounds, PERMNO labels, provenance, market INDNO, resumable extract); three `crsp_data` tests on the real files that skip without `Data/` |
+| `test_market_neutral_target.py` | brief 08 A: the target averages to zero per date, a common return cancels, the mean counts rows dropped for a feature and only the date's members, `y_daily` sums to it, the long-short book is blind to a common return, `target_kind` in every row |
+| `test_gate_weight.py` | brief 08 B: the brief's example matrix by hand (and the corrected calm value), `h = 1` and `A = I` limits, the horizon read from the panel, the same rule on training and test dates, `gate_weight` in every row; the Q24 diagnostic |
+| `test_compustat.py` | brief 08 C on invented CIZ and cfz fixtures: the derived lookback, extract identity and refusal, the new columns, links over time and ambiguity reporting, GICS switching on `INDFROM`, period ends, YTD differencing, availability, staleness, keyset-8 count |
+| `test_q26_features.py` | brief 08 D: every characteristic by hand, ranks, fill, flags, sector fallback, earnings timing on past report dates only, no look-ahead (prices and fundamentals), the build on both fixtures, `feature_set` in every row |
+| `test_feature_coverage.py` | brief 08 E: the data-layer registry fields, the coverage report (aggregate only, refuses per-security values), the scripts compile; one `crsp_data` test |
 
 `python3.14 -m pytest tests/ -q` — the whole offline suite, deterministic, ~38 s
 (132 tests + 3 network-gated skips). Lint and types:
@@ -1173,29 +1336,37 @@ losses — and if you enable one, that run is an *ablation arm*, logged as such.
 
 ## II.4 Getting real data (Stage B), step by step
 
-The real data is CRSP (release `ciz202512`), licensed to the university. **Licence rules:**
-`Quant Model/Data/` is gitignored; everything derived from CRSP (extracts, parquet, built
-panels, coverage tables, registries of CRSP runs) goes to `Data/derived/` and nowhere else;
-test fixtures are invented; committed reports quote aggregate statistics only.
+The real data is CRSP (release `ciz202512`) and the CRSP/Compustat Merged release
+(`cfz202607`), licensed to the university. **Licence rules:** `Quant Model/Data/` is
+gitignored; everything derived from them (extracts, parquet, built panels, coverage
+tables, registries of real-data runs) goes to `Data/derived/` and nowhere else; test
+fixtures are invented; committed reports quote aggregate statistics only.
 
 ### Build the panel (once)
 
 From `nec_baseline/`, with the `crsp` extra installed (`pip install -e '.[crsp]'`, i.e.
-pyarrow):
+pyarrow). RUNBOOK section 8a has the same four commands with what each writes:
 
 ```bash
-python3.14 scripts/extract_crsp.py        # streams the CIZ files once, resumable
-python3.14 scripts/build_pit_panel.py     # the PIT panel, coverage table, build report
+python3.14 scripts/extract_crsp_v2.py           # CRSP StkDlySecurityData, resumable
+python3.14 scripts/extract_compustat.py         # CCM link, GICS, quarterly fundamentals
+python3.14 scripts/build_pit_panel.py           # the Q26 PIT panel, coverage, build report
+python3.14 scripts/feature_coverage_report.py   # aggregate coverage -> results/feature_coverage/
 ```
 
-The extract (`Data/derived/crsp_extract_ciz202512_2015-01-01_2024-12-31/`, ~74 MB) holds
-the rows of the 736 PERMNOs that were S&P 500 members in 2015-2024, from about 18 months
-before the window to two months after it, plus their membership spells, delisting
-records, security-info history and the market series. The build writes
-`pit_panel_crsp_2015-01-01_2024-12-31.pt` (~500 MB; 1,264,598 rows, 2,516 dates),
-`pit_coverage_crsp_2015-01-01_2024-12-31.csv` and an aggregate `.report.json` next to it.
-Both scripts take an optional `[start] [end]`; the build reads the default extract, which
-covers every sub-window.
+The CRSP extract (`Data/derived/crsp_extract_ciz202512_2015-01-01_2024-12-31_StkDlySecurityData_lb1887d/`)
+holds the rows of the PERMNOs that were S&P 500 members in 2015-2024 and of their
+companies' other share classes, from late 2009 (the feature windows' five years) to two
+months after the window, plus their membership spells, delisting records,
+security-info history and the market series. The Compustat extract
+(`Data/derived/compustat_cfz202607_2015-01-01_2024-12-31/`) holds the linked GVKEYs' link
+and GICS rows and their quarterly files from mid-2011. The build writes
+`pit_panel_crsp_2015-01-01_2024-12-31_q26_market_neutral.pt`, the coverage `.csv` and an
+aggregate `.report.json` next to it; the brief 06 files
+(`crsp_extract_ciz202512_2015-01-01_2024-12-31/`, `pit_panel_crsp_2015-01-01_2024-12-31.pt`,
+legacy features and raw target) are left in place. The scripts take an optional
+`[start] [end]`; the build reads the default window's extracts, which cover every
+sub-window.
 
 ### Use it
 
@@ -1203,10 +1374,9 @@ covers every sub-window.
 from nec_moe import (NECConfig, EncoderConfig, ExpertConfig, TrainConfig, NECModel,
                      Trainer, CRSPSpec, StageBSpec, build_crsp_panel, data_config_from_panel)
 
-build = build_crsp_panel(CRSPSpec(), StageBSpec(seq_len=20, horizon=5))
-panel = build.panel     # or torch.load(CRSPSpec().panel_path, weights_only=False)
-print(len(panel), "rows,", len(panel.date_labels), "dates,",
-      len(panel.entity_labels), "PERMNOs")   # 1,264,598 / 2,516 / 713
+spec = StageBSpec(seq_len=20, horizon=5)    # market-neutral target, Q26 inputs
+build = build_crsp_panel(CRSPSpec(), spec)  # loads the default Compustat extract
+panel = build.panel     # or torch.load(CRSPSpec().panel_path_for(spec), weights_only=False)
 print(build.coverage)                        # PUBLISH this next to any result
 
 cfg = NECConfig(
@@ -1218,10 +1388,13 @@ cfg = NECConfig(
 )
 ```
 
-In the control panel: `data="crsp"` (build from the extract, with `start`, `end` and
-`post_delisting_return`) or `data="panel_file"` (the prebuilt panel, the default path).
-Every trial the panel produces carries `data_source="crsp_ciz202512"` and the
-`post_delisting_return` it was built with.
+In the control panel: `data="crsp"` (build from the extracts, with `start`, `end`,
+`post_delisting_return`, `target_kind`, `feature_set` and `input_mode`) or
+`data="panel_file"` (the prebuilt panel; the default path is the Q26 market-neutral
+file). Every trial the panel produces carries `data_source="crsp_ciz202512"`, the
+`post_delisting_return`, `target_kind`, `feature_set`, `crsp_stock_file`,
+`compustat_release` and `sector_source` it was built with, and the model's
+`gate_weight`.
 
 ### `StageBSpec` reference
 
@@ -1229,10 +1402,12 @@ Every trial the panel produces carries `data_source="crsp_ciz202512"` and the
 |---|---|---|
 | `seq_len` | 20 | trailing window length (the encoder's T) |
 | `horizon` | 5 | forward-return target in trading days (5 or 20 per the syllabus); **purge by exactly this number in evaluation** |
-| `cs_rank` | True | per-date rank-normalize snapshot features to [−0.5, 0.5] — leave on |
+| `cs_rank` | True | per-date rank-normalize snapshot features (Q26: to [−1, 1], required; legacy: [−0.5, 0.5]) |
 | `min_names_per_date` | 5 | drop dates with a thinner valid cross-section |
-| `target_kind` | `"raw"` | `"residual"` = market-neutral target `fwd − β_t·mkt_fwd` (β from a *trailing* window — no lookahead, planted-truth tested); the syllabus's "raw vs residual" ablation is these two specs on the same prices |
-| `beta_window` | 250 | trailing days for the rolling market beta (residual only); windows > 120 cost extra warm-up rows beyond `mom_120d`'s |
+| `target_kind` | `"market_neutral"` | Q25: forward return minus the date's cross-sectional mean (`fwd_mn_ret_{h}d`); `"raw"` (`fwd_ret_{h}d`); `"residual"` = trailing-beta residual `fwd − β_t·mkt_fwd`, not the decision |
+| `beta_window` | 250 | trailing days for the rolling market beta (residual only) |
+| `features` | `FeatureSpec()` | the feature set (`"q26"` or `"legacy14"`) and every Q26 window, threshold and cap |
+| `input_mode` | `"snapshot"` | the experts' input mode the panel is built for: `"snapshot_plus_hidden"` drops rows with an incomplete sequence window (Q26 only) |
 
 ### What the CRSP build does, and the choices it records
 
@@ -1254,7 +1429,15 @@ Every trial the panel produces carries `data_source="crsp_ciz202512"` and the
   replacement; `1000200` for a wider universe) feeds the market features, the beta and
   the residual target.
 - **Checks:** the build refuses an extract too short for the features' warm-up or the
-  horizon, and a member count outside `member_count_min..member_count_max` (500..510).
+  horizon, an extract built with another stock file or lookback, and a member count
+  outside `member_count_min..member_count_max` (500..510).
+- **Q26 inputs (brief 08):** each PERMNO's company market equity (every share class),
+  GICS sector, report dates and point-in-time fundamentals come from the Compustat
+  extract through the CCM link on each date. A row is never dropped for a missing
+  characteristic: it is ranked without it, filled with 0 and flagged. Two
+  definitions need every balance-sheet component (`taccruals_at`, `noa_at`: a missing
+  `IVAOQ`, `IVSTQ`, `MIBQ` or `PSTKQ` leaves them missing, per "missing, not zero"); the
+  coverage report shows how often that happens, which is worth a look before training.
 
 ## II.5 Bringing your own data
 
@@ -1262,8 +1445,9 @@ Three routes, by decreasing convenience:
 
 **Route 1 — another CRSP window.** `dataclasses.replace(CRSPSpec(), start=..., end=...)`
 with `build_crsp_panel(spec, stage_b, extract=load_extract(CRSPSpec()))` for any
-sub-window of the default extract; for a window outside it, run `extract_crsp.py` with
-the new dates first.
+sub-window of the default extract (the Q26 build also loads the default window's
+Compustat extract); for a window outside it, run `extract_crsp_v2.py` and
+`extract_compustat.py` with the new dates first.
 
 **Route 2 — you have daily returns and volumes.** One daily frame per entity
 (`DAILY_COLUMNS`: `ret` = daily log return with NaN for missing, `volume`,
@@ -1858,9 +2042,12 @@ The package fails loudly and specifically; the message usually *is* the fix.
 | `PriorConfig.tvtp … guarded-off extension` | TVTP not built (identifiability caution) | see Part III.2 before building |
 | `auxiliary losses are supported on the memoryless path only` | aux + HMM | disable aux for the HMM arm |
 | `n_experts must be >= 2 (a mixture)` | K=1 requested | use `MLPBaseline` — that *is* the single-model |
-| `no complete CRSP extract at …: run scripts/extract_crsp.py first` | the extract is missing or was interrupted | run (or rerun: it resumes) `scripts/extract_crsp.py` |
+| `no complete CRSP extract at …: run scripts/extract_crsp_v2.py first` | the extract is missing or was interrupted | run (or rerun: it resumes) `scripts/extract_crsp_v2.py` |
+| `the extract at … does not match the spec: stock_file …` | the extract was built with another stock file or lookback | run `scripts/extract_crsp_v2.py` (it writes a new folder), or set the spec to the extract's values |
+| `no complete Compustat extract at …` | the Q26 build needs it | run `scripts/extract_compustat.py` (after the CRSP extract) |
+| `this panel was built for input_mode=…` | a Q26 panel built for the other expert input mode | rebuild with `StageBSpec(input_mode=...)` matching `ExpertConfig.input_mode` |
 | `members per date range … outside the band …` | the membership INDNO or the window is wrong | check `CRSPSpec.membership_indno` (1000500) and the band |
-| `trial config lacks the provenance keys …` | a registry row without `data_source` / `post_delisting_return` / `hidden_init` | pass `**trial_provenance(panel, cfg)` into its config |
+| `trial config lacks the provenance keys …` | a registry row without one of `PROVENANCE_KEYS` (`data_source`, `post_delisting_return`, `hidden_init`, `portfolio_scheme`, `target_kind`, `gate_weight`, `feature_set`, `crsp_stock_file`, `compustat_release`, `sector_source`) | pass `**trial_provenance(panel, cfg)` into its config |
 | `only N dates have >= min_names valid names` | thin panel after validity filtering | widen dates/universe; lower `min_names_per_date` knowingly |
 | `no date had a scoreable cross-section — constant per-date predictions …` | rank-IC on a classical emission | compare on NLL/regime recovery |
 | `no overlap between panel dates and context index` | alignment join failed | real panels need `date_labels`; synthetic contexts index by integer codes |

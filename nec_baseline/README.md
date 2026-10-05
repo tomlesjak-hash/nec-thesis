@@ -138,15 +138,22 @@ cfg = NECConfig(data=data_config_from_panel(panel))
 # panel plugs into Trainer / walk_forward_evaluate unchanged
 ```
 
-Two scripts, run from `nec_baseline/` (they need the `crsp` extra, i.e. pyarrow):
+Four scripts, run from `nec_baseline/` in this order (they need the `crsp` extra, i.e.
+pyarrow; RUNBOOK.md section 8a has the details):
 
-1. `python3.14 scripts/extract_crsp.py` streams the CRSP CIZ files once (from the
-   extracted `Data/crspdata/ciz202512_ascii/` copy, else from `Data/ciz202512_ascii.zip`,
-   never unzipped whole) and keeps the rows of every PERMNO that was an S&P 500 member in
-   the window, with lookback and lead. Resumable: the byte offset of every block is on
-   record.
-2. `python3.14 scripts/build_pit_panel.py` builds the point-in-time panel from that
-   extract and writes the panel, its coverage table and an aggregate build report.
+1. `python3.14 scripts/extract_crsp_v2.py` streams the CRSP CIZ daily security file
+   (`StkDlySecurityData`, with open/high/low/close and bid/ask) once (from the extracted
+   `Data/crspdata/ciz202512_ascii/` copy, else from `Data/ciz202512_ascii.zip`, never
+   unzipped whole) and keeps the rows of every PERMNO that was an S&P 500 member in the
+   window and of their companies' other share classes, from about five years before the
+   window. Resumable: the byte offset of every block is on record.
+2. `python3.14 scripts/extract_compustat.py` extracts the CCM link, GICS sectors and the
+   quarterly fundamentals (release `cfz202607`) of the linked companies.
+3. `python3.14 scripts/build_pit_panel.py` builds the point-in-time panel from the two
+   extracts (market-neutral target, the 57 Q26 inputs) and writes the panel, its coverage
+   table and an aggregate build report.
+4. `python3.14 scripts/feature_coverage_report.py` writes the aggregate feature coverage
+   to `results/feature_coverage/`.
 
 `run_experiment.py` reads it with `data="crsp"` (build from the extract) or
 `data="panel_file"` (the prebuilt panel).

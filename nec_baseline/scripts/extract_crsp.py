@@ -1,5 +1,10 @@
 """Extract the CRSP rows the panel needs into ``Data/derived/`` (brief 06 A.5).
 
+Since brief 08 the default ``CRSPSpec`` streams ``StkDlySecurityData`` with a
+lookback derived from the feature windows, so this does what
+``scripts/extract_crsp_v2.py`` does (that script is the documented command).
+The brief 06 extract (primary file, 550 days) keeps its own folder.
+
 Streams the daily stock file and the cumulative adjustment-factor file once
 each, from the extracted ``Data/crspdata/<release>_ascii/`` copy when it exists
 and otherwise from ``Data/<release>_ascii.zip`` (never unzipped whole). Keeps

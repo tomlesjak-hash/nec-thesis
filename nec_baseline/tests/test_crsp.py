@@ -553,7 +553,7 @@ def _real_files() -> bool:
 needs_crsp = pytest.mark.skipif(not _real_files(), reason="CRSP files not under Data/")
 needs_extract = pytest.mark.skipif(
     not (REAL.extract_dir / "extract.json").exists(),
-    reason="no CRSP extract: run scripts/extract_crsp.py",
+    reason="no CRSP v2 extract: run scripts/extract_crsp_v2.py",
 )
 
 

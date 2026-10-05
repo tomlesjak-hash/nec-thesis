@@ -2,9 +2,14 @@
 
 Input: one **daily frame** per entity (:data:`DAILY_COLUMNS`): the daily log
 return, raw share volume, raw dollar volume, a cumulative share-adjustment
-factor, whether the day is a tradable row, and the post-delisting fill. The
-CRSP layer (:mod:`nec_moe.crsp`) builds these frames from ``DlyRet``,
-``DlyPrc``, ``DlyVol`` and ``DlyCumFacShr``; nothing here knows the source.
+factor, whether the day is a tradable row, and the post-delisting fill; for
+the Q26 features also (:data:`OPTIONAL_DAILY_COLUMNS`) the return without
+distributions, the day's open/high/low/close and closing bid/ask, the
+company's market equity, the GICS sector, the report dates and the
+point-in-time fundamental inputs. The CRSP layer (:mod:`nec_moe.crsp`, with
+:mod:`nec_moe.compustat`) builds these frames from ``StkDlySecurityData``,
+``StkDlyCumulativeAdjFactor`` and the CRSP/Compustat Merged files; nothing
+here knows the source.
 
 Timing convention (the anti-leakage rule, stated once and enforced by test)
 ---------------------------------------------------------------------------
@@ -29,20 +34,54 @@ A row (date t, entity i) represents a prediction made **at the close of t**:
   beta (:func:`rolling_beta`, window ``beta_window``) — estimated from past
   data only, so the residualization itself introduces no lookahead. It is
   *not* the Q25 decision and is kept as an option;
-- cross-sectional rank normalization uses only date-t's own cross-section.
+- cross-sectional rank normalization uses only date-t's own cross-section;
+- fundamentals enter only once available (one trading day after the later
+  of the report date and the filing), carried forward at most a year
+  (:mod:`nec_moe.compustat`).
 
-``test_no_lookahead`` verifies this mechanically: features at t computed from
-a series truncated at t equal those computed from the full series.
+``test_no_lookahead`` (here, in ``test_crsp.py`` and, for every Q26
+characteristic and the fundamentals, in ``test_q26_features.py``) verifies
+this mechanically: features at t computed from data truncated at t equal
+those computed from all of it.
 
-Feature set (syllabus §3 "initial feature set", every column named):
+Feature sets (``StageBSpec.features``, a :class:`FeatureSpec`)
+------------------------------------------------------------
+``"q26"`` (the default; decision Q26, brief 08 D): 57 inputs
+(:data:`nec_moe.characteristics.Q26_FEATURES`), every window a
+:class:`FeatureSpec` field:
 
-- snapshot (cross-sectionally rank-normalized to [-0.5, 0.5] per date by
-  default): returns 1/5/20/60d, momentum 120d, realized vol 5/20/60d,
-  downside vol 20d, drawdown vs 60d high, log dollar volume 20d, volume
-  z-score 20d, market-relative 20d return and vol ratio;
-- sequence channels (trailing ``seq_len`` window per row, natural units):
-  daily log return, market-relative daily return, trailing 20d vol, volume
-  z-score — the observable regime signals the gate's encoder reads.
+- 26 JKP characteristics, two per theme of Jensen, Kelly & Pedersen (2023):
+  ``ret_5d``, ``ret_20d`` (short-term reversal); ``mom_12_1``,
+  ``prc_highprc_252d`` (momentum); ``rvol_21d``, ``beta_bab`` (low risk);
+  ``log_me``, ``ami_126d`` (size); ``seas_2_5an``, ``coskew_21d``
+  (seasonality); ``be_me``, ``ni_me`` (value); ``niq_be``, ``ocf_at``
+  (profitability); ``gp_at``, ``ni_inc8q`` (quality); ``at_gr1``,
+  ``sale_gr1`` (investment); ``oaccruals_at``, ``taccruals_at`` (accruals);
+  ``debt_gr3``, ``noa_at`` (debt issuance); ``netdebt_me``, ``cash_at``
+  (low leverage); ``niq_su``, ``saleq_su`` (profit growth);
+- 12 short-horizon market characteristics: ``ivol_capm_21d``,
+  ``vol_shock``; ``rskew_21d``, ``rmax1_21d``; ``volume_z``,
+  ``qspread_21d``; ``overnight_20d``, ``ma50_gap``; ``earn_next5``,
+  ``days_since_earn``; ``var_ratio_60d``, ``ret_vol_corr_60d``;
+- the industry block: 11 GICS sector dummies, ``ind_mom_12_1`` and
+  ``ret_20d_ind_rel`` (value-weighted by default), and within-sector ranks
+  of ``be_me``, ``ni_me``, ``niq_be``, ``ocf_at``;
+- ``flag_price_missing`` and ``flag_fund_missing``.
+
+Each characteristic is ranked per date over the date's universe rows that
+have it (ties averaged) and mapped to [-1, 1]; a missing value is then 0 (the
+median) and sets its family's flag; rows are no longer dropped for a missing
+characteristic. Definitions: :mod:`nec_moe.characteristics`.
+
+``"legacy14"`` (kept for comparison and the older tests): returns
+1/5/20/60d, momentum 120d, realized vol 5/20/60d, downside vol 20d, drawdown
+vs 60d high, log dollar volume 20d, volume z-score 20d, market-relative 20d
+return and vol ratio, ranked to [-0.5, 0.5]; a row with any of them missing
+is dropped.
+
+Sequence channels (both sets; trailing ``seq_len`` window per row, natural
+units): daily log return, market-relative daily return, trailing 20d vol,
+volume z-score, the observable regime signals the gate's encoder reads.
 
 The result is a plain :class:`~nec_moe.data.Panel` — everything downstream
 (Trainer, walk-forward harness, backtest) works unchanged.
@@ -61,6 +100,7 @@ import torch
 from numpy.lib.stride_tricks import sliding_window_view
 
 from .characteristics import (
+    FUNDAMENTAL_INPUTS,
     JKP_FEATURES,
     MARKET_FEATURES,
     Q26_FEATURES,
@@ -72,6 +112,7 @@ from .data import FeatureSchema, Panel
 
 __all__ = [
     "DAILY_COLUMNS",
+    "OPTIONAL_DAILY_COLUMNS",
     "TARGET_KINDS",
     "CALENDAR_DAYS_PER_YEAR",
     "FeatureSpec",
@@ -109,6 +150,24 @@ DAILY_COLUMNS: tuple[str, ...] = (
     "share_factor",
     "tradable",
     "fill_ret",
+)
+
+#: Optional daily-frame columns the Q26 characteristics read (a column a
+#: frame lacks leaves its characteristics missing, never zero):
+#:
+#: - ``retx``: the simple return without distributions (``DlyRetx``), whose
+#:   cumulative product is the price index ``P``;
+#: - ``open``, ``high``, ``low``, ``close``, ``bid``, ``ask``: the day's
+#:   prices and closing quotes (``StkDlySecurityData``);
+#: - ``cap``: the PERMNO's ``DlyCap``; ``me``: its company's market equity in
+#:   $ millions (every share class), on the day;
+#: - ``sector``: the GICS sector code in force that day (NaN without one);
+#: - ``rdq_date``: a report date, on the first trading day on or after it;
+#: - the point-in-time fundamental inputs
+#:   (:data:`nec_moe.characteristics.FUNDAMENTAL_INPUTS`).
+OPTIONAL_DAILY_COLUMNS: tuple[str, ...] = (
+    "retx", "open", "high", "low", "close", "bid", "ask", "cap", "me", "sector",
+    "rdq_date", *FUNDAMENTAL_INPUTS,
 )
 
 SEQUENCE_FEATURES: tuple[str, ...] = (

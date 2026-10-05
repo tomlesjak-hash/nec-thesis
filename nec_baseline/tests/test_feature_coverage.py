@@ -129,6 +129,73 @@ def test_the_report_refuses_per_security_values(built, tmp_path: Path):
     write_feature_coverage(report, tmp_path / "ok", forbidden | {"2020", "1", "8"})
 
 
+def test_member_firm_quarters_and_their_report_date_coverage(tmp_path: Path):
+    """Brief 09 A.3: a firm-quarter counts when its GVKEY is linked, on the
+    period end, to a PERMNO that is an index member that day (both bounds
+    inclusive); the RDQ and filing-date shares are taken by fiscal year, and
+    the early-years table puts them beside the calendar-year flag rates.
+    Invented identifiers and dates."""
+    import pandas as pd
+
+    from nec_moe.coverage import (
+        early_years_table,
+        rdq_coverage_by_fiscal_year,
+        universe_firm_quarters,
+    )
+
+    t, nat = pd.Timestamp, pd.NaT
+    quarters = pd.DataFrame({
+        "KYGVKEY": ["900001", "900001", "900001", "900002", "900002", "900003"],
+        "FYYYYQ": [20004, 20011, 20012, 20004, 20011, 20004],
+        "FYEARQ": [2000, 2001, 2001, 2000, 2001, 2000],
+        "datadate": [t("2000-12-31"), t("2001-03-31"), t("2001-06-30"), t("2000-12-31"),
+                     t("2001-03-31"), nat],
+        "rdq": [t("2001-01-25"), nat, t("2001-07-20"), t("2001-01-30"), t("2001-04-28"),
+                t("2001-01-20")],
+        "first_filing": [t("2001-02-10"), t("2001-05-01"), nat, t("2001-02-12"),
+                         t("2001-05-10"), nat],
+    })
+    links = pd.DataFrame({
+        "KYGVKEY": ["900001", "900002", "900002"],
+        "LINKDT": [t("1990-01-01"), t("1990-01-01"), t("2001-01-01")],
+        "LINKENDDT": [t("2200-12-31"), t("2000-12-31"), t("2200-12-31")],
+        "LPERMNO": [90011, 90022, 90023],
+        "LINKTYPE": ["LC", "LU", "NR"],  # 900002's later link is filtered out
+        "LINKPRIM": ["P", "P", "P"],
+    })
+    spells = pd.DataFrame({
+        "PERMNO": [90011, 90022],
+        "MbrStartDt": [t("2000-06-01"), t("1995-01-01")],
+        "MbrEndDt": [t("2001-04-30"), t("2030-01-01")],
+    })
+    members = universe_firm_quarters(quarters, links, spells, CompustatSpec())
+    # 900001: Q4 2000 and Q1 2001 while a member, not Q2 2001 (spell ended);
+    # 900002: Q4 2000 (link ends on the period end, inclusive), not Q1 2001
+    # (only an NR link then); 900003 has no period end and no link
+    assert sorted(zip(members["KYGVKEY"], members["FYYYYQ"], strict=True)) == [
+        ("900001", 20004), ("900001", 20011), ("900002", 20004)]
+    rdq = rdq_coverage_by_fiscal_year(members)
+    assert rdq == {
+        "fiscal_2000": {"firm_quarters": 2, "rdq_share": 1.0, "filing_share": 1.0},
+        "fiscal_2001": {"firm_quarters": 1, "rdq_share": 0.0, "filing_share": 1.0},
+    }
+    report = {"by_year": {"year_2000": {"rows": 10, "flag_price_rate": 0.1,
+                                        "flag_fund_rate": 0.2,
+                                        "sector_missing_share": 0.3}}}
+    table = early_years_table(report, rdq, 2000, 2001)
+    assert list(table.index) == ["year_2000", "year_2001"]
+    assert table.loc["year_2000", "rows"] == 10 and table.loc["year_2000", "rdq_share"] == 1.0
+    assert table.loc["year_2001", "member_firm_quarters"] == 1
+    assert pd.isna(table.loc["year_2001", "rows"])  # no panel rows that year
+    with pytest.raises(ValueError, match="empty"):
+        early_years_table(report, rdq, 2001, 2000)
+    full = dict(report, rdq_coverage_by_fiscal_year=rdq, present_share={})
+    full["by_year"] = {"year_2000": dict(report["by_year"]["year_2000"], present_share={})}
+    paths = write_feature_coverage(full, tmp_path / "early", {"900001", "90011"},
+                                   tables={"early_years": table})
+    assert [p.name for p in paths][-1] == "early_years.csv"
+
+
 def test_the_real_data_scripts_compile():
     for name in ("extract_crsp_v2.py", "extract_compustat.py", "feature_coverage_report.py",
                  "build_pit_panel.py"):

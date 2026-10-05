@@ -138,14 +138,16 @@ class Experiment:
     # ---------------- data ----------------
     data: str = "synthetic"         # "synthetic" | "crsp" | "panel_file"
     # CRSP data (data="crsp"): built from the extract in Data/derived/, which
-    # scripts/extract_crsp.py writes (licensed: it never leaves Data/)
-    start: str = "2015-01-01"
+    # scripts/extract_crsp_v2.py writes (licensed: it never leaves Data/).
+    # The sample is 2000-2024 (Q16 (a), decided 2026-10-05; brief 09 A): the
+    # extract reaches further back for the feature windows only.
+    start: str = "2000-01-01"
     end: str = "2024-12-31"
     post_delisting_return: str = "cash"   # "cash" | "market"; not a decision (CRSPSpec)
     # panel file (data="panel_file") — e.g. the prebuilt CRSP PIT panel
     # (scripts/build_pit_panel.py; relative to this file):
     panel_file: str = (
-        "../Data/derived/pit_panel_crsp_2015-01-01_2024-12-31_q26_market_neutral.pt"
+        "../Data/derived/pit_panel_crsp_2000-01-01_2024-12-31_q26_market_neutral.pt"
     )
     # feature/target spec (CRSP builds; a panel file carries its own):
     seq_len: int = 20               # encoder window T

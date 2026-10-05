@@ -195,8 +195,9 @@ class CompustatSpec:
 
     Separate from :class:`nec_moe.crsp.CRSPSpec`: another release
     (``cfz202607``), another licence file set. ``start``/``end`` are the
-    panel window (the CRSP spec's); the fundamentals reach back to
-    :func:`fundamentals_start`, derived from the feature definitions.
+    panel window (the CRSP spec's; the 2000-2024 sample of Q16 (a), brief 09
+    A); the fundamentals reach back to :func:`fundamentals_start`, derived
+    from the feature definitions (mid-1996 for a 2000 start).
 
     - ``keyset``: the Compustat data format used (1: industrial,
       consolidated, standardised); ``restated_keyset`` (8, "PRE") is only
@@ -219,7 +220,7 @@ class CompustatSpec:
 
     crsp_dir: str = str(REPO_DATA_DIR)
     release: str = "cfz202607"
-    start: str = "2015-01-01"
+    start: str = "2000-01-01"
     end: str = "2024-12-31"
     keyset: int = 1
     restated_keyset: int = 8
@@ -266,8 +267,8 @@ class CompustatSpec:
 
 def fundamentals_start(spec: CompustatSpec) -> pd.Timestamp:
     """The earliest period end the extract keeps: ``start`` moved back by
-    ``quarters_back + history_margin_quarters`` quarters (about mid-2011 for
-    the defaults), so the 12-quarter growth and the 8-quarter surprise
+    ``quarters_back + history_margin_quarters`` quarters (mid-1996 for the
+    2000 default start), so the 12-quarter growth and the 8-quarter surprise
     volatility exist on the first panel date."""
     months = 3 * (spec.quarters_back + spec.history_margin_quarters)
     return (pd.Timestamp(spec.start) - pd.DateOffset(months=months)).normalize()

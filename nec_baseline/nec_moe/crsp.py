@@ -311,8 +311,12 @@ class CRSPSpec:
       on the previous trading day (a replacement handed over overnight).
 
     ``member_count_min``/``member_count_max`` are the band the real-data test
-    and the build check hold the per-date member count to: the observed 502
-    to 508 with a margin of 2.
+    and the build check hold the per-date member count to: the observed range
+    with a margin of 2. Over 2015-2024 the count was 502 to 508 (band 500 to
+    510). Over the 2000-2024 sample (brief 09 A, Q16 (a)) it is 498 to 508:
+    in 2000-2013 the median is 500, with dips to 499 (and in 2008 to 498),
+    and the excess from two share classes starts in 2014. The band is therefore 496 to
+    510, the same rule applied to the longer sample.
 
     ``post_delisting_return`` completes a forward window that runs past a
     stock's final CRSP return: ``"cash"`` fills those days with a 0 log
@@ -320,9 +324,10 @@ class CRSPSpec:
     days (module docstring). The default ``"cash"`` is **not a decision**; it
     is recorded in every trial so results under the two can't be mixed up.
 
-    ``start``/``end`` are the panel window, unchanged from the free-data
-    panel so the two are comparable; the window itself is part of the open
-    question Q16. The extract reaches :attr:`lookback_days` calendar days
+    ``start``/``end`` are the panel window: the decided sample 2000-2024
+    (Q16 (a), brief 09 A; it was 2015-2024). 2000 is the earliest start with
+    sectors, because Compustat's GICS history begins in mid-1999. The
+    extract reaches :attr:`lookback_days` calendar days
     before ``start`` and ``extract_lead_days`` after ``end`` (covers the
     forward horizon); :func:`build_crsp_panel` checks both against the
     actual calendar. The lookback is ``extract_lookback_days`` when set,
@@ -351,10 +356,10 @@ class CRSPSpec:
     market_indno: int = 1000500
     universe: Literal["sp500"] = "sp500"
     membership_indno: int = 1000500
-    start: str = "2015-01-01"
+    start: str = "2000-01-01"
     end: str = "2024-12-31"
     post_delisting_return: Literal["cash", "market"] = "cash"
-    member_count_min: int = 500
+    member_count_min: int = 496
     member_count_max: int = 510
     extract_lookback_days: int | None = None  # None: derived (see docstring)
     lookback_margin_days: int = 30  # calendar days added to the derived lookback

@@ -21,7 +21,8 @@ LICENCE: all three are derived from CRSP and Compustat and stay inside
 numbers only.
 
 Usage:  python3.14 scripts/build_pit_panel.py [start] [end]
-        (defaults 2015-01-01 .. 2024-12-31; run from nec_baseline/)
+        (defaults 2000-01-01 .. 2024-12-31, the sample of Q16 (a); run from
+        nec_baseline/)
 """
 
 from __future__ import annotations

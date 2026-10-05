@@ -34,8 +34,15 @@ from nec_moe.features import FeatureSpec, StageBSpec, price_history_trading_days
 CAL = pd.bdate_range("2009-01-01", "2022-12-31")  # the trading calendar of these tests
 
 
+#: the window the invented cfz fixture was written around (its quarters run
+#: from before this window's history start into 2020); pinned here because
+#: CompustatSpec's default window moved to the 2000-2024 sample (brief 09 A)
+FIXTURE_WINDOW = {"start": "2015-01-01", "end": "2024-12-31"}
+
+
 def _cspec(root: Path, **kw) -> CompustatSpec:
-    return CompustatSpec(**({"crsp_dir": str(root), "release": cfz.RELEASE} | kw))
+    return CompustatSpec(**({"crsp_dir": str(root), "release": cfz.RELEASE}
+                            | FIXTURE_WINDOW | kw))
 
 
 def _crsp(root: Path, **kw) -> CRSPSpec:
@@ -83,9 +90,9 @@ def test_extract_folder_names_carry_stock_file_and_lookback():
     s = CRSPSpec()
     legacy = dataclasses.replace(s, stock_file=LEGACY_STOCK_FILE,
                                  extract_lookback_days=LEGACY_LOOKBACK_DAYS)
-    assert legacy.extract_dir.name == "crsp_extract_ciz202512_2015-01-01_2024-12-31"
+    assert legacy.extract_dir.name == "crsp_extract_ciz202512_2000-01-01_2024-12-31"
     assert s.extract_dir.name == (
-        f"crsp_extract_ciz202512_2015-01-01_2024-12-31_StkDlySecurityData_lb{s.lookback_days}d"
+        f"crsp_extract_ciz202512_2000-01-01_2024-12-31_StkDlySecurityData_lb{s.lookback_days}d"
     )
     longer = dataclasses.replace(s, extract_lookback_days=s.lookback_days + 1)
     assert len({legacy.extract_dir, s.extract_dir, longer.extract_dir}) == 3
@@ -259,7 +266,10 @@ def test_gics_lpermno_is_checked_against_the_link(cex, cfx):
 def test_history_start_derives_from_the_features():
     spec = CompustatSpec()
     assert spec.quarters_back == 12  # debt_gr3; niq_su's 8 differences of 4-quarter lags
-    assert cs.fundamentals_start(spec) == pd.Timestamp("2011-07-01")
+    # 12 + 2 quarters before the 2000 start of the sample (brief 09 A)
+    assert spec.start == "2000-01-01"
+    assert cs.fundamentals_start(spec) == pd.Timestamp("1996-07-01")
+    assert cs.fundamentals_start(_cspec(Path("."))) == pd.Timestamp("2011-07-01")
 
 
 def test_period_end_mapping(cex, cfx, quarters):

@@ -22,7 +22,8 @@ LICENCE: everything this writes is derived from CRSP and stays inside
 
 Usage:  python3.14 scripts/extract_crsp.py [start] [end]
         python3.14 scripts/extract_crsp.py --return-duration-flags
-        (defaults 2015-01-01 .. 2024-12-31; run from nec_baseline/; needs the
+        (defaults: CRSPSpec's window, 2000-01-01 .. 2024-12-31 since brief 09;
+        run from nec_baseline/; needs the
         ``crsp`` extra, i.e. pyarrow)
 
 ``--return-duration-flags`` adds ``DlyRetDurFlg`` to an existing extract, for

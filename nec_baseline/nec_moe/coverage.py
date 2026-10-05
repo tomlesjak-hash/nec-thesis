@@ -23,6 +23,9 @@ __all__ = [
     "feature_coverage",
     "assert_aggregate_only",
     "write_feature_coverage",
+    "universe_firm_quarters",
+    "rdq_coverage_by_fiscal_year",
+    "early_years_table",
 ]
 
 #: Keys a per-security record would carry; refused anywhere in a report.
@@ -115,6 +118,73 @@ def feature_coverage(panel_metadata: dict[str, Any], compustat_info: dict[str, A
     }
 
 
+def universe_firm_quarters(
+    quarters: pd.DataFrame, links: pd.DataFrame, spells: pd.DataFrame, cspec: Any
+) -> pd.DataFrame:
+    """The firm-quarters of index members: one row per (``KYGVKEY``,
+    ``FYYYYQ``) whose GVKEY is linked (under ``cspec``'s link filter) on the
+    quarter's period end to a PERMNO that is an index member that day.
+
+    ``quarters`` is :func:`nec_moe.compustat.quarterly_fundamentals` output
+    (``KYGVKEY``, ``FYYYYQ``, ``FYEARQ``, ``datadate``, ``rdq``,
+    ``first_filing``); ``links`` the extract's raw link rows; ``spells`` the
+    membership spells (``PERMNO``, ``MbrStartDt``, ``MbrEndDt``, both bounds
+    inclusive). A quarter without a period end cannot be placed and is left
+    out (it is counted in the period-end mapping check instead).
+    """
+    from .compustat import valid_links
+
+    cols = ["KYGVKEY", "FYYYYQ", "FYEARQ", "datadate", "rdq", "first_filing"]
+    q = quarters[cols].dropna(subset=["datadate"])
+    v = valid_links(links, cspec)[["KYGVKEY", "LPERMNO", "LINKDT", "LINKENDDT"]]
+    m = q.merge(v, on="KYGVKEY", how="inner")
+    m = m[(m["LINKDT"] <= m["datadate"]) & (m["datadate"] <= m["LINKENDDT"])]
+    s = spells[["PERMNO", "MbrStartDt", "MbrEndDt"]].astype({"PERMNO": "int64"})
+    m = m.merge(s, left_on="LPERMNO", right_on="PERMNO", how="inner")
+    m = m[(m["MbrStartDt"] <= m["datadate"]) & (m["datadate"] <= m["MbrEndDt"])]
+    return m[cols].drop_duplicates(["KYGVKEY", "FYYYYQ"]).reset_index(drop=True)
+
+
+def rdq_coverage_by_fiscal_year(universe_quarters: pd.DataFrame) -> dict[str, dict]:
+    """Per fiscal year (``FYEARQ``): the members' firm-quarters, and the share
+    with a report date (RDQ) and with a 10-Q/10-K filing date. Keys are
+    ``"fiscal_<year>"`` (a bare number could equal an identifier)."""
+    out: dict[str, dict] = {}
+    for year, g in universe_quarters.groupby("FYEARQ"):
+        n = len(g)
+        out[f"fiscal_{int(year)}"] = {
+            "firm_quarters": int(n),
+            "rdq_share": float(g["rdq"].notna().mean()) if n else 0.0,
+            "filing_share": float(g["first_filing"].notna().mean()) if n else 0.0,
+        }
+    return out
+
+
+def early_years_table(
+    report: dict[str, Any], rdq_by_year: dict[str, dict], first: int, last: int
+) -> pd.DataFrame:
+    """One row per year ``first..last``: the panel's rows and flag rates by
+    **calendar** year (from the coverage report's ``by_year``) beside the
+    members' RDQ and filing-date coverage by **fiscal** year. Aggregate only."""
+    if last < first:
+        raise ValueError(f"early-years range {first}..{last} is empty")
+    by_year = report.get("by_year") or {}
+    rows = {}
+    for year in range(first, last + 1):
+        cal = by_year.get(f"year_{year}", {})
+        fis = rdq_by_year.get(f"fiscal_{year}", {})
+        rows[f"year_{year}"] = {
+            "rows": cal.get("rows"),
+            "flag_price_rate": cal.get("flag_price_rate"),
+            "flag_fund_rate": cal.get("flag_fund_rate"),
+            "sector_missing_share": cal.get("sector_missing_share"),
+            "member_firm_quarters": fis.get("firm_quarters"),
+            "rdq_share": fis.get("rdq_share"),
+            "filing_share": fis.get("filing_share"),
+        }
+    return pd.DataFrame(rows).T
+
+
 def _by_year_frames(report: dict[str, Any]) -> tuple[pd.DataFrame, pd.DataFrame]:
     by_year = report.get("by_year") or {}
     present = pd.DataFrame({y: v["present_share"] for y, v in by_year.items()}).T
@@ -128,21 +198,27 @@ def _by_year_frames(report: dict[str, Any]) -> tuple[pd.DataFrame, pd.DataFrame]
 
 
 def write_feature_coverage(
-    report: dict[str, Any], out_dir: str | Path, forbidden: Iterable[str]
+    report: dict[str, Any],
+    out_dir: str | Path,
+    forbidden: Iterable[str],
+    tables: dict[str, pd.DataFrame] | None = None,
 ) -> list[Path]:
     """Check, then write ``coverage.json``, ``present_share_by_year.csv`` and
-    ``rates_by_year.csv`` into ``out_dir``. Nothing is written if the check
-    fails."""
+    ``rates_by_year.csv`` into ``out_dir``, plus ``<name>.csv`` for every
+    extra table in ``tables`` (e.g. the early-years table of brief 09 A.3).
+    Nothing is written if any check fails."""
     forbidden = list(forbidden)
     assert_aggregate_only(report, forbidden)
     present, rates = _by_year_frames(report)
-    for frame in (present, rates):
+    frames = {"present_share_by_year": present, "rates_by_year": rates, **(tables or {})}
+    for frame in frames.values():
         assert_aggregate_only({"index": [str(i) for i in frame.index],
                                "columns": [str(c) for c in frame.columns]}, forbidden)
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    paths = [out / "coverage.json", out / "present_share_by_year.csv", out / "rates_by_year.csv"]
+    paths = [out / "coverage.json"]
     paths[0].write_text(json.dumps(report, indent=2, default=str))
-    present.to_csv(paths[1])
-    rates.to_csv(paths[2])
+    for name, frame in frames.items():
+        paths.append(out / f"{name}.csv")
+        frame.to_csv(paths[-1])
     return paths

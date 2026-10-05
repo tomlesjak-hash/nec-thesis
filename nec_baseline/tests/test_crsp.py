@@ -130,13 +130,15 @@ def test_spec_defaults_are_the_brief_and_the_approved_indno():
     assert (s.stock_file, s.market_indno, s.membership_indno) == (
         "StkDlySecurityData", 1000500, 1000500,  # brief 08 C.1: OHLC and quotes
     )
-    assert (s.universe, s.start, s.end) == ("sp500", "2015-01-01", "2024-12-31")
+    # the 2000-2024 sample (Q16 (a), brief 09 A)
+    assert (s.universe, s.start, s.end) == ("sp500", "2000-01-01", "2024-12-31")
     assert s.post_delisting_return == "cash"
-    assert (s.member_count_min, s.member_count_max) == (500, 510)  # observed 502-508, +-2
+    # observed 498-508 over 2000-2024, +-2 (502-508 over 2015-2024 gave 500-510)
+    assert (s.member_count_min, s.member_count_max) == (496, 510)
     assert s.data_source == "crsp_ciz202512"
     assert Path(s.crsp_dir).name == "Data"
     assert s.derived_dir == Path(s.crsp_dir) / "derived"  # derived data stays inside Data/
-    assert s.panel_path.name == "pit_panel_crsp_2015-01-01_2024-12-31.pt"
+    assert s.panel_path.name == "pit_panel_crsp_2000-01-01_2024-12-31.pt"
     for bad in (dict(universe="r3000"), dict(post_delisting_return="zero"),
                 dict(member_count_min=510, member_count_max=500),
                 dict(start="2020-01-01", end="2019-01-01")):
@@ -573,10 +575,18 @@ def test_real_member_count_stays_in_the_band():
 @pytest.mark.crsp_data
 @needs_extract
 def test_real_delisting_returns_are_already_in_dlyret():
-    """A.4.2: on every delisting-return row of the extract, ``DlyRet`` equals
-    ``DelRet``, and the two are missing together."""
+    """A.4.2: on every delisting-return row of an index member in the
+    extract, ``DlyRet`` equals ``DelRet``, and the two are missing together.
+
+    Members only: since brief 08 the extract also carries the other share
+    classes of the members' companies (for market equity), and their
+    delisting records are not extracted, because no panel row uses them
+    (``extract_crsp`` keeps ``StkDelists`` rows of members)."""
     ex = load_extract(REAL)
-    rows = ex.stock[ex.stock["DlyDelFlg"] == "Y"][["PERMNO", "DlyCalDt", "DlyRet"]]
+    members = {int(p) for p in membership_universe(read_membership(REAL))
+               .members_union(REAL.start, REAL.end)}
+    rows = ex.stock[(ex.stock["DlyDelFlg"] == "Y") & ex.stock["PERMNO"].astype(int).isin(members)]
+    rows = rows[["PERMNO", "DlyCalDt", "DlyRet"]]
     joined = ex.delists.merge(rows, left_on=["PERMNO", "DelDlyDt"],
                               right_on=["PERMNO", "DlyCalDt"], how="inner")
     assert len(joined) == len(rows) > 0  # every delisting row has its record

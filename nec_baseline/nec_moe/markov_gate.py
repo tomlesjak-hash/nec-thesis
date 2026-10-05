@@ -44,6 +44,19 @@ multiplicity of "best of N" reaches the deflated Sharpe like any other
 selection in this project, and convergence failures are reported rather than
 silently absorbed.
 
+**The native estimator and the gate's memory (brief 09 D).** With
+``fit_backend="native"`` the same model is fitted by the scaled Baum-Welch of
+:mod:`nec_moe.baum_welch` (multi-start from the same starting values),
+validated against statsmodels on log-likelihood, parameters and filtered
+probabilities. With ``memory="regime_clock"`` a second, weighted pass follows
+the unweighted one: its E-step is unchanged and its M-steps weight regime
+``k``'s terms by ``rho_g ** n_k(t, T)`` (theory notes section 7): each
+regime's emission ages on its own clock, and the transitions out of ``j`` on
+``j``'s. Calm data turns over while a crisis keeps its weight, so a long calm
+spell cannot dissolve the stress state the way calendar forgetting can
+(section 7.3). Only the estimate changes; the filter, ``apply_causal`` and the
+gate weight are as before.
+
 **The gate weight (Q27).** The served row at date t is built from the
 filtered probability ``xi_t`` and the frozen, canonically ordered transition
 matrix ``A`` by :func:`gate_weight_probs`: by default the average over the
@@ -65,8 +78,10 @@ import numpy as np
 import torch
 from torch import Tensor
 
-from .config import MarkovGateConfig, NECConfig
+from . import baum_welch as bw
+from .config import MarkovGateConfig, NECConfig, check_gate_memory
 from .data import Panel
+from .decay import decay_factor, regime_clock_exponents
 from .priors import PrecomputedRegimePrior, PriorOutput
 
 __all__ = [
@@ -81,7 +96,22 @@ __all__ = [
     "MarkovSwitchingRegimePrior",
     "date_level_series",
     "gate_weight_probs",
+    "regime_clock_gate_weights",
+    "GateNotSettledWarning",
 ]
+
+
+class GateNotSettledWarning(UserWarning):
+    """The regime-clock gate's weighted pass did not settle within
+    ``weighted_maxiter`` (brief 09 D.2): reported, never silently stopped."""
+
+
+def regime_clock_gate_weights(filtered: np.ndarray, half_life: float) -> np.ndarray:
+    """``omega_t(k) = rho_g ** n_k(t, T)``, ``(T, K)`` (brief 09 D.2): each
+    regime's clock, from the first pass's filtered probabilities, with
+    ``rho_g = 2 ** (-1 / H_gate)`` and ``n_k`` as for the experts
+    (:func:`nec_moe.decay.regime_clock_exponents`)."""
+    return decay_factor(half_life) ** regime_clock_exponents(filtered)
 
 # --------------------------------------------------------------------------- #
 # What the gate is fitted on (brief 03 section 2)
@@ -490,6 +520,19 @@ class MarkovFit:
     # per start: "failed" (raised) | "nonconverged" | "converged" (brief 04 B.3)
     start_status: tuple[str, ...] = field(default_factory=tuple)
     distinct_optima_tol: float = 1.0
+    # brief 09 D: which estimator, which memory; the canonical initial
+    # distribution the native filter starts from
+    backend: str = "statsmodels"
+    memory: str = "full"
+    gate_half_life: float = math.inf
+    initial: np.ndarray | None = None  # (K,) canonical; native only
+    # the regime-clock weighted pass: whether it settled, its iterations, and
+    # per iteration (unweighted log-likelihood, weighted objective, largest
+    # parameter change), the objective logged every iteration (D.2)
+    weighted_settled: bool | None = None
+    weighted_iterations: int = 0
+    weighted_trace: tuple[tuple[float, float, float], ...] = field(default_factory=tuple)
+    unweighted_llf: float | None = None  # pass 1's log-likelihood
 
     @property
     def distinct_optima(self) -> list[float]:
@@ -506,6 +549,7 @@ class MarkovFit:
         optima = self.distinct_optima
         m: dict[str, float] = {
             "gate_llf": self.llf,
+            "gate_native": float(self.backend == "native"),
             "gate_n_starts": float(self.n_starts),
             "gate_n_converged": float(self.n_converged),
             "gate_n_failed": float(self.start_status.count("failed")),
@@ -528,6 +572,13 @@ class MarkovFit:
         # omitted rather than reported as 0, which would read as a tie
         if len(optima) > 1:
             m["gate_best_minus_second"] = optima[0] - optima[1]
+        if self.weighted_settled is not None:  # the regime-clock pass ran
+            m["gate_weighted_settled"] = float(self.weighted_settled)
+            m["gate_weighted_iterations"] = float(self.weighted_iterations)
+            if self.weighted_trace:
+                m["gate_weighted_objective_final"] = float(self.weighted_trace[-1][1])
+            if self.unweighted_llf is not None:
+                m["gate_llf_pass1"] = float(self.unweighted_llf)
         for k in range(len(self.variances)):
             m[f"gate_mean_{k}"] = float(self.means[k])
             m[f"gate_variance_{k}"] = float(self.variances[k])
@@ -623,6 +674,7 @@ class MarkovSwitchingRegimePrior(PrecomputedRegimePrior):
                 f"unknown markov_gate.order_by {cfg.order_by!r}; registered: "
                 f"{sorted(ORDERING_REGISTRY)}"
             )
+        check_gate_memory(cfg)
         self.cfg = cfg
         self.fit_result: MarkovFit | None = None
         self._model_kwargs: dict | None = None
@@ -676,14 +728,123 @@ class MarkovSwitchingRegimePrior(PrecomputedRegimePrior):
         self.horizon = self._panel_horizon(train_panel)
         dates, series = date_level_series(train_panel, self.cfg)
         model = self._build_model(series)
-        result, trace = self._multi_start_fit(model, series)
-        perm = self._canonical_order(result)
-        self.fit_result = self._summarize(result, perm, trace)
+        if self.cfg.fit_backend == "native":
+            self.fit_result, filtered = self._native_fit(model, series)
+        else:
+            result, trace = self._multi_start_fit(model, series)
+            perm = self._canonical_order(result)
+            self.fit_result = self._summarize(result, perm, trace)
+            filtered = self._filtered_canonical(result, perm)
         # the fitted table: gate weights from the filtered probabilities over
         # the training dates (Q27), the same rule apply_causal uses
-        filtered = self._filtered_canonical(result, perm)
         self._remember_filtered(dates[self.cfg.order :], filtered)
         self.set_fitted_table(dates[self.cfg.order :], self._gate_log_prior(filtered))
+
+    # ---------------------------------------------------- native (brief 09 D)
+    def _native_starts(self, model, series: np.ndarray) -> list[bw.HMMParams]:
+        """The start-value machinery's starts (statsmodels' constrained
+        vectors, read by name), as native parameters. A ``None`` start
+        (``default_jitter``'s first) is statsmodels' own default start."""
+        names = list(model.param_names)
+        vectors = START_SCHEME_REGISTRY[self.cfg.start_scheme](model, series, self.cfg)
+        return [
+            bw.params_from_statsmodels(
+                names, model.start_params if v is None else v, self.cfg.k_regimes
+            )
+            for v in vectors
+        ]
+
+    def _native_fit(self, model, series: np.ndarray) -> tuple[MarkovFit, np.ndarray]:
+        """Multi-start native Baum-Welch (pass 1), then, for
+        ``memory="regime_clock"`` with a finite half-life, the weighted pass
+        2 from pass 1's estimate. Returns the frozen fit and the canonically
+        ordered filtered probabilities of the final parameters."""
+        c = self.cfg
+        floor = c.variance_floor_rel * float(np.var(series))
+        best: bw.BaumWelchResult | None = None
+        llfs: list[float] = []
+        status: list[str] = []
+        best_i = -1
+        for i, start in enumerate(self._native_starts(model, series)):
+            try:
+                res = bw.baum_welch(series, start, initial=c.initial_distribution,
+                                    variance_floor=floor, tol=c.em_tol, maxiter=c.em_maxiter)
+            except (ValueError, FloatingPointError, np.linalg.LinAlgError):
+                llfs.append(float("nan"))
+                status.append("failed")
+                continue
+            llfs.append(res.loglik)
+            status.append("converged" if res.converged else "nonconverged")
+            if res.converged and (best is None or res.loglik > best.loglik):
+                best, best_i = res, i
+        if best is None:
+            raise RuntimeError(
+                f"native Markov switching gate: none of {len(llfs)} starts converged "
+                f"({status.count('failed')} raised, {status.count('nonconverged')} did "
+                "not settle within em_maxiter). Reported rather than silently falling "
+                "back to an unconverged fit"
+            )
+        final, pass1_llf = best, None
+        settled: bool | None = None
+        trace: tuple[tuple[float, float, float], ...] = ()
+        if c.memory == "regime_clock" and not math.isinf(c.gate_half_life):
+            omega = regime_clock_gate_weights(best.filtered, c.gate_half_life)
+            final = bw.baum_welch(series, best.params, weights=omega,
+                                  initial=c.initial_distribution, variance_floor=floor,
+                                  tol=c.weighted_tol, maxiter=c.weighted_maxiter)
+            pass1_llf, settled, trace = best.loglik, final.converged, final.trace
+            if not final.converged:
+                import warnings
+
+                warnings.warn(
+                    f"the regime-clock gate's weighted pass did not settle in "
+                    f"{final.n_iter} iterations (last parameter change "
+                    f"{trace[-1][2]:.3e} > weighted_tol={c.weighted_tol}); the last "
+                    "iterate is used and gate_weighted_settled=0 is recorded",
+                    GateNotSettledWarning, stacklevel=3,
+                )
+        raw = final.params
+        perm = ORDERING_REGISTRY[c.order_by](raw.variances, raw.means)
+        canon = raw.permuted(perm)
+        a = canon.transition
+        with np.errstate(divide="ignore"):
+            durations = 1.0 / (1.0 - np.diag(a))
+        fit = MarkovFit(
+            params=bw.params_to_statsmodels(raw, list(model.param_names)),
+            llf=final.loglik,
+            transition=a,
+            expected_durations=durations,
+            variances=canon.variances,
+            means=canon.means,
+            permutation=tuple(int(i) for i in perm),
+            n_starts=len(llfs),
+            n_converged=status.count("converged"),
+            chosen_start=best_i,
+            start_llfs=tuple(llfs),
+            start_status=tuple(status),
+            distinct_optima_tol=c.distinct_optima_tol,
+            backend="native",
+            memory=c.memory,
+            gate_half_life=c.gate_half_life,
+            initial=canon.initial,
+            weighted_settled=settled,
+            weighted_iterations=final.n_iter if settled is not None else 0,
+            weighted_trace=trace,
+            unweighted_llf=pass1_llf,
+        )
+        # the filter at the frozen canonical parameters: exactly what
+        # apply_causal will run over the extended series, so the two agree to
+        # the last bit on the training dates
+        filtered, _ = bw.filter_series(series, canon)
+        return fit, filtered
+
+    def native_params(self) -> bw.HMMParams:
+        """The frozen native parameters, canonically ordered."""
+        f = self.fit_result
+        if f is None or f.backend != "native" or f.initial is None:
+            raise ValueError("no native fit to read parameters from")
+        return bw.HMMParams(means=f.means, variances=f.variances,
+                            transition=f.transition, initial=f.initial)
 
     def _multi_start_fit(self, model, series: np.ndarray):
         """Best converged fit over the scheme's starts; every start is a trial.
@@ -845,6 +1006,9 @@ class MarkovSwitchingRegimePrior(PrecomputedRegimePrior):
             raise ValueError("apply_causal before fit: nothing is frozen yet")
         self._panel_horizon(panel)  # the same target horizon as the fit's
         dates, series = date_level_series(panel, self.cfg)
+        if self.fit_result.backend == "native":
+            self._apply_native(dates, series)
+            return
         model = self._build_model(series)
         frozen = self.fit_result.params
         applied = model.filter(frozen)  # NOT .fit(): no re-estimation
@@ -860,6 +1024,27 @@ class MarkovSwitchingRegimePrior(PrecomputedRegimePrior):
         self._remember_filtered(dates[self.cfg.order :], filtered,
                                 only_after=self.fit_max_date)
         self.extend_causal_table(dates[self.cfg.order :], self._gate_log_prior(filtered))
+
+    def _apply_native(self, dates: Tensor, series: np.ndarray) -> None:
+        """The frozen native filter over the extended series (no estimation).
+
+        The series starts at the training block's first date, so the filter
+        over the fitted dates is the fit's own; asserted equal to the stored
+        filtered probabilities, which also proves the later dates cannot have
+        moved the earlier ones (the filter is causal)."""
+        filtered, _ = bw.filter_series(series, self.native_params())
+        seen = [i for i, d in enumerate(dates.tolist())
+                if self.fit_max_date is not None and d <= self.fit_max_date]
+        if seen:
+            fitted = self.filtered_probabilities(dates[seen])
+            if not np.array_equal(filtered[seen], fitted):
+                raise ValueError(
+                    "the frozen native filter does not reproduce the fit's filtered "
+                    "probabilities on the training dates: the applied series or "
+                    "parameters differ from the fitted ones"
+                )
+        self._remember_filtered(dates, filtered, only_after=self.fit_max_date)
+        self.extend_causal_table(dates, self._gate_log_prior(filtered))
 
     # ------------------------------------------------------------ forward
     def forward(self, gate_logits: Tensor, ctx=None) -> PriorOutput:

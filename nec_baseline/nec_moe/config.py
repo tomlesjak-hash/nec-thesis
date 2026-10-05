@@ -325,6 +325,37 @@ class MarkovGateConfig:
       ``h`` is the panel target's horizon (``DataConfig.horizon_periods``),
       never a field here, so it cannot disagree with the target. The same
       rule applies on training and on test dates.
+
+    The gate's memory and estimator (brief 09 D; Q16 (d)(e)):
+
+    - ``fit_backend``: ``"statsmodels"`` (``MarkovRegression``, BFGS after
+      a few EM steps; the default) or ``"native"`` (:mod:`nec_moe.baum_welch`,
+      a scaled Baum-Welch for the order-0 Gaussian model, which can weight
+      its M-steps). ``"native"`` needs ``order = 0``, ``trend = "c"`` and
+      switching mean and variance (what ``MarkovRegression`` fits today).
+    - ``memory``: ``"full"`` (every training date weighs the same; the
+      default until the pilot chooses) or ``"regime_clock"``: a second,
+      weighted Baum-Welch pass whose M-steps weight regime ``k``'s terms by
+      ``rho_g ** n_k(t, T)``, ``n_k`` the later regime-``k`` experience by
+      the first pass's filtered probabilities, ``rho_g = 2 ** (-1 /
+      gate_half_life)`` (theory notes section 7). Needs ``fit_backend =
+      "native"``; with ``order > 0`` it raises ``NotImplementedError`` (the
+      autoregressive gate keeps full memory). It changes only how the
+      parameters are estimated: the forward filter, ``apply_causal`` and
+      ``gate_weight`` are unchanged.
+    - ``gate_half_life``: in regime-days; infinity reproduces the full-memory
+      fit exactly (the second pass is skipped).
+    - ``initial_distribution`` (native only): ``"stationary"`` (the default:
+      ``rho`` is the stationary distribution of ``A``, as statsmodels'
+      steady-state initialisation, so both backends maximise the same
+      likelihood) or ``"estimated"`` (the textbook free ``rho = gamma_1``).
+    - ``em_tol`` / ``em_maxiter``: the native unweighted fit's stopping rule
+      (largest parameter change; a start that does not settle counts as not
+      converged, like a statsmodels start); ``weighted_tol`` /
+      ``weighted_maxiter``: the same for the weighted pass, which is a
+      weighted generalised-EM heuristic and is reported, never silently
+      stopped, when it does not settle; ``variance_floor_rel``: the native
+      M-step's variance floor, relative to the series' variance.
     """
 
     series: str = "market_excess_return"  # registry key
@@ -388,6 +419,16 @@ class MarkovGateConfig:
     # Q27: "filtered" | "predicted" | "window" (decided); see the docstring
     gate_weight: Literal["filtered", "predicted", "window"] = "window"
     registry_tag: str = "markov_gate_starts"  # TrialRegistry tag for §5
+    # brief 09 D: estimator and memory (see the docstring)
+    fit_backend: Literal["statsmodels", "native"] = "statsmodels"
+    memory: Literal["full", "regime_clock"] = "full"
+    gate_half_life: float = math.inf  # regime-days; inf = full memory
+    initial_distribution: Literal["stationary", "estimated"] = "stationary"
+    em_tol: float = 1e-8
+    em_maxiter: int = 5000
+    weighted_tol: float = 1e-8
+    weighted_maxiter: int = 5000
+    variance_floor_rel: float = 1e-6
 
 
 @dataclass(frozen=True)
@@ -512,6 +553,45 @@ class TrainConfig:
     # infinity means equal weights. Default "none" until the pilot chooses.
     expert_decay: Literal["none", "regime_clock"] = "none"
     expert_decay_half_life: float = math.inf
+
+
+def check_gate_memory(mg: MarkovGateConfig) -> None:
+    """The brief 09 D.3 rules for the gate's estimator and memory."""
+    if mg.fit_backend not in ("statsmodels", "native"):
+        raise ValueError(f"unknown markov_gate.fit_backend {mg.fit_backend!r}")
+    if mg.memory not in ("full", "regime_clock"):
+        raise ValueError(f"unknown markov_gate.memory {mg.memory!r}")
+    if mg.memory == "regime_clock" and mg.order > 0:
+        raise NotImplementedError(
+            "markov_gate.memory='regime_clock' is implemented for the order-0 gate "
+            "only; the autoregressive gate (order > 0) keeps full memory for now "
+            "(brief 09 D.3)"
+        )
+    if mg.memory == "regime_clock" and mg.fit_backend != "native":
+        raise ValueError(
+            "markov_gate.memory='regime_clock' needs fit_backend='native': statsmodels "
+            "takes no observation weights"
+        )
+    if mg.fit_backend == "native":
+        if mg.order > 0:
+            raise NotImplementedError(
+                "fit_backend='native' fits the order-0 Gaussian model only; use "
+                "'statsmodels' for the autoregressive gate"
+            )
+        if mg.trend != "c" or not (mg.switching_trend and mg.switching_variance):
+            raise NotImplementedError(
+                "fit_backend='native' fits a switching constant and a switching "
+                "variance (trend='c', switching_trend and switching_variance True)"
+            )
+    if mg.initial_distribution not in ("stationary", "estimated"):
+        raise ValueError(f"unknown initial_distribution {mg.initial_distribution!r}")
+    if not mg.gate_half_life > 0:
+        raise ValueError(f"gate_half_life must be > 0, got {mg.gate_half_life}")
+    if not (mg.em_tol > 0 and mg.weighted_tol > 0 and mg.em_maxiter >= 1
+            and mg.weighted_maxiter >= 1):
+        raise ValueError("em_tol, weighted_tol must be > 0 and the maxiters >= 1")
+    if not mg.variance_floor_rel >= 0:
+        raise ValueError(f"variance_floor_rel must be >= 0, got {mg.variance_floor_rel}")
 
 
 @dataclass(frozen=True)
@@ -814,6 +894,7 @@ class NECConfig:
                 f"unknown markov_gate.gate_weight {mg.gate_weight!r}; use one of "
                 f"{GATE_WEIGHTS}"
             )
+        check_gate_memory(mg)
         from .markov_gate import (
             ORDERING_REGISTRY,
             SERIES_REGISTRY,

@@ -272,6 +272,20 @@ class Experiment:
     # 1..h-step-ahead regime probabilities | "predicted" | "filtered"
     gate_weight: str = "window"
     gate_registry_tag: str = "markov_gate_starts"
+    # the gate's estimator and memory (Q16 (d)(e), brief 09 D; the pilot
+    # chooses the memory, so the defaults are full memory on statsmodels):
+    # "statsmodels" | "native" (scaled Baum-Welch, order 0); "full" |
+    # "regime_clock" (weighted second pass; native only); half-life in
+    # regime-days (inf = full memory)
+    gate_fit_backend: str = "statsmodels"
+    gate_memory: str = "full"
+    gate_half_life: float = math.inf
+    gate_initial_distribution: str = "stationary"  # native: "stationary" | "estimated"
+    gate_em_tol: float = 1e-8                  # native: parameter-change tolerance
+    gate_em_maxiter: int = 5000
+    gate_weighted_tol: float = 1e-8            # the regime-clock pass
+    gate_weighted_maxiter: int = 5000
+    gate_variance_floor_rel: float = 1e-6      # native variance floor / series variance
 
     # ---------------- checkpointing / resume ----------------
     checkpoint_every: int = 0       # save training state every N steps (0 = only at the
@@ -449,7 +463,16 @@ def _nec_config(exp: Experiment, panel: Panel, sigma_init: float) -> NECConfig:
                                      prob_floor=exp.gate_prob_floor,
                                      order_by=exp.gate_order_by,
                                      gate_weight=exp.gate_weight,  # type: ignore[arg-type]
-                                     registry_tag=exp.gate_registry_tag),
+                                     registry_tag=exp.gate_registry_tag,
+                                     fit_backend=exp.gate_fit_backend,  # type: ignore[arg-type]
+                                     memory=exp.gate_memory,  # type: ignore[arg-type]
+                                     gate_half_life=exp.gate_half_life,
+                                     initial_distribution=exp.gate_initial_distribution,  # type: ignore[arg-type]
+                                     em_tol=exp.gate_em_tol,
+                                     em_maxiter=exp.gate_em_maxiter,
+                                     weighted_tol=exp.gate_weighted_tol,
+                                     weighted_maxiter=exp.gate_weighted_maxiter,
+                                     variance_floor_rel=exp.gate_variance_floor_rel),
         base=BaseConfig(enabled=exp.base_enabled,
                         hidden_dims=tuple(exp.base_hidden_dims),
                         dropout=exp.base_dropout,

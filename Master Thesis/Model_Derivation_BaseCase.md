@@ -44,8 +44,9 @@ calls both sigma.
 
 $$\hat y_{i,t} \;=\; f_0(x_{i,t};\phi) \;+\; \sum_{k=1}^{K} \pi_k(t)\, r_k(x_{i,t};\psi_k)$$
 
-where $\pi_k(t) = \mathbb{P}(s_t = k \mid r_1,\dots,r_t)$ is the **filtered** regime probability from
-Stage 1, $f_0$ is the frozen base of Stage 2, and $r_k$ are the expert corrections of Stage 3.
+where $\pi_k(t)$ is the gate weight from Stage 1. **Updated 2026-10-05 (Q27):** it is the average over the
+5-day target window of the h-step-ahead regime probabilities, built from the **filtered** probability
+(section 1.7); originally it was the filtered probability itself. Stage 1, $f_0$ is the frozen base of Stage 2, and $r_k$ are the expert corrections of Stage 3.
 
 ---
 
@@ -219,6 +220,15 @@ Two practical consequences.
 Define, once and for all,
 
 $$\pi_k(t) \;\equiv\; \xi_{t\mid t}(k)$$
+
+**Superseded 2026-10-05 (Advisor_Questions.md, Q27).** The gate weight for an h-day target is the
+average of the h-step-ahead probabilities, built from the filtered probability and the transition matrix:
+
+$$\pi_k(t) \;\equiv\; \bar w_k(t) \;=\; \frac{1}{h}\sum_{j=1}^{h}\big[\xi_{t\mid t}^{\top}\mathbf P^{\,j}\big]_k, \qquad h = 5$$
+
+It is still built from the filtered series, never the smoothed one, and is used on training and test
+dates alike, so everything above about look-ahead and consistency still applies. It is exact for the
+expected 5-day return; the filtered probability alone assumes the regime never changes inside the window.
 
 ### 1.8 Freezing, and application beyond the training block
 

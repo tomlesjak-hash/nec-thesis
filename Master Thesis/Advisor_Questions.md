@@ -1274,61 +1274,6 @@ feature or a leak?
 
 ---
 
-### Q21. At what frequency should the gate and the cross-section run, and what is the target horizon?
-
-**Status:** open, raised 2026-09-26. Tom's current preference is a **daily gate and a daily
-cross-section**, but it is kept open until it has been discussed. Nothing in the code commits to an
-answer: the CRSP loader (brief 06) builds the daily panel the pipeline already uses, and the horizon
-stays a config field.
-
-**Three questions that have to be answered together.**
-
-1. **Gate frequency.** How often the regime probabilities are updated. A daily Hamilton filter sees
-   about 21 times as many observations as a monthly one, so its transition matrix is better
-   identified and it reacts to volatility clustering within days rather than weeks.
-2. **Cross-section frequency.** How often the stocks are ranked against each other, which is also how
-   often the portfolio is rebalanced. The options are (a) daily gate with a daily cross-section,
-   (b) daily gate with a monthly cross-section, where the gate probability on the last trading day of
-   each month is the input to that month's cross-section, and (c) monthly for both.
-3. **Target horizon `h`.** The forward return being predicted: next day (`h = 1`), next week
-   (`h = 5`, what the code uses now as `fwd_ret_5d`), or next month (`h` of about 21). Any `h > 1` at
-   daily frequency creates overlapping targets, which the code now handles with a Hansen-Hodrick
-   long-run variance at lag `h - 1` (audit finding E-2), and sets the purge gap to `h` days (see Q22).
-
-**Considerations.**
-
-- **Predictability is weaker and noisier at daily horizons.** Next-day cross-sectional returns are
-  dominated by short-term reversal and by bid-ask bounce: a trade at the bid followed by one at the
-  ask looks like a return even when the price has not moved. Gu, Kelly and Xiu, the benchmark, use
-  monthly data partly for this reason. A daily cross-section is a legitimate choice but needs one
-  sentence of justification and a comparison that nets out transaction costs.
-- **Turnover.** Daily rebalancing multiplies turnover, so the portfolio metrics in Q9 are only
-  meaningful after costs.
-- **Comparability.** A monthly cross-section is directly comparable with Gu, Kelly and Xiu and with
-  most of the asset-pricing literature; a daily one is not.
-- **Compute.** A daily cross-section has about 21 times the rows of a monthly one over the same
-  window, which feeds straight into the compute budget the advisor asked for.
-- **Fundamentals** (Compustat) update quarterly, so they are equally stale at either frequency and do
-  not bear on the choice.
-
-**Reading, about an hour.**
-- Roll, R. (1984), "A simple implicit measure of the effective bid-ask spread in an efficient
-  market", *Journal of Finance* 39(4). Why bid-ask bounce creates spurious negative autocorrelation in
-  short-horizon returns.
-- Jegadeesh, N. (1990), "Evidence of predictable behavior of security returns", *Journal of Finance*
-  45(3), and Lehmann, B. (1990), "Fads, martingales, and market efficiency", *Quarterly Journal of
-  Economics* 105(1). Short-term reversal at monthly and weekly horizons.
-- Gu, S., Kelly, B. and Xiu, D. (2020), *Review of Financial Studies* 33(5), the data section, for
-  why the benchmark is monthly.
-
-**Ask the advisor:**
-(a) Which pairing: daily/daily, daily gate with a monthly cross-section, or monthly/monthly?
-(b) Which target horizon `h`?
-(c) If the cross-section is daily, is comparability with Gu, Kelly and Xiu still required, for
-    example through a monthly robustness arm?
-
----
-
 ### Q22. Should the gate's filter run through the purge gap?
 
 **Status:** open, raised 2026-09-26 from audit finding G-1. Nothing decided; the code keeps its
@@ -1397,6 +1342,189 @@ departing from the literature's standard excess-return series?
 
 ---
 
+## RESOLVED
+
+### Q27. Which gate weight: filtered, one-step predicted, or averaged over the 5-day window? [RESOLVED 2026-10-05]
+
+**Answer: the average over the target window of the h-step-ahead regime probabilities.** The same
+weight is used in training and in forecasting. Tom decided this on 2026-10-05. Before this, the item
+was listed as "not yet a question" in the Progress Tracker and in the PDF (Section 8.9).
+
+**The three candidates.** At the close of day t, the gate has today's filtered probability, the
+probability of today's regime given the market series up to t:
+
+$$\xi_{t\mid t}(k)=\mathbb P(z_t=k\mid\mathcal F_t)$$
+
+From it, with the transition matrix A, it can form:
+
+1. **Filtered:** today's regime, the filtered probability itself. Model_Derivation_BaseCase.md and
+   the Hamilton gate in the code (`markov_gate.py`, `filtered_marginal_probabilities`) use this.
+2. **One-step predicted:** tomorrow's regime.
+
+   $$\pi_k(t)=\mathbb P(z_{t+1}=k\mid\mathcal F_t)=\big[\xi_{t\mid t}^\top A\big]_k$$
+
+   The PDF's one-step derivation and the backprop-HMM baseline use this.
+3. **Window average (chosen):** the expected share of the target window (t, t+h] spent in each
+   regime, with h = 5 (Q21).
+
+   $$\bar w_k(t)=\frac1h\sum_{j=1}^{h}\big[\xi_{t\mid t}^\top A^{\,j}\big]_k$$
+
+All three use only the market up to day t (they are F_t-measurable), so none has look-ahead.
+
+**Why the window average, in depth.**
+
+1. **It is the one that is exact for the target.** The target is the sum of h daily market-neutral
+   returns. Assume each day's expected return is set by that day's regime, with regime k contributing
+   one h-th of expert k's window prediction per day. Then
+   $$\mathbb E[y_{i,t}\mid\mathcal F_t]=\sum_{j=1}^h\sum_k\mathbb P(z_{t+j}=k\mid\mathcal F_t)\,\frac{\mu_k(x_{i,t})}{h}=\sum_k\bar w_k(t)\,\mu_k(x_{i,t})$$
+   So the gate-weighted forecast with these weights is exactly the conditional expected 5-day return.
+   The expected within-regime noise also adds up over days, so it is matched as well. The filtered
+   weight assumes the regime never changes during the window. The one-step weight assumes it changes
+   at most once, tomorrow. Both are approximations to the window average.
+2. **It is consistent with the generative model.** Returns on each future day come from that day's
+   regime (PDF Section 6). For h = 1 the window average reduces to the one-step predicted
+   probability, so the one-step derivations in the PDF are the h = 1 case of this rule.
+3. **It is the textbook multi-step forecast.** In Hamilton's framework, a forecast h days ahead uses
+   the filtered belief moved h steps forward with the transition matrix (Hamilton 1994, ch. 22).
+   Regime-switching asset allocation does the same over a holding period (Guidolin & Timmermann 2007).
+   Using today's filtered probability for a future window is the practitioners' shortcut.
+4. **It costs no information and no look-ahead.** It is built from the filtered belief and the frozen
+   A.
+5. **Training and forecasting use the same weight,** so the experts never face a different kind of
+   gate weight at test time (the same principle as using filtered rather than smoothed probabilities
+   on training dates).
+
+**Descriptive check.** A 2-state Gaussian Hamilton model was fitted to the CRSP S&P 500 index (INDNO
+1000500), daily, 2015-2024. This is a full-sample fit of the gate alone, not model results.
+
+| Regime | Daily volatility | Expected duration |
+|---|---|---|
+| Calm | 0.6% | about 54 days |
+| Stressed | 1.8% | about 27 days |
+
+The weight on the stressed regime differs from the filtered weight as follows:
+
+| Comparison | Mean gap | Largest gap |
+|---|---|---|
+| Window average | 0.055 | 0.10 |
+| One-step predicted | 0.020 | — |
+
+- The window-average gap exceeds 0.10 on about 10% of days, mostly when the filter is sure of stress.
+  The average then pulls the weight back towards the long-run mix, because stress tends to end.
+- About 18% of 5-day windows contain a switch of the filtered regime. This is a noisy proxy (crossings
+  of 0.5), but it means the "one regime per window" approximation fails often enough to matter.
+- The correction is modest and systematic, and largest in stress.
+
+**Costs accepted.**
+
+- The weights are slightly less sharp (about 0.86 instead of 1.00 when stress is certain), so the
+  experts separate a little less strongly.
+- The weight relies on A being well estimated, because errors in A compound over h steps.
+- The mixture likelihood with these weights is still the "one regime per window" approximation. The
+  exact distribution of a 5-day return is a mixture over regime paths. The window weights get its
+  mean and its expected within-regime variance right; the likelihood is used for estimation, not
+  inference.
+
+**What it changes.**
+
+- **Code.**
+  - The Hamilton gate must output the window average instead of the filtered probability. Per the
+    rule that every hyperparameter is a config field, this is a switch (`gate_weight`: `filtered` |
+    `predicted` | `window`, default `window`), with h read from the target's horizon.
+  - The backprop-HMM baseline (`HMMRegimePrior`) is **not** changed. Its latent is attached to each
+    date's whole target window, one latent per 5-day target rather than a daily market regime. Its
+    h-step predict from the last fully realised target is already the consistent weight for that
+    model. Correction 2026-10-05: an earlier line here said it would move to window weights.
+  - Gates without a transition matrix (the statistical jump model, the Wasserstein gate) need one
+    estimated from their decoded state sequence on the training block. That is a detail for the
+    implementation brief.
+- **Docs.**
+  - PDF Section 8.6 and 8.9 and the checklist are updated (revised 2026-10-05).
+  - Model_Derivation_BaseCase.md section 1.7 now points here.
+
+*Sources:* Hamilton (1994), *Time Series Analysis*, ch. 22; Guidolin & Timmermann (2007), JEDC 31(11);
+Hamilton (1989), Econometrica 57(2).
+
+### Q24. Is the regime latent per date or per observation in the likelihood? [RESOLVED 2026-10-05]
+
+**Answer: per row.** The experts are trained on the per-row objective, which is what the code already
+does (`losses.mixture_nll`, one log-sum-exp per row). Tom decided this on 2026-10-05. The model itself
+is unchanged: one regime per date, shared by all stocks (Section 6 of `MoE_HMM_Gate_Formulation.pdf`).
+Only the estimation objective is per row. No code change follows. The full theory is in Appendix D of
+the PDF, revised 2026-10-05.
+
+**The correction that settles it.** The original question (below) treated the per-row likelihood as
+the likelihood of a *different* model, one where each stock-day draws its own regime. That is true,
+but it is only half the picture. Under the per-date model, integrating out every other stock gives
+each stock's own distribution, and that is exactly the per-row factor:
+
+$$p\big(r_{i,t+1}\mid x_{i,t},\mathcal F_t\big)=\sum_{k=1}^K\pi_k(t)\,\mathcal N\big(r_{i,t+1};\mu_k(x_{i,t}),s_k^2\big)$$
+
+So the per-row objective is the sum of the *correct* one-stock log-likelihoods of our model. It drops
+only the dependence between stocks on the same date. That kind of objective is a **composite
+likelihood**, here the independence likelihood (Lindsay 1988; Varin, Reid & Firth 2011). The choice is
+therefore between the full likelihood and a composite likelihood **of the same model**, not between
+the right model and a wrong one.
+
+**Why per row, in depth.**
+
+1. **It estimates the right parameters.** Each term is a true log-density, so its score has expectation
+   zero at the true parameters, and a sum of such terms is an unbiased estimating equation whether or
+   not the terms are dependent. Under the usual regularity conditions the estimator is therefore
+   consistent. The frozen gate ties expert k to HMM state k, which removes the label-switching that
+   would otherwise make the mixture unidentified.
+2. **It is robust to the known failure of A3.** The per-date likelihood uses its extra information only
+   through A3: given the regime, stocks are independent. That is false. Industry peers share shocks
+   after the market is removed, and the market-neutral target leaves residual beta exposure (Q25).
+   - The per-date likelihood then counts correlated stocks as independent evidence. With clusters of
+     m stocks whose evidence terms correlate at rho, the cross-section is worth only
+     N / (1 + (m - 1) rho) independent stocks (Kish's design effect). In an illustration with assumed
+     values, m = 45 and rho = 0.1, the per-date posterior is about 5 times overconfident.
+   - Its parameters become pseudo-true values: the best fit to the wrong joint distribution. A
+     stylised simulation in Appendix D.8 shows this bites when regimes are close. With 600 dates,
+     200 stocks in clusters of 20 and within-cluster correlation 0.5, the per-row estimates stay near
+     the truth. The per-date estimates put the two experts' means nearly eight times too far apart
+     (0.38 against 0.05) and squeeze their noise levels together. With no correlation, both objectives
+     recover the truth.
+   - The per-row objective needs only each stock's own distribution to be right. Appendix D.8 gives a
+     model where A3 fails but every one-stock distribution is exactly right; the per-row objective
+     stays correctly specified and the per-date one does not. This is the logic of working-independence
+     estimating equations (Liang & Zeger 1986).
+3. **It keeps the frozen gate in charge.**
+   - Under the per-date likelihood, the responsibility (the regime posterior after seeing the returns)
+     is almost always 0 or 1. With about 0.22 nats of evidence per stock, 500 stocks give about 110
+     nats. The day's returns set it, whatever the gate said. Each expert learns from the days whose
+     cross-section fits it, so the stocks redefine the regimes every day.
+   - Under the per-row objective, one stock's evidence is small (a likelihood ratio of about 1.25), so
+     the responsibility stays near the gate's weight. Each expert learns mainly from the days the gate
+     assigns to its regime.
+   - That is the purpose of freezing the gate (Q19): regimes stay market regimes.
+4. **The forecast formula is identical.** Both use the gate-weighted average of the experts; only
+   training differs.
+5. **Practicalities.** The per-row objective is already implemented, mini-batches can be any rows, and
+   training is smoother.
+
+**Costs accepted.**
+
+- **Efficiency.** The information in the co-movement of stocks on a date is not used. The relevant
+  information measure is the Godambe (sandwich) information, which is never larger than the Fisher
+  information.
+- **No standard errors from the Hessian** (the matrix of second derivatives of the objective). The
+  inverse Hessian is not a valid variance under a composite likelihood. This does not matter here,
+  because inference comes from walk-forward rank ICs with Hansen-Hodrick corrections.
+- **Softer specialisation.** The expert with the larger noise level can drift into absorbing outlying
+  stock-days. Diagnostic after training: compare each expert's training weight with the gate's weight
+  and with the size of the residuals.
+
+**What this does not settle.** Q20, the error function. If the mixture likelihood is replaced by a
+point-prediction loss, the per-date/per-row distinction disappears.
+
+*Sources:* Lindsay (1988), Contemporary Mathematics 80; Varin, Reid & Firth (2011), Statistica Sinica 21;
+Liang & Zeger (1986), Biometrika 73(1); Pakel, Shephard, Sheppard & Engle (2021), JBES 39(3); Kish (1965),
+*Survey Sampling*; Godambe (1960), Annals of Mathematical Statistics 31.
+
+*Original question, for the record:*
+
 ### Q24. Is the regime latent per date or per observation in the likelihood?
 
 **Status:** open, raised 2026-10-01 while deriving the model from Bishop 14.5. Nothing decided; the
@@ -1432,7 +1560,594 @@ $$\prod_{i=1}^{N} \sum_{k=1}^{K} \pi_k(t)\, \mathcal{N}\big(y_{i,t};\, \mu_k(x_{
 regime story implies) or per observation (as implemented)? Is the per-observation form defensible as
 an approximation, and should the other be reported as a robustness check?
 
-## RESOLVED
+### Q26. Which input features should the model use, and how are they prepared? [RESOLVED 2026-10-05]
+
+**Status.** Decided by Tom on 2026-10-05, for the final model and not only the base case: the
+selection rule, the scaling, the missing-value treatment, the industry treatment and the final list of
+40 characteristics (57 inputs; part 6). The point-in-time fundamentals pipeline (part 5) is a proposal
+for the implementation brief.
+
+**The question.** Which characteristics go into the expert and base inputs, how many, and how are they
+scaled, filled when missing, and combined with industry membership? The code currently has 14
+price/volume snapshot features (`SNAPSHOT_FEATURES` in `features.py`), ranks them to [-0.5, 0.5],
+and drops any row with a missing value (`_valid_rows`). Two of the 14 are exact duplicates after
+ranking: `rel_ret_20d` (ret_20d minus the market's) and `rel_vol_20d` (vol_20d over the market's).
+The market term is the same for every stock on a date, so their ranks equal those of `ret_20d` and
+`vol_20d`.
+
+#### 1. Feature families and the selection rule (decided)
+
+**Decision.** There are three families:
+
+- price/volume, from CRSP daily;
+- fundamentals, from Compustat via the CRSP/Compustat link, point-in-time;
+- industry membership, from GICS sectors (Compustat; ICB was the original choice, see part 4).
+
+In the first two families, characteristics are chosen by one rule: **exactly two representatives for
+each of the 13 themes of Jensen, Kelly & Pedersen (2023)**. The themes are Accruals, Debt Issuance,
+Investment, Low Leverage, Low Risk, Momentum, Profit Growth, Profitability, Quality, Seasonality,
+Short-Term Reversal, Size and Value. Theme membership follows JKP's own cluster file (`Cluster
+Labels.csv` in bkelly-lab/ReplicationCrisis). That gives 26 characteristics. The industry block
+(part 4) comes on top.
+
+The two representatives of a theme are chosen by these criteria, in order:
+
+1. robust in large caps, because the universe is the S&P 500;
+2. relevant at the 5-day horizon (Q21);
+3. a payoff known to depend on the market state, which gives the experts something to disagree about;
+4. computable point-in-time from CRSP and Compustat;
+5. different from each other, so the second adds information rather than repeating the first.
+
+**Why a rule rather than a number.**
+
+1. **The independent information in characteristics is low-dimensional.**
+   - Green, Hand & Zhang (2017): 12 of 94 characteristics were independent determinants of returns
+     in non-microcaps over 1980-2014, and only 2 since 2003.
+   - Freyberger, Neuhierl & Weber (2020): about a dozen of 62 add information, and fewer among large
+     stocks.
+   - Hou, Xue & Zhang (2020): 65% of 452 anomalies fail once microcaps are controlled for.
+   - JKP: 153 factors cluster into 13 themes.
+
+   Adding features beyond the themes mostly adds near-copies: more parameters and noise, little
+   information.
+2. **Theme coverage** means no known source of cross-sectional return variation is left out.
+3. **Exactly two, rather than one or two** (Tom's choice). One representative makes a theme hostage
+   to a single definition. Two give a second measurement of the same economic idea, built a different
+   way, which averages out the quirks of any one definition. The count is also fixed and pre-specified
+   rather than tuned.
+4. **No search.** The set is fixed before any result is seen. No feature selection is done on
+   validation or test data, which protects the test set (Q15).
+
+**Not decided here; to run later.** Two checks:
+
+- A redundancy diagnostic on training data only: the average daily rank-correlation matrix,
+  hierarchical clustering, and PCA eigenvalues.
+- A pre-registered group ablation on validation: price/volume, then plus fundamentals, then plus
+  industry.
+
+PCA serves as a redundancy diagnostic, not as the selection rule, for three reasons:
+
+- it never sees the target;
+- it returns blends of features, not features;
+- a direction that explains little variance can be the most predictive one. Short-term reversal is
+  nearly uncorrelated with everything else, for example.
+
+#### 2. Scaling: rank to [-1, 1] (decided)
+
+On each date, each characteristic is ranked across the universe (ties get the average rank) and
+mapped linearly:
+
+$$
+x_{i,t} = \frac{2\,(\mathrm{rank}_{i,t} - 1)}{N_t - 1} - 1 \in [-1, 1]
+$$
+
+**Why rank at all.**
+
+- It is robust to outliers and to the heavy tails of accounting ratios. One firm with near-zero book
+  equity cannot dominate.
+- It removes the time variation in each characteristic's scale. The network sees the same uniform
+  distribution every day, so what it learns in 2017 applies in 2022.
+- The cost is that the size of differences between stocks is discarded and only their order kept.
+  This is accepted, as in Gu, Kelly & Xiu (2020) and Freyberger, Neuhierl & Weber (2020).
+
+**Why [-1, 1] rather than [-0.5, 0.5].**
+
+- The information is identical: one range is twice the other, and the first-layer weights absorb the
+  factor of 2.
+- The input variance is 1/3 instead of 1/12. That is closer to the unit-variance inputs that
+  standard weight initialisations (Xavier, He) assume.
+- Under weight decay, the narrower range needs weights twice as large, penalised four times as
+  heavily. That is an extra regularisation nobody chose.
+- It is the Gu, Kelly & Xiu convention.
+
+Implementation: `_cross_sectional_rank` currently maps to [-0.5, 0.5]. The 0/1 sector dummies are not
+ranked.
+
+#### 3. Missing values (decided)
+
+**Decision.**
+
+- (a) **Price/volume features** use rolling windows with a minimum count (80% of the window)
+  instead of a full window.
+- (b) **Fundamentals** carry the stock's own last point-in-time value forward until the next report,
+  for at most 12 months after it became public.
+- (c) **Anything still missing** after (a) and (b) is set to 0 after ranking, which is the
+  cross-sectional median. One missing-value flag per family (price/volume, fundamental) is set to 1
+  when any characteristic in that family was filled.
+- (d) **Rows are no longer dropped** for a missing characteristic. They are still dropped when the
+  target is missing.
+
+**The theory behind it.**
+
+1. **Why missingness matters.** Rubin (1976) separates three cases:
+   - *missing completely at random*: unrelated to anything;
+   - *missing at random*: related only to observed variables;
+   - *missing not at random*: related to the missing value itself or to the outcome.
+
+   Firm characteristics are not missing completely at random. Bryzgalova, Lerner, Lettau & Pelger
+   (2025) show that over 70% of firms have gaps, that missingness is systematic, and that stocks with
+   missing characteristics earn different returns.
+2. **Why not drop the rows (complete-case analysis).** There are three reasons:
+   - The model would be trained on an unrepresentative cross-section that systematically excludes
+     young firms, recent index additions and financials. Financials are excluded because items such
+     as cost of goods sold do not exist for them.
+   - At forecast time every stock in the universe needs a forecast. A training rule that drops rows
+     has no counterpart in deployment.
+   - With 26 characteristics, the chance that at least one is missing compounds.
+3. **Why the fill must be causal.** The forecast must be adapted to the information filtration
+   (`MoE_HMM_Gate_Formulation.pdf`, Section 1.4): every input on day t must be computable from
+   information available at the close of day t.
+   - Interpolating a gap from values on both sides uses data from after t, even when weighted towards
+     the trend. That is look-ahead, the same problem as smoothed regime probabilities.
+   - Tom's first idea was a weekly per-stock median with a trend weight towards the later value. That
+     is this kind of interpolation.
+   - The causal alternative, extrapolating the recent trend forward, is a forecast of a number that
+     has not been reported. It adds noise, and the market itself does not have that number.
+4. **Why carrying forward is right for fundamentals.** It is hardly an imputation at all. Between two
+   reports, the latest filing is exactly what the market knows about a firm's book equity or earnings.
+   A step function that changes on report dates is the correct point-in-time representation of
+   accounting information. It also keeps Tom's intuition that a fill should come from the stock's own
+   history, not from the market.
+
+   The 12-month cap exists because, after one missed annual cycle, the number no longer describes the
+   firm (late filers, restructurings). Such firms are better identified by the flag than by a stale
+   value.
+5. **Why minimum-count windows for price features.** An average over 16 of 20 days estimates the same
+   quantity with slightly more noise and negligible bias. The gain in coverage is large: new listings,
+   trading halts, and stocks just added to the index.
+6. **Why 0 plus a flag.**
+   - In rank space, 0 is the median. It is the neutral value: no information, so assume a typical
+     stock.
+   - A feature enters the first network layer as weight times value, so at 0 a filled feature
+     contributes nothing in either direction.
+   - The flag lets the model learn a separate shift for stocks with missing data. This is how
+     missingness that is itself informative enters the model: if those stocks earn different returns,
+     the flag captures it instead of the fill distorting the feature.
+   - Simple is enough for machine-learning portfolios. Chen & McCoy (2024) find that cross-sectional
+     mean imputation performs about as well as EM. The reason is that missingness comes in large
+     blocks (by time and by data source) and cross-sectional correlations are small, so the observed
+     characteristics say little about the missing ones.
+7. **Upgrade path, not adopted now.** Bryzgalova et al.'s causal B-XS method, which uses the stock's
+   own past plus the cross-section through latent factors, can serve as a robustness check.
+
+#### 4. Industry (decided)
+
+**Source: GICS from Compustat (changed from ICB on 2026-10-05, Tom's decision).** CRSP's ICB field
+(`ICBIndustry` in `StkSecurityInfoHist` / `StkIssuerInfoHist`) is filled for S&P 500 members only up
+to September 2023:
+
+- from October 2023 every member is "NOAVAIL", and CRSP switches to a different scheme
+  (`UESIndustry`, with different sector names);
+- Compustat's dated GICS history (`gicshistory.dat` in the CRSP/Compustat Merged release, fields
+  `INDFROM`, `INDTHRU`, `GSECTORH`) covers the whole sample point-in-time;
+- GICS is the classification the S&P 500 itself uses.
+
+The original ICB rationale below applies unchanged to GICS's 11 sectors.
+
+*Original text:* ICB industry from the CRSP issuer history (`StkIssuerInfoHist`). It is dated, so it is
+point-in-time. There are 11 sectors: Basic Materials, Consumer Discretionary, Consumer Staples, Energy,
+Financials, Health Care, Industrials, Real Estate, Technology, Telecommunications and Utilities. Stocks
+coded "not available" get all dummies equal to zero.
+
+**Three uses, all adopted.**
+
+1. **Sector dummies** (11 inputs, 0/1).
+   - The base learns each sector's average market-neutral return.
+   - The experts learn regime-dependent sector rotation, for example defensives beating the market in
+     stress and technology leading in calm markets. This is the kind of switching the mixture is
+     designed for.
+   - The 11 sectors average about 45 stocks each. Gu, Kelly & Xiu's 74 two-digit SIC groups would
+     leave about 7 stocks per group in the S&P 500, which is too noisy.
+2. **Industry-relative characteristics** for a subset of the fundamentals: the characteristic is
+   ranked within its sector instead of across the whole universe.
+   - Accounting ratios differ structurally across industries (banks' book-to-market, software's thin
+     book), so a universe-wide rank partly just sorts industries. A within-sector rank compares a firm
+     with its peers (Asness, Porter & Stevens 2000).
+   - Doubling every feature is not adopted. The subset is decided with the list; the proposal is the
+     two Value and the two Profitability representatives.
+3. **Industry return signals.**
+   - Industry momentum: the sector's past return (Moskowitz & Grinblatt 1999).
+   - Within-industry reversal: the stock's past return minus its sector's (Da, Liu & Schaumburg 2014;
+     Hameed & Mian 2015).
+
+**Resulting size.** See part 6: 57 inputs once the short-horizon market block is included.
+
+#### 5. Point-in-time fundamentals (proposed; for the implementation brief)
+
+**Data check (aggregate only).** The CRSP/Compustat Merged files are in `Data/`:
+
+- the link history (gvkey to PERMNO with validity dates, link type and primary flag);
+- quarterly income statement, balance sheet and year-to-date cash flow;
+- the quarterly report date (RDQ), present for 99.9% of the 30,225 firm-quarters of S&P 500 members
+  in fiscal 2013-2024;
+- the 10-Q/10-K filing dates.
+
+**Proposed rules.**
+
+- A quarter's numbers become usable one trading day after the later of its report date and its
+  filing date. The earnings and revenue surprises are the exception: they use the report date, since
+  the announcement is the event.
+- Flows are trailing four-quarter sums, with year-to-date cash flow differenced into quarters.
+- Market values come from CRSP on day t.
+
+**History needed.**
+
+- Fundamentals from about 2013, since growth rates need a year of history.
+- Some price features need up to five years, so CRSP history from about 2010 is needed for the
+  features only. The training sample is still 2015-2024 unless the sample extension changes it.
+
+**Known limitation.** Standard Compustat values can be restated after first release. The file contains
+keysets for data "prior to company amendment", which may partly fix this; to be checked.
+
+#### 6. The final list (decided 2026-10-05)
+
+**Why a short-horizon market block was added.** Tom's point: 8 of the 13 JKP themes are accounting-based,
+because they come from the monthly anomaly literature. At a 5-day horizon that balance is backwards.
+Fundamentals barely change from week to week, while the signals known to predict weekly returns are
+market-based, and price trends, liquidity and volatility dominate Gu, Kelly & Xiu's feature importance.
+So the same rule, two representatives per theme, is applied to six further short-horizon market
+themes, each backed by evidence at a daily or weekly horizon. The block was cross-checked against
+Tom's Trexquant research (`Trexquant/`); see the end of this part.
+
+**A. JKP block: 26 characteristics (13 themes × 2).**
+
+| Theme | Representative 1 | Representative 2 | Data |
+|---|---|---|---|
+| Short-Term Reversal | 5-day return | 20-day return | CRSP |
+| Momentum | 12-month return skipping the last month | price / 52-week high (George & Hwang 2004) | CRSP |
+| Low Risk | 21-day volatility | beta, Frazzini-Pedersen construction (1-year volatility, 5-year correlation) | CRSP |
+| Size | log market cap | Amihud illiquidity, 126 days | CRSP |
+| Seasonality | same-calendar-month return, years 2-5 back (Heston & Sadka 2008) | coskewness with the market, 21 days (in this cluster in JKP's file) | CRSP |
+| Value | book-to-market | earnings-to-price | Compustat + CRSP |
+| Profitability | quarterly ROE | operating cash flow / assets | Compustat |
+| Quality | gross profitability / assets (Novy-Marx 2013) | earnings consistency (consecutive quarterly earnings increases, up to 8) | Compustat |
+| Investment | asset growth (Cooper, Gulen & Schill 2008) | sales growth | Compustat |
+| Accruals | operating accruals (Sloan 1996) | total accruals (Richardson et al. 2005) | Compustat |
+| Debt Issuance | 3-year debt growth | net operating assets / assets (Hirshleifer et al. 2004) | Compustat |
+| Low Leverage | net debt / market cap | cash / assets | Compustat + CRSP |
+| Profit Growth | standardised unexpected earnings (SUE) | revenue surprise (Jegadeesh & Livnat 2006) | Compustat, dated by report date |
+
+**B. Short-horizon market block: 12 characteristics (6 themes × 2).**
+
+| Theme | Representative 1 | Representative 2 |
+|---|---|---|
+| Volatility dynamics | idiosyncratic volatility, 21 days (market-model residual; Ang, Hodrick, Xing & Zhang 2006) | volatility shock: 5-day volatility / 60-day volatility |
+| Tails and asymmetry | realized skewness, 21 days (Amaya et al. 2015) | maximum daily return, 21 days (Bali, Cakici & Whitelaw 2011) |
+| Volume and liquidity | abnormal volume: today's volume against its trailing average (Gervais, Kaniel & Mingelgrin 2001) | quoted spread, (ask - bid) / midpoint at the close, 21-day average |
+| Price path | overnight (close-to-open) return, 20 days (Lou, Polk & Skouras 2019) | price / 50-day moving average (Han, Zhou & Zhu 2016) |
+| Earnings timing | announcement expected within the next 5 trading days (0/1, estimated causally from the report date four quarters earlier) | trading days since the last announcement (Barber et al. 2013) |
+| Return dynamics | variance ratio: 5-day against 1-day return variance, 60 days (Lo & MacKinlay 1988) | correlation of daily return and volume, 60 days (Llorente, Michaely, Saar & Wang 2002) |
+
+**C. Industry block: 17 inputs.**
+
+- 11 GICS sector dummies (Compustat GICS history; ICB dropped, see part 4).
+- 2 industry return signals:
+  - industry momentum, the sector's 12-month return skipping the last month (Moskowitz & Grinblatt 1999);
+  - within-industry reversal, the stock's 20-day return minus its sector's.
+- 4 within-sector ranks, for book-to-market, earnings-to-price, quarterly ROE, and operating cash flow / assets.
+
+**D. Missing flags: 2** (price/volume, fundamental).
+
+**Total: 40 characteristics (22 market-based, 18 fundamental-based) and 57 inputs.**
+
+**Data consequences.**
+
+- The current CRSP extract keeps only price, return, market cap and volume. The open, high, low, bid
+  and ask are in the raw daily file (`StkDlySecurityData`), with 100% coverage on S&P 500
+  stock-days 2015-2024, so a re-extract is needed. The number of trades covers only 28% of those
+  stock-days (Nasdaq only) and is not used.
+- Shares outstanding for turnover-type measures are in `StkShares`.
+- History needed: about 2010 onward for the 5-year windows, and fundamentals from about 2013.
+
+**Cross-check against the Trexquant work.**
+
+- *Not transferable:*
+  - first-hour and last-hour bar features, because there are no intraday data;
+  - calendar, FOMC, VIX and macro series, which are identical across stocks and so carry nothing after
+    ranking; they could only enter through the gate;
+  - trade size, because of the trade-count coverage.
+- *Confirmed by Tom's own results:* volatility term structure, the overnight/intraday split, days to
+  earnings, and volume relative to its own average.
+- *Added from it:* the return-dynamics theme (proposed in `36_STOCK_CHARACTERISTICS.py`, not tested
+  there).
+- *Skipped as near-copies:*
+  - position of the close in its 20-day range;
+  - daily high/low ratio;
+  - upside/downside volatility ratio;
+  - announcement-return persistence (about 4 observations a year).
+- *Lesson adopted:* express levels as surprises relative to the stock's own history where the level
+  would otherwise act as a static tilt (volume, volatility).
+
+*Sources:* Jensen, Kelly & Pedersen (2023), JF 78(5); Green, Hand & Zhang (2017), RFS 30(12);
+Freyberger, Neuhierl & Weber (2020), RFS 33(5); Hou, Xue & Zhang (2020), RFS 33(5); Gu, Kelly & Xiu
+(2020), RFS 33(5); Rubin (1976), Biometrika 63(3); Bryzgalova, Lerner, Lettau & Pelger (2025), RFS
+38(3); Chen & McCoy (2024), JFE 155; Asness, Porter & Stevens (2000), working paper; Moskowitz &
+Grinblatt (1999), JF 54(4); Da, Liu & Schaumburg (2014), MS 60(3); Hameed & Mian (2015), JFQA 50(1-2); George & Hwang (2004), JF 59(5); Heston & Sadka (2008), JFE 87(2);
+Frazzini & Pedersen (2014), JFE 111(1); Novy-Marx (2013), JFE 108(1); Cooper, Gulen & Schill (2008), JF
+63(4); Sloan (1996), TAR 71(3); Richardson, Sloan, Soliman & Tuna (2005), JAE 39(3); Hirshleifer, Hou,
+Teoh & Zhang (2004), JAE 38; Jegadeesh & Livnat (2006), JAE 41(1-2); Ang, Hodrick, Xing & Zhang (2006),
+JF 61(1); Amaya, Christoffersen, Jacobs & Vasquez (2015), JFE 118(1); Bali, Cakici & Whitelaw (2011), JFE
+99(2); Gervais, Kaniel & Mingelgrin (2001), JF 56(3); Lou, Polk & Skouras (2019), JFE 134(1); Han, Zhou &
+Zhu (2016), JFE 122(2); Barber, De George, Lehavy & Trueman (2013), JFE 108(1); Lo & MacKinlay (1988),
+RFS 1(1); Llorente, Michaely, Saar & Wang (2002), RFS 15(4).
+
+### Q21. At what frequency should the gate and the cross-section run, and what is the target horizon? [RESOLVED 2026-10-05]
+
+**Answer: option B. A daily gate, a daily cross-section, and a 5-day target horizon ($h=5$).** This is
+Tom's decision, taken 2026-10-05, after a review of the literature and a descriptive check on the
+CRSP panel. It confirms what the code already does (`StageBSpec.horizon = 5`, daily panel), so no code
+change follows from it.
+
+**What it means.** Every trading day $t$ the Hamilton gate is updated with that day's market return,
+and every stock in the S&P 500 universe is ranked on its characteristics $x_{i,t}$. The target is the
+market-neutral return (Q25) over the next five trading days, $(t, t+5]$. Consecutive targets overlap by
+four days.
+
+**The options compared.** (A) daily gate, daily cross-section, $h=1$; (B) daily gate, daily
+cross-section, $h=5$ (chosen); (C) daily gate, monthly cross-section, $h\approx21$; (D) monthly gate and
+monthly cross-section.
+
+**Why option B, in depth.**
+
+1. **Statistical power on the sample we have.** The panel covers 2015-2024, 2,516 trading days. A
+   monthly horizon leaves about 118 non-overlapping periods, and only about 59 of them in high-volatility
+   conditions. That is far too few to train regime-specific experts or to detect regime differences:
+   in the descriptive check below, a 5% rank IC at $h=21$ was not significant. At $h=5$ there are about
+   500 non-overlapping weeks (about 250 in high volatility); at $h=1$ about 2,500 days.
+2. **The regime contrast is clearest at $h=5$ while the statistics stay usable.** A descriptive check on
+   the market-neutral target (CRSP, S&P 500 members 2015-2024, daily cross-sectional rank IC of three
+   textbook signals, non-overlapping periods, days split at the median of trailing 20-day market
+   volatility as a crude stand-in for regimes; full-sample signal diagnostics, not model results):
+   one-week reversal had IC 2.27% (t = 2.73) at $h=5$, rising to 3.26% in high-volatility periods
+   against 1.29% in low; one-month reversal 2.58% against -0.11%; at $h=21$ momentum changed sign
+   (-2.22% against +1.78%), consistent with momentum crashes. The cross-section changes with the
+   market's state, which is what the gate is meant to exploit, and at $h=5$ that change is both large
+   and measurable.
+3. **Less noise than next-day returns.** A one-day target is the noisiest choice: each period carries the
+   least signal, it is contaminated by bid-ask bounce (Roll 1984), and daily machine-learning strategies
+   on the S&P 500 have largely decayed since 2010 (Fischer & Krauss 2018; Krauss, Do & Huck 2017).
+   Five days averages much of the microstructure noise out while keeping the short-horizon effects.
+4. **Short-horizon effects are where regime dependence is strongest.** Short-term reversal returns are
+   compensation for liquidity provision and rise sharply in turbulent markets (Nagel 2012). A weekly
+   horizon keeps the study in the range where the cross-section is known to depend on the market state.
+5. **It respects the regime timescale.** Under a daily Hamilton gate, regimes last weeks to months
+   (expected durations of roughly 20-50 days for typical transition matrices). A 5-day window is short
+   against that, so the base-case approximation "one regime per target window" is reasonable. A monthly
+   window is comparable to the length of a stressed regime and would break it.
+6. **The gate is best identified on daily data.** The Hamilton filter estimates its transition matrix and
+   regime volatilities from about 2,500 daily observations, against about 120 monthly ones, and reacts
+   to volatility clustering within days rather than weeks.
+7. **It is already built and audited.** Overlapping targets are handled by Hansen-Hodrick t-statistics at
+   lag $h-1$ (audit E-2), the purge between training and test equals $h$ (O-3), and the long-short book
+   is horizon-consistent (E-3).
+8. **It fits the market-neutral target.** At $h=5$ market demeaning removes about 28% of the target's
+   variance (Q25), so the target is substantially cleaner without being reduced to next-day noise.
+
+**Costs accepted deliberately.**
+
+- **No direct comparability with Gu, Kelly & Xiu**, whose benchmark is monthly. Stated as a design choice
+  in the methodology.
+- **Overlapping targets.** Daily sampling of a 5-day target means consecutive observations share four
+  days. Statistics are overlap-corrected, but the training likelihood counts overlapping dates as if
+  independent, so it is used for estimation, not for inference.
+- **Turnover.** A weekly holding period trades far more than a monthly one, so portfolio results are only
+  meaningful net of transaction costs (Q9).
+- **Compute.** About 1.27 million stock-days, roughly 21 times a monthly panel over the same years.
+- **Slow characteristics** (fundamentals updated quarterly) barely change from one day to the next; most
+  daily variation in the inputs comes from price-based features.
+
+**What this does not settle.** Whether to extend the sample before 2015 (the loader's `start` is a config
+field; the CRSP files appear to hold the full history), which would also make a monthly comparability arm
+feasible; the long-short book's default (`portfolio_scheme`); whether the gate weight for a 5-day window
+should be the one-step predicted probability, the filtered probability, or an average over the window
+(the open timing item in `MoE_HMM_Gate_Formulation.pdf`, Section 8.9); and whether to add a non-overlapping
+(every fifth day) robustness check.
+
+*Sources:* Fischer & Krauss (2018), EJOR 270(2); Krauss, Do & Huck (2017), EJOR; Blitz, Hanauer,
+Hoogteijling & Howard (2023), JFDS 5(4); Nagel (2012), RFS 25(7); Daniel & Moskowitz (2016), JFE 122(2);
+Roll (1984), JF 39(4); Gu, Kelly & Xiu (2020), RFS 33(5).
+
+*Original question, for the record:*
+
+### Q21. At what frequency should the gate and the cross-section run, and what is the target horizon?
+
+**Status:** open, raised 2026-09-26. Tom's current preference is a **daily gate and a daily
+cross-section**, but it is kept open until it has been discussed. Nothing in the code commits to an
+answer: the CRSP loader (brief 06) builds the daily panel the pipeline already uses, and the horizon
+stays a config field.
+
+**Three questions that have to be answered together.**
+
+1. **Gate frequency.** How often the regime probabilities are updated. A daily Hamilton filter sees
+   about 21 times as many observations as a monthly one, so its transition matrix is better
+   identified and it reacts to volatility clustering within days rather than weeks.
+2. **Cross-section frequency.** How often the stocks are ranked against each other, which is also how
+   often the portfolio is rebalanced. The options are (a) daily gate with a daily cross-section,
+   (b) daily gate with a monthly cross-section, where the gate probability on the last trading day of
+   each month is the input to that month's cross-section, and (c) monthly for both.
+3. **Target horizon `h`.** The forward return being predicted: next day (`h = 1`), next week
+   (`h = 5`, what the code uses now as `fwd_ret_5d`), or next month (`h` of about 21). Any `h > 1` at
+   daily frequency creates overlapping targets, which the code now handles with a Hansen-Hodrick
+   long-run variance at lag `h - 1` (audit finding E-2), and sets the purge gap to `h` days (see Q22).
+
+**Considerations.**
+
+- **Predictability is weaker and noisier at daily horizons.** Next-day cross-sectional returns are
+  dominated by short-term reversal and by bid-ask bounce: a trade at the bid followed by one at the
+  ask looks like a return even when the price has not moved. Gu, Kelly and Xiu, the benchmark, use
+  monthly data partly for this reason. A daily cross-section is a legitimate choice but needs one
+  sentence of justification and a comparison that nets out transaction costs.
+- **Turnover.** Daily rebalancing multiplies turnover, so the portfolio metrics in Q9 are only
+  meaningful after costs.
+- **Comparability.** A monthly cross-section is directly comparable with Gu, Kelly and Xiu and with
+  most of the asset-pricing literature; a daily one is not.
+- **Compute.** A daily cross-section has about 21 times the rows of a monthly one over the same
+  window, which feeds straight into the compute budget the advisor asked for.
+- **Fundamentals** (Compustat) update quarterly, so they are equally stale at either frequency and do
+  not bear on the choice.
+
+**Reading, about an hour.**
+- Roll, R. (1984), "A simple implicit measure of the effective bid-ask spread in an efficient
+  market", *Journal of Finance* 39(4). Why bid-ask bounce creates spurious negative autocorrelation in
+  short-horizon returns.
+- Jegadeesh, N. (1990), "Evidence of predictable behavior of security returns", *Journal of Finance*
+  45(3), and Lehmann, B. (1990), "Fads, martingales, and market efficiency", *Quarterly Journal of
+  Economics* 105(1). Short-term reversal at monthly and weekly horizons.
+- Gu, S., Kelly, B. and Xiu, D. (2020), *Review of Financial Studies* 33(5), the data section, for
+  why the benchmark is monthly.
+
+**Ask the advisor:**
+(a) Which pairing: daily/daily, daily gate with a monthly cross-section, or monthly/monthly?
+(b) Which target horizon `h`?
+(c) If the cross-section is daily, is comparability with Gu, Kelly and Xiu still required, for
+    example through a monthly robustness arm?
+
+
+### Q25. What target variable should the model be trained on? [RESOLVED 2026-10-01]
+
+**Answer: the market-neutral return, defined as the cross-sectionally demeaned forward return.**
+This is Tom's decision, taken 2026-10-01, after a literature review of the alternatives.
+
+**Definition.** For stock $i$ in the universe $\mathcal S_t$ on formation date $t$, with forward return
+$r_{i,t\to t+h}$ over $(t,t+h]$ (the same return the code already builds, delisting returns and the
+post-delisting fill included):
+
+$$y_{i,t} \;=\; r_{i,t\to t+h} \;-\; \frac{1}{N_t}\sum_{j\in\mathcal S_t} r_{j,t\to t+h}$$
+
+where the average runs over the stocks of date $t$ that have a valid target (equal weights). Three
+properties follow from the definition. The risk-free rate cancels, so raw and excess returns give the
+same target. The target sums to zero across stocks on every date. The demeaning uses the realised
+cross-section at $t+h$, which is legitimate because it transforms only the label, never a feature, and
+the model's forecast at $t$ is a forecast of this relative return.
+
+**Not to be confused with the code's existing `target_kind="residual"`.** That option subtracts
+$\beta_{i,t}$ times the market's forward return, with a trailing 250-day beta (`features.py`), and
+its docstring calls it "market-neutralized". It is a beta-residual (CAPM-style) target, which is
+option 5 below and is *not* the decision. The decided target is a third kind that does not yet exist
+in the code (implementation pending; the default stays `"raw"` until a brief changes it).
+
+**The alternatives considered.** (1) Raw or excess return; (2) market-neutral, cross-sectionally
+demeaned return (chosen); (3) cross-sectionally standardised or percentile-ranked return; (4)
+volatility-scaled return (return divided by the stock's ex-ante volatility, "risk-adjusted" in the
+Sharpe sense); (5) factor-residual or abnormal return (CAPM or Fama-French, "risk-adjusted" in the
+alpha sense).
+
+**Why the market-neutral return, in depth.**
+
+1. **It is the quantity the thesis question is about.** The question is whether the market regime
+   changes *which stocks outperform which*. The day's cross-sectional mean is the same number for
+   every stock: it cannot be ranked, it carries no cross-sectional information, and predicting it is
+   a market-timing problem, not a cross-sectional one. Removing it aligns what the experts are
+   trained on with what the thesis claims to measure.
+2. **It keeps the gate's information and the target's information apart, which is what makes the
+   regime effect attributable.** The gate is fitted on the market series. A raw target contains,
+   as its largest daily component, essentially that same market move. A regime that predicts the
+   market's level would then appear to "help the experts" through the common move alone, and the
+   comparison across gates would partly measure market timing. With the common move removed, any
+   gain the gate brings has to come from regime-dependent *cross-sectional* structure. This is the
+   same attribution logic that motivated freezing the gate (Q19).
+3. **It makes the model's own assumptions defensible.** The derivation (`MoE_HMM_Gate_Formulation.pdf`,
+   Section 6, assumption A3) assumes stock returns are independent given the regime and their
+   characteristics, and independent of the market return. For raw daily returns this is badly
+   false: on a $-4\%$ day almost every stock falls by more than any regime-conditional mean explains.
+   The per-date likelihood (Q24) would then treat ~500 strongly correlated returns as independent
+   evidence, and its responsibilities would mostly classify days by tomorrow's market move. Demeaning
+   removes the dominant common factor, so A3 becomes a reasonable approximation; only residual
+   dependence such as industry co-movement remains.
+4. **The headline metrics are unchanged by it, so training and evaluation measure the same thing.**
+   Rank IC, decile sorts and equal-weighted long-short returns are all invariant to subtracting a
+   number common to every stock on a date. Training on the demeaned return therefore optimises
+   exactly the variation those metrics score, instead of spending capacity on variation they ignore.
+5. **It keeps the regime's dispersion information, unlike standardising or ranking.** Cross-sectional
+   dispersion rises in stressed regimes. Dividing each date by its dispersion (option 3) would erase
+   that, collapse the experts' noise levels $s_k$ towards a common value, and empty the variance-gain
+   part of the NLL decomposition (`NLL_single` vs `NLL_full`). Demeaning removes the level only.
+6. **It is compatible with the Gaussian mixture likelihood, unlike ranks.** Percentile ranks are
+   bounded and uniform; a Gaussian expert is the wrong model for them, and a ranking target belongs
+   with a ranking loss (Q20), not with the likelihood derived for the base case.
+7. **It needs no estimated inputs, unlike volatility scaling or factor residuals.** Option 4 requires an
+   ex-ante volatility estimate (estimation error, and a look-ahead risk if built carelessly) and
+   down-weights high-volatility stocks and periods, which is where machine-learning signal is known
+   to concentrate (Avramov, Cheng & Metzker 2023). Option 5 requires rolling betas, which are noisy
+   and lagged.
+8. **It does not strip out regime-dependent factor premia, unlike factor residuals.** Momentum
+   crashes in rebounds after bear markets (Daniel & Moskowitz 2016) and value's cyclical swings are
+   exactly the regime-dependent cross-sectional effects the experts should be able to learn. A
+   Fama-French residual target would remove them by construction. Wang (2024) also finds no
+   predictive gain from abnormal-return targets when only firm characteristics are used.
+9. **It is simple, deterministic and reproducible**: one subtraction per date, no parameters, no
+   warm-up period that drops early rows (unlike the 250-day beta window of the residual option).
+10. **It has clear precedent.** A cross-sectional regression with an intercept (Fama-MacBeth) is
+    equivalent to regressing on demeaned returns; production pipelines (Qlib, MASTER) normalise labels
+    cross-sectionally by default; and Azevedo, Kaiser & Mueller (2023) find that removing the level
+    and noise of raw returns from the training target improves long-short performance substantially.
+
+**Costs accepted deliberately.**
+
+- **Gu, Kelly & Xiu's 0.40% out-of-sample $R^2$ is not directly comparable**, since theirs is on excess
+  returns. Our $R^2$ measures the explained share of *relative* returns and must be reported as such.
+- **Heavy tails remain.** Demeaning removes the common shock, not the stock-specific outliers. How to
+  handle them belongs to the loss function (Q20), which stays open.
+- **Equal weights.** The demeaning gives every stock in the S&P 500 universe the same weight, which
+  matches the equal-weighted long-short evaluation. A value-weighted version would differ slightly.
+- **A technical violation of independence that is negligible here:** demeaned returns sum to zero on
+  every date, which induces a correlation of about $-1/(N_t-1)\approx-0.002$ between any two stocks.
+- **Residual cross-sectional correlation (industries) remains**, so the per-date posterior can still
+  be overconfident (Q24).
+- **Market timing is out of scope**: the model no longer forecasts the market's level at all.
+
+**Clarifications added 2026-10-05.**
+
+- **Market-neutral throughout, including reporting.** Tom's decision: results are reported in
+  market-neutral returns, not raw returns. Demeaning preserves every difference between stocks and
+  between industries exactly (the subtracted mean cancels in any difference), so "which stocks and
+  which industries performed best" remains fully visible; only the level common to all stocks on a
+  day is gone.
+- **Measured noise reduction** (CRSP, S&P 500 members 2015-2024, ~504 stocks per day, daily log
+  returns, aggregate only): demeaning removes **32%** of the variance of daily returns (28% at a
+  5-day horizon), from 10-16% in calm years (2017, 2024) to 38% in 2022 and **50% in 2020**. The
+  removed part is one shock shared by every stock, so it does not average out across the cross-section
+  and is concentrated in the stressed periods the regimes are about.
+- **Implicit assumption: unit beta.** Subtracting the equal-weighted mean removes the common move with
+  the same loading for every stock. Where betas differ, $(\beta_i-\bar\beta)\,m$ remains in the target,
+  so A3(b) holds only approximately and a regime-dependent beta tilt (e.g. low-beta stocks favoured in
+  stressed regimes) can still be learned. That is a genuine cross-sectional effect; it should be
+  measured (correlate each expert's predictions with stock betas, per regime), not removed.
+
+**What this does not settle.** The horizon $h$ and frequency (Q21); log versus simple returns (the code
+currently sums daily log returns); whether to run a volatility-scaled version as a robustness check; and
+the loss function (Q20).
+
+**Implementation (pending, not yet briefed).** A new target kind in `StageBSpec` that subtracts the
+date's equal-weighted cross-sectional mean of the forward return over the stocks with a valid target;
+the base $f_0$ and the experts are retrained on it; all metrics continue to be computed as now.
+
+*Sources:* Gu, Kelly & Xiu (2020), RFS 33(5); Azevedo, Kaiser & Mueller (2023), J. Asset Management
+24(5); Poh, Lim, Zohren & Roberts (2021), JFDS 3(2); Lim, Zohren & Roberts (2019); Wang (2024),
+Financial Innovation 10; Blitz, Huij & Martens (2011), J. Empirical Finance 18(3); Avramov, Cheng &
+Metzker (2023), Management Science 69(5); Daniel & Moskowitz (2016), JFE 122(2); Qlib documentation;
+MASTER repository (SJTU).
+
 
 ### Q3. Data access, CRSP and Compustat through the university? [RESOLVED 2026-09-19]
 **Answer: CRSP.** The thesis runs on US equities. Wind remains available and could support a China

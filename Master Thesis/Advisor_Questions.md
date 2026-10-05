@@ -1729,6 +1729,14 @@ ranked.
      characteristics say little about the missing ones.
 7. **Upgrade path, not adopted now.** Bryzgalova et al.'s causal B-XS method, which uses the stock's
    own past plus the cross-section through latent factors, can serve as a robustness check.
+8. **Zero-if-missing items (decided 2026-10-05, after the first coverage report).** In total accruals
+   (`taccruals_at`) and net operating assets (`noa_at`), IVAOQ, IVSTQ, MIBQ and PSTKQ count as 0 when
+   blank. Compustat leaves them blank when a firm has none; book equity already treats TXDITCQ and
+   PSTKQ this way, and it is the usual treatment in Richardson et al. (2005) and JKP. Core items (ATQ,
+   ACTQ, LCTQ, LTQ, DLTTQ, ...) stay strictly missing, so a definition that does not apply (a bank's
+   current assets) is still missing and flagged. Under the strict rule `taccruals_at` was present on
+   5% of rows and `flag_fund_missing` was set on 95%; with this rule they are 79% and 30% (CRSP S&P 500
+   panel 2015-2024, aggregate coverage only). Code: `FeatureSpec.zero_if_missing_items`.
 
 #### 4. Industry (decided)
 

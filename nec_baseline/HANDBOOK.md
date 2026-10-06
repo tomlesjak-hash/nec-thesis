@@ -1241,6 +1241,39 @@ interrupted and resumed run equals an uninterrupted one **exactly**, interrupted
 inside a fold, between folds, in the middle of a sweep, or with its newest checkpoint
 torn by a crash during the write.
 
+## II.0c The compute envelope (brief 09 H)
+
+Decided 2026-10-05 (Q8 update; `Master Thesis/Progress_Tracker.md` section 1c). The
+whole design, run twice, fits the laptop (Apple M4 Pro, 10 one-thread processes) in
+about 2-6 days of machine time if it stays inside:
+
+| | envelope |
+|---|---|
+| depth scan | 1, 2, 3 hidden layers, widths from `pyramid_dims(first_width, depth)` |
+| first width | at most 128 |
+| K (experts, regimes) | at most 4 |
+
+Depths 4-5 or a first width of 256 take 1-1.5 months (and Gu, Kelly & Xiu find depths
+4-5 add nothing). `nec_moe.config.COMPUTE_ENVELOPE` holds the three values as
+**documented defaults, not hard limits**: `scripts/run_campaign.py` prints a note for an
+arm outside them, and nothing refuses. The envelope says where the design is
+affordable, not which K or first width to use: K is Q18 and the widths Q8/Q17, both
+open, and the code keeps its current defaults (K = 2, widths (64, 32)).
+
+**The real pipeline's cost per step** (`scripts/time_real_pipeline.py`, timing only,
+`results/benchmark/real_pipeline_timing.json`). One job on the real 2000-2024 panel:
+Hamilton gate, K = 3, widths 64-32, batch 4,096, 2,000 steps, the 2009 pilot fold
+(training 2000-2008, 1.13M rows), one thread: **24.4 ms per step against the
+benchmark's 4.19 ms, an overhead factor of 5.8** (the budget in section 1c assumed
+2.5). Gate fit (statsmodels, K = 3, 24 starts) 29 s, base fit 0.2 s (its default 1,000
+steps of 128), expert training 49 s, peak memory 3.9 GB; the panel loads in 0.3 s from
+a warm page cache. A profile of the same step on a synthetic panel of the same shape
+(25 ms per step) puts about 60% in the GRU encoder over the 20-day sequence, whose
+output the frozen Hamilton gate with snapshot-only experts does not use (the
+dead-parameter warning), and about 14% in the precomputed gate's per-row date lookup
+(a Python loop over the batch); the experts themselves take about 10%. Those two are
+engineering, not design: removing them would bring the factor near 1.5.
+
 Under the hood, every experiment is the same seven moves:
 
 ```

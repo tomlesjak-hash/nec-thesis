@@ -40,6 +40,7 @@ sys.path.insert(0, str(ROOT))
 
 import run_experiment as rx  # noqa: E402
 from nec_moe import (  # noqa: E402
+    COMPUTE_ENVELOPE,
     BaseCache,
     RunStore,
     TrialRegistry,
@@ -104,6 +105,12 @@ def main(config: str | Path, *, n_workers: int | None = None, resume: str | None
     folds = rx.main_folds(exp, panel, purge)
     arms: dict[str, dict] = cfg["arms"]
     depths, seeds = list(cfg["depths"]), list(cfg["seeds"])
+    # the compute envelope (brief 09 H.1): documented defaults, not limits
+    for name, overrides in arms.items():
+        k = int(overrides.get("n_experts", exp.n_experts))
+        for note in COMPUTE_ENVELOPE.notes(first_width=cfg["first_width"], depths=depths,
+                                           n_experts=k):
+            print(f"[campaign] note: arm {name!r} is outside the compute envelope: {note}")
     lock: dict[str, Any] = {}
     for overrides in arms.values():  # the lock holds for every arm (F.3)
         for depth in depths:

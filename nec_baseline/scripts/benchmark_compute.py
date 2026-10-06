@@ -88,7 +88,7 @@ class BatchedExperts(nn.Module):
         dims = (D_INPUT, *widths)
         self.ws = nn.ParameterList()
         self.bs = nn.ParameterList()
-        for a, b in zip(dims[:-1], dims[1:]):
+        for a, b in zip(dims[:-1], dims[1:], strict=True):
             w = torch.empty(k, a, b)
             for j in range(k):
                 nn.init.kaiming_uniform_(w[j].T, a=math.sqrt(5))
@@ -102,7 +102,7 @@ class BatchedExperts(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         h = x.unsqueeze(0).expand(self.k, -1, -1)  # (K, B, d)
-        for w, b in zip(self.ws, self.bs):
+        for w, b in zip(self.ws, self.bs, strict=True):
             h = self.drop(torch.relu(torch.baddbmm(b, h, w)))
         out = torch.baddbmm(self.head_b, h, self.head_w)  # (K, B, 1)
         return out.squeeze(-1).T  # (B, K)
@@ -111,7 +111,7 @@ class BatchedExperts(nn.Module):
 def n_weights(widths: tuple[int, ...]) -> tuple[int, int]:
     """(all weights incl. biases of one expert, weights of its first layer)."""
     dims = (D_INPUT, *widths, 1)
-    total = sum(a * b + b for a, b in zip(dims[:-1], dims[1:]))
+    total = sum(a * b + b for a, b in zip(dims[:-1], dims[1:], strict=True))
     return total, D_INPUT * widths[0]
 
 
@@ -265,7 +265,8 @@ def _write_csv(path: Path, rows: list[dict]) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--quick", action="store_true", help="small grid, short timings")
-    ap.add_argument("--out", default=None, help="output folder (default nec_baseline/results/benchmark)")
+    ap.add_argument("--out", default=None,
+                    help="output folder (default nec_baseline/results/benchmark)")
     args = ap.parse_args()
 
     secs, warm = (0.6, 5) if args.quick else (2.0, 20)
@@ -299,7 +300,8 @@ def main() -> None:
     # B. threads within one process
     threads = []
     for th in (1, 2, 4, 8):
-        r = time_config(Config(ref.k, ref.depth, ref.first_width, ref.batch, threads=th), secs, warm)
+        r = time_config(Config(ref.k, ref.depth, ref.first_width, ref.batch, threads=th),
+                        secs, warm)
         threads.append(r)
         print(f"B threads={th}  {r['steps_per_s']:.1f} steps/s")
 
@@ -342,8 +344,10 @@ def main() -> None:
             print(f"E batched K={k} depth={dpt}  {r['steps_per_s']:.1f} steps/s")
 
     elapsed = round(time.time() - t_start, 1)
-    rows = ([{"part": "A_grid", **r} for r in grid] + [{"part": "B_threads", **r} for r in threads]
-            + [{"part": "C_parallel", **r} for r in parallel] + [{"part": "D_mps", **r} for r in gpu]
+    rows = ([{"part": "A_grid", **r} for r in grid]
+            + [{"part": "B_threads", **r} for r in threads]
+            + [{"part": "C_parallel", **r} for r in parallel]
+            + [{"part": "D_mps", **r} for r in gpu]
             + [{"part": "E_batched", **r} for r in batched])
     csv_path = out / f"compute_benchmark_{stamp}.csv"
     json_path = out / f"compute_benchmark_{stamp}.json"

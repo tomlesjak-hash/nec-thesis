@@ -1,0 +1,52 @@
+{
+  "brief": "09 H.2: one timed real run, timing only; nothing scored",
+  "job": {
+    "prior": "markov",
+    "n_experts": 3,
+    "expert_hidden_dims": [
+      64,
+      32
+    ],
+    "batch_size": 4096,
+    "steps": 2000,
+    "base_enabled": true,
+    "correction_mode": true,
+    "freeze_gate": true,
+    "data": "panel_file",
+    "sigma_init": 0.03,
+    "seeds": [
+      0
+    ]
+  },
+  "fold": {
+    "validation_year": 2009,
+    "train_first": "2000-01-03",
+    "train_last": "2008-12-23",
+    "train_rows": 1128914,
+    "train_dates": 2258,
+    "expert_train_rows": 1128914
+  },
+  "gate": {
+    "fit_backend": "statsmodels",
+    "k_regimes": 3
+  },
+  "base_steps": 1000,
+  "base_batch_size": 128,
+  "threads": 1,
+  "seconds": {
+    "data_loading": 0.2834523330020602,
+    "gate_fit": 28.78253145799681,
+    "base_fit": 0.23395629200240364,
+    "expert_training": 48.86190520800301
+  },
+  "seconds_per_step": 0.024430952604001504,
+  "benchmark_seconds_per_step": 0.004194,
+  "benchmark_file": "compute_benchmark_20261005_233042.json",
+  "overhead_factor": 5.825215213162019,
+  "peak_memory_gb": 3.862298624,
+  "machine": {
+    "platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O",
+    "python": "3.14.4",
+    "torch": "2.12.1"
+  }
+}

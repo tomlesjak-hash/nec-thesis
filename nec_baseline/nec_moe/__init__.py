@@ -30,8 +30,10 @@ from .compustat import (
     quarterly_fundamentals,
 )
 from .config import (
+    COMPUTE_ENVELOPE,
     FOLD_SCHEMES,
     BaseConfig,
+    ComputeEnvelope,
     DataConfig,
     EncoderConfig,
     ExpertConfig,
@@ -314,6 +316,8 @@ __all__ = [
     "PreTestViolation",
     "FoldConfig",
     "FOLD_SCHEMES",
+    "ComputeEnvelope",
+    "COMPUTE_ENVELOPE",
     "rank_ic_by_date",
     "IcSummary",
     "ic_summary",

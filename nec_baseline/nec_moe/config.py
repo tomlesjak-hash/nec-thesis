@@ -28,6 +28,8 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 __all__ = [
+    "ComputeEnvelope",
+    "COMPUTE_ENVELOPE",
     "FOLD_SCHEMES",
     "FoldConfig",
     "DataConfig",
@@ -68,6 +70,47 @@ def pyramid_dims(first_width: int, depth: int) -> tuple[int, ...]:
             f"{first_width}/{depth}"
         )
     return tuple(max(first_width // (2**i), 1) for i in range(depth))
+
+
+@dataclass(frozen=True)
+class ComputeEnvelope:
+    """The design's compute envelope (Tom's decision 2026-10-05; Q8 update,
+    Progress_Tracker section 1c; brief 09 H.1): **documented defaults, not
+    hard limits**.
+
+    - ``depths``: the depth scan, each depth's widths from
+      :func:`pyramid_dims` of one fixed first width (default 1, 2, 3);
+    - ``max_first_width``: the first hidden width at most 128;
+    - ``max_experts``: K at most 4.
+
+    Measured on the M4 Pro, the whole design inside this envelope takes about
+    2-6 days of machine time with 10 parallel processes; depths 4-5 or a first
+    width of 256 take 1-1.5 months. It says where the design is affordable,
+    not which K or first width to use: those are Q18 and Q8/Q17, open, and the
+    code keeps its current defaults (K = 2, widths (64, 32)).
+    :meth:`notes` lists what lies outside, for a campaign to print; nothing
+    refuses.
+    """
+
+    depths: tuple[int, ...] = (1, 2, 3)
+    max_first_width: int = 128
+    max_experts: int = 4
+
+    def notes(self, *, first_width: int, depths: tuple[int, ...] | list[int],
+              n_experts: int) -> list[str]:
+        out = []
+        if first_width > self.max_first_width:
+            out.append(f"first width {first_width} > {self.max_first_width}")
+        extra = sorted(set(depths) - set(self.depths))
+        if extra:
+            out.append(f"depth(s) {extra} outside the scan {self.depths}")
+        if n_experts > self.max_experts:
+            out.append(f"K = {n_experts} > {self.max_experts}")
+        return out
+
+
+#: The envelope's documented defaults (``ComputeEnvelope``).
+COMPUTE_ENVELOPE = ComputeEnvelope()
 
 
 _HORIZON_IN_TARGET = re.compile(r"_(\d+)d$")

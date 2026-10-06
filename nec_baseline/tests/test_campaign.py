@@ -235,3 +235,17 @@ def test_a_stop_in_the_parent_reaches_every_worker(tmp_path: Path):
     assert statuses <= {"skipped", "interrupted"}, statuses
     status = json.loads((out["run_dir"] / "status.json").read_text())
     assert status["state"] == "interrupted"
+
+
+def test_the_compute_envelope_is_documented_defaults_not_limits():
+    from nec_moe import COMPUTE_ENVELOPE, ComputeEnvelope
+
+    assert COMPUTE_ENVELOPE == ComputeEnvelope(depths=(1, 2, 3), max_first_width=128,
+                                               max_experts=4)
+    assert COMPUTE_ENVELOPE.notes(first_width=64, depths=[1, 2, 3], n_experts=2) == []
+    notes = COMPUTE_ENVELOPE.notes(first_width=256, depths=[1, 5], n_experts=6)
+    assert len(notes) == 3  # reported, never refused
+    # K and the widths are open (Q18, Q8/Q17): the defaults are unchanged
+    import run_experiment as rx
+
+    assert (rx.Experiment().n_experts, rx.Experiment().expert_hidden_dims) == (2, (64, 32))

@@ -210,6 +210,25 @@ class PrecomputedRegimePrior(RegimePrior):
         #: largest date the *fit* was allowed to see; apply_causal may only
         #: add dates strictly after it
         self.fit_max_date: int | None = None
+        #: the lookup index built from ``_rows`` (sorted date codes, their
+        #: rows); rebuilt lazily whenever the table changes
+        self._index: tuple[Tensor, Tensor] | None = None
+
+    def _lookup(self, dates: Tensor) -> tuple[Tensor, Tensor]:
+        """``(rows, found)`` for each date code, vectorised: a binary search
+        over the sorted codes instead of a Python dict lookup per row."""
+        if getattr(self, "_index", None) is None:  # also a gate unpickled from before it
+            codes = torch.tensor(sorted(self._rows), dtype=torch.long)
+            rows = torch.tensor([self._rows[int(c)] for c in codes], dtype=torch.long)
+            self._index = (codes, rows)
+        assert self._index is not None
+        codes, rows = self._index
+        d = dates.to(torch.long).reshape(-1)
+        if codes.numel() == 0:
+            return torch.zeros_like(d), torch.zeros_like(d, dtype=torch.bool)
+        pos = torch.searchsorted(codes, d).clamp_(max=codes.numel() - 1)
+        found = codes[pos] == d
+        return rows[pos], found
 
     # ----------------------------------------------------------- table I/O
     def _write(self, dates: Tensor, log_prior: Tensor, *, source: str) -> None:
@@ -234,6 +253,7 @@ class PrecomputedRegimePrior(RegimePrior):
             table.append(log_prior[torch.tensor(keep, dtype=torch.long)].detach())
         self._rows = rows
         self._log_table = torch.cat(table, dim=0)
+        self._index = None
 
     def gate_state(self) -> dict[str, Any]:
         """Everything a resumed fold needs to use this fitted gate again
@@ -251,6 +271,7 @@ class PrecomputedRegimePrior(RegimePrior):
 
     def load_gate_state(self, state: dict[str, Any]) -> None:
         self._rows = dict(state["rows"])
+        self._index = None
         self._log_table = state["log_table"].clone()
         self.fit_max_date = state["fit_max_date"]
         self.fitted = state["fitted"]
@@ -264,7 +285,7 @@ class PrecomputedRegimePrior(RegimePrior):
 
     def covers(self, dates: Tensor) -> Tensor:
         """Which of ``dates`` have a table row (a fitted or applied prior)."""
-        return torch.tensor([int(d) in self._rows for d in dates], dtype=torch.bool)
+        return self._lookup(dates)[1]
 
     def set_fitted_table(self, dates: Tensor, log_prior: Tensor) -> None:
         """Install the rows produced by :meth:`fit` (the training block)."""
@@ -310,17 +331,15 @@ class PrecomputedRegimePrior(RegimePrior):
                 "were supplied (PriorContext.date is None). Batches carry "
                 "their date codes; pass them through"
             )
-        missing = sorted({int(d) for d in ctx.date} - set(self._rows))
-        if missing:
+        idx, found = self._lookup(ctx.date)
+        if not bool(found.all()):
+            missing = sorted({int(d) for d in ctx.date[~found]})
             raise ValueError(
                 f"{type(self).__name__}: {len(missing)} date(s) outside the "
                 f"fitted information set, first {missing[:5]}. A date is only "
                 "servable if fit() saw it or apply_causal() produced it by "
                 "running the frozen model forward"
             )
-        idx = torch.tensor(
-            [self._rows[int(d)] for d in ctx.date], dtype=torch.long
-        )
         return PriorOutput(log_prior=self._log_table[idx])
 
 

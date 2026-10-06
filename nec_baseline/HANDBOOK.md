@@ -1350,6 +1350,19 @@ dead-parameter warning), and about 14% in the precomputed gate's per-row date lo
 (a Python loop over the batch); the experts themselves take about 10%. Those two are
 engineering, not design: removing them would bring the factor near 1.5.
 
+Both are now removed. `NECModel.encoder_is_dead` is true when the prior is
+precomputed, the experts read the snapshot only, and the encoder draws no random
+numbers (no inter-layer dropout); the forward pass then skips the GRU and passes the
+gate head zeros it only shape-checks. `skip_dead_encoder = False` restores the full
+path. The precomputed gate looks dates up by binary search over its sorted date codes,
+and still refuses a date outside the fitted and applied populations.
+`tests/test_fast_paths.py` shows that a frozen Hamilton-gate model trained either way
+is bit-identical: the same parameters, predictions, RNG state, training history and
+gradient audit. On the synthetic same-shape panel (this container, one thread) the
+step falls from 61.3 ms to 23.8 ms, 2.6 times faster: 29.4 ms with the encoder
+skipped, the rest from the lookup. Re-run `scripts/time_real_pipeline.py` for the
+real factor; the projection from the measured speed-up is about 2.3.
+
 Under the hood, every experiment is the same seven moves:
 
 ```

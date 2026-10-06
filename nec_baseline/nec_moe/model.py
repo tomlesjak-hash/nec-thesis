@@ -129,6 +129,29 @@ class NECModel(nn.Module):
         # Evaluation switch, not state: set only inside corrections_disabled()
         # and never saved (audit finding E-1).
         self._corrections_off = False
+        # Skip the encoder and gate head where their output cannot reach the
+        # loss or the prediction (see encoder_is_dead). Not state, never
+        # saved; a test turns it off to compare against the full path.
+        self.skip_dead_encoder = True
+
+    @property
+    def encoder_is_dead(self) -> bool:
+        """True when the encoder's output can reach neither loss nor prediction.
+
+        That is the case for a **precomputed** prior (the frozen Hamilton gate:
+        it looks its rows up by date and reads the gate logits for their
+        shape only) with **snapshot-only** experts (which never see ``h_T``).
+        The encoder must also draw no random numbers, i.e. no inter-layer
+        dropout, so skipping it leaves the RNG stream exactly as it was.
+        The gradient audit is unchanged: the encoder and gate head get no
+        gradient either way (``grad is None``, "disconnected").
+        """
+        e = self.cfg.encoder
+        return (
+            bool(getattr(self.prior, "precomputed", False))
+            and self.cfg.experts.input_mode == "snapshot"
+            and (e.dropout == 0.0 or e.num_layers < 2)
+        )
 
     # ------------------------------------------------------------ the base
     def attach_base(self, base: BaseModel) -> NECModel:
@@ -203,8 +226,16 @@ class NECModel(nn.Module):
         assert_shape(x_seq, (None, d.seq_len, d.d_seq), "x_seq")
         assert_shape(x_snap, (x_seq.shape[0], d.d_snap), "x_snap")
 
-        h_t = self.encoder(x_seq)
-        gate_logits = self.gate(h_t)
+        if self.skip_dead_encoder and self.encoder_is_dead:
+            # placeholders of the right shape: the precomputed prior checks
+            # the logits' shape only, and snapshot experts never read h_T.
+            # The GRU was ~60% of a training step here (brief 09 H profile)
+            b = x_seq.shape[0]
+            h_t = x_seq.new_zeros(b, self.cfg.encoder.hidden_dim)
+            gate_logits = x_seq.new_zeros(b, self.cfg.experts.n_experts)
+        else:
+            h_t = self.encoder(x_seq)
+            gate_logits = self.gate(h_t)
         prior = self.prior(gate_logits, ctx)
 
         x_exp = self.expert_input(x_snap, h_t)

@@ -34,16 +34,16 @@
   "base_batch_size": 128,
   "threads": 1,
   "seconds": {
-    "data_loading": 0.2834523330020602,
-    "gate_fit": 28.78253145799681,
-    "base_fit": 0.23395629200240364,
-    "expert_training": 48.86190520800301
+    "data_loading": 0.12744587499764748,
+    "gate_fit": 29.055512541999633,
+    "base_fit": 0.21446095799910836,
+    "expert_training": 11.148161249999248
   },
-  "seconds_per_step": 0.024430952604001504,
+  "seconds_per_step": 0.005574080624999624,
   "benchmark_seconds_per_step": 0.004194,
   "benchmark_file": "compute_benchmark_20261005_233042.json",
-  "overhead_factor": 5.825215213162019,
-  "peak_memory_gb": 3.862298624,
+  "overhead_factor": 1.3290607117309547,
+  "peak_memory_gb": 3.860791296,
   "machine": {
     "platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O",
     "python": "3.14.4",

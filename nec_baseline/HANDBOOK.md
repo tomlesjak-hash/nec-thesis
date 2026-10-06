@@ -1360,8 +1360,12 @@ and still refuses a date outside the fitted and applied populations.
 is bit-identical: the same parameters, predictions, RNG state, training history and
 gradient audit. On the synthetic same-shape panel (this container, one thread) the
 step falls from 61.3 ms to 23.8 ms, 2.6 times faster: 29.4 ms with the encoder
-skipped, the rest from the lookup. Re-run `scripts/time_real_pipeline.py` for the
-real factor; the projection from the measured speed-up is about 2.3.
+skipped, the rest from the lookup. **Re-timed on the real panel (same job, same
+machine, one thread): 5.57 ms per step against the benchmark's 4.19 ms, an overhead
+factor of 1.33** (was 24.4 ms and 5.8), now inside the 2.5 the section 1c budget
+assumed. Expert training 11.1 s (was 49 s); gate fit 29 s, base fit 0.2 s and peak
+memory 3.9 GB are unchanged. The real speed-up, 4.4 times, is larger than the
+synthetic one because the GRU's share of the step was larger on the M-series CPU.
 
 Under the hood, every experiment is the same seven moves:
 

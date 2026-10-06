@@ -50,7 +50,13 @@ from .decay import (
     regime_clock_components,
     weight_summary,
 )
-from .registry import TrialRegistry, gate_weight_of, trial_provenance
+from .registry import (
+    TrialRegistry,
+    fold_provenance,
+    gate_weight_of,
+    scheme_provenance,
+    trial_provenance,
+)
 from .runstore import Run
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -1583,7 +1589,8 @@ def walk_forward_evaluate(
         backtest_quantiles, cost_rate, resolve_hac_lags(panel, hac_lags), hac_kernel,
         portfolio_scheme, panel.horizon,
     )
-    provenance = trial_provenance(panel, None, portfolio_scheme) | (provenance_extra or {})
+    provenance = trial_provenance(panel, None, portfolio_scheme, folds) | (
+        provenance_extra or {})
     for fold in folds:
         done_file = resume / f"fold_{fold.fold}.pt" if resume is not None else None
         if done_file is not None and done_file.exists():
@@ -1683,7 +1690,8 @@ def walk_forward_evaluate(
         gate_perm, gate_metrics = _gate_report(
             trainer, fold, registry, registry_tag, seed,
             {**provenance, "hidden_init": trainer.cfg.experts.hidden_init,
-             "gate_weight": gate_weight_of(trainer.cfg)},
+             "gate_weight": gate_weight_of(trainer.cfg),
+             **scheme_provenance(trainer.cfg), **fold_provenance([fold])},
         )
         payload = acc.add(
             fold, pred, train, test, nll,

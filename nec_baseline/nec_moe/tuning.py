@@ -35,7 +35,7 @@ from torch import Tensor
 
 from .data import Panel
 from .evaluation import WalkForwardFold, walk_forward_folds
-from .registry import TrialRegistry, trial_provenance
+from .registry import SCHEME_KEYS, TrialRegistry, trial_provenance
 from .sweep import SweepArm, SweepReport, run_sweep
 
 __all__ = ["validation_tail", "TuneResult", "tune"]
@@ -149,6 +149,7 @@ def tune(
                 **trial_provenance(train_panel, None, portfolio_scheme),
                 "hidden_init": rec.get("hidden_init"),
                 "gate_weight": rec.get("gate_weight"),
+                **{k: rec.get(k) for k in SCHEME_KEYS},
             },
             notes=f"tuning aggregate over {a.n_seeds} seeds",
         )

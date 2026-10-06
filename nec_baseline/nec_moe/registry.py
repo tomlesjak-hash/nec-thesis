@@ -35,7 +35,8 @@ from typing import Any
 
 __all__ = [
     "PROVENANCE_KEYS", "TrialRecord", "TrialRegistry", "gate_weight_of", "panel_feature_set",
-    "panel_target_kind", "trial_provenance",
+    "panel_target_kind", "trial_provenance", "scheme_provenance", "fold_provenance",
+    "SCHEME_KEYS",
 ]
 
 _SELECTION_SUFFIX = "#selection"
@@ -45,6 +46,19 @@ PROVENANCE_KEYS: tuple[str, ...] = (
     "data_source", "post_delisting_return", "hidden_init", "portfolio_scheme",
     "target_kind", "gate_weight", "feature_set", "crsp_stock_file", "compustat_release",
     "sector_source",
+    # brief 09 I.1, the training scheme: the folds (scheme, pilot or main,
+    # the test years), the sample's first and last date, the three memories,
+    # the gate's estimator, and the pilot selection the run was locked to
+    "fold_scheme", "protocol", "test_years", "sample_start", "sample_end",
+    "base_decay_half_life_days", "expert_decay", "expert_decay_half_life",
+    "gate_memory", "gate_half_life", "gate_fit_backend", "pilot_selection_hash",
+)
+
+#: The model-config part of the brief 09 keys (:func:`scheme_provenance`),
+#: named as the ``Experiment`` fields and the pilot's selection file name them.
+SCHEME_KEYS: tuple[str, ...] = (
+    "base_decay_half_life_days", "expert_decay", "expert_decay_half_life",
+    "gate_memory", "gate_half_life", "gate_fit_backend",
 )
 
 #: Target-name prefixes of the Stage B target kinds (``StageBSpec.target``),
@@ -97,8 +111,52 @@ def gate_weight_of(cfg: Any) -> str | None:
     return str(cfg.markov_gate.gate_weight)
 
 
+def scheme_provenance(cfg: Any) -> dict[str, Any]:
+    """The memories and the gate estimator of a model config (brief 09 I.1):
+    ``None`` where a key does not apply (no base, no regime-clock decay, no
+    Hamilton gate, or no config at all, e.g. a baseline model)."""
+    out: dict[str, Any] = dict.fromkeys(SCHEME_KEYS)
+    if cfg is None:
+        return out
+    base, train = getattr(cfg, "base", None), getattr(cfg, "train", None)
+    if base is not None and getattr(base, "enabled", False):
+        out["base_decay_half_life_days"] = base.decay_half_life_days
+    if train is not None:
+        out["expert_decay"] = train.expert_decay
+        if train.expert_decay != "none":
+            out["expert_decay_half_life"] = train.expert_decay_half_life
+    if getattr(getattr(cfg, "prior", None), "kind", None) == "markov":
+        mg = cfg.markov_gate
+        out["gate_memory"] = mg.memory
+        out["gate_half_life"] = mg.gate_half_life
+        out["gate_fit_backend"] = mg.fit_backend
+    return out
+
+
+def fold_provenance(folds: Any) -> dict[str, Any]:
+    """The folds' scheme, protocol and test years (brief 09 I.1). Main and
+    pilot folds are calendar years; count folds have no test year."""
+    folds = list(folds or ())
+    kinds = {getattr(f, "kind", "count") for f in folds}
+    years = sorted({int(f.test_year) for f in folds if getattr(f, "test_year", None) is not None})
+    return {
+        "fold_scheme": None if not folds else (
+            "count" if kinds == {"count"} else "calendar_year"),
+        "protocol": None if not folds else ("pilot" if "pilot" in kinds else "main"),
+        "test_years": years or None,
+    }
+
+
+def _sample_window(panel: Any) -> tuple[str | None, str | None]:
+    labels = getattr(panel, "date_labels", None)
+    date = getattr(panel, "date", None)
+    if not labels or date is None or len(date) == 0:
+        return None, None
+    return str(labels[int(date.min())]), str(labels[int(date.max())])
+
+
 def trial_provenance(
-    panel: Any, cfg: Any = None, portfolio_scheme: str | None = None
+    panel: Any, cfg: Any = None, portfolio_scheme: str | None = None, folds: Any = None
 ) -> dict[str, Any]:
     """The provenance keys of a trial run on ``panel`` with model config ``cfg``.
 
@@ -111,10 +169,15 @@ def trial_provenance(
     gate's ``gate_weight`` from ``cfg`` (:func:`gate_weight_of`, brief 08 B);
     the panel's ``feature_set`` (:func:`panel_feature_set`, brief 08 D); and,
     from the build metadata, the CRSP stock file, the Compustat release and
-    the sector source (``"gics"``) (brief 08 E.1).
+    the sector source (``"gics"``) (brief 08 E.1); the folds' scheme,
+    protocol and test years (:func:`fold_provenance` of ``folds``), the
+    panel's first and last date, and the model's memories and gate estimator
+    (:func:`scheme_provenance`) (brief 09 I.1). ``pilot_selection_hash`` is
+    ``None`` here; a run under the pre-registration lock merges its own in.
     """
     metadata = getattr(panel, "metadata", None) or {}
     experts = getattr(cfg, "experts", None)
+    start, end = _sample_window(panel)
     return {
         "data_source": getattr(panel, "data_source", "unspecified"),
         "post_delisting_return": metadata.get("post_delisting_return"),
@@ -129,6 +192,14 @@ def trial_provenance(
         "crsp_stock_file": metadata.get("crsp_stock_file"),
         "compustat_release": metadata.get("compustat_release"),
         "sector_source": metadata.get("sector_source"),
+        # brief 09 I.1: the folds (scheme, pilot or main, test years), the
+        # panel's first and last date, the memories and the gate estimator;
+        # the pilot-selection hash is the run's, merged in by the caller
+        **fold_provenance(folds),
+        "sample_start": start,
+        "sample_end": end,
+        **scheme_provenance(cfg),
+        "pilot_selection_hash": None,
     }
 
 

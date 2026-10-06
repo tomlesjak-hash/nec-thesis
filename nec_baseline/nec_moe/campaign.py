@@ -419,7 +419,7 @@ def log_campaign_gate_starts(spec: CampaignSpec, jobs: list[Job], registry: Any,
     ``provenance`` is the panel's and the run's (``trial_provenance`` and the
     run-level keys); each job's ``hidden_init`` and ``gate_weight`` are
     added from its own config."""
-    from .registry import gate_weight_of
+    from .registry import fold_provenance, gate_weight_of, scheme_provenance
 
     for job in jobs:
         gate_file = spec.job_dir(job) / f"fold_{spec.folds[job.fold].fold}_gate.pt"
@@ -433,7 +433,8 @@ def log_campaign_gate_starts(spec: CampaignSpec, jobs: list[Job], registry: Any,
         log_gate_starts(registry, fit, spec.folds[job.fold].fold, cfg,
                         cfg.markov_gate.registry_tag, job.seed,
                         {**provenance, "hidden_init": cfg.experts.hidden_init,
-                         "gate_weight": gate_weight_of(cfg)})
+                         "gate_weight": gate_weight_of(cfg), **scheme_provenance(cfg),
+                         **fold_provenance([spec.folds[job.fold]])})
 
 
 def jobs_manifest(jobs: list[Job]) -> str:

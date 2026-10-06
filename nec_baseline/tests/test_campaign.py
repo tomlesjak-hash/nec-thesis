@@ -130,6 +130,13 @@ def test_the_campaign_writes_aggregates_and_keeps_predictions_in_data(parallel):
     assert sorted((r["config"]["arm"], r["config"]["depth"], r["seed"]) for r in sweep_rows) == [
         ("hamilton", 1, 0), ("hamilton", 2, 0)]
     assert any(r["tag"] == "markov_gate_starts" for r in rows)  # the gate's starts, too
+    # brief 09 I.1: the scheme on every row (count folds: no test year)
+    from nec_moe import PROVENANCE_KEYS
+
+    for r in rows:
+        assert set(PROVENANCE_KEYS) <= set(r["config"])
+        assert (r["config"]["fold_scheme"], r["config"]["protocol"]) == ("count", "main")
+        assert r["config"]["test_years"] is None and r["config"]["gate_memory"] == "full"
     assert (run_dir / "metrics" / "report.csv").exists()
     preds = list((tmp / "Data" / "derived" / "runs" / out["run_id"]).rglob("*_predictions.pt"))
     assert len(preds) == 4
@@ -249,3 +256,25 @@ def test_the_compute_envelope_is_documented_defaults_not_limits():
     import run_experiment as rx
 
     assert (rx.Experiment().n_experts, rx.Experiment().expert_hidden_dims) == (2, (64, 32))
+
+
+def test_scheme_and_fold_provenance():
+    from conftest import small_base_config, small_config
+
+    from nec_moe import fold_provenance, scheme_provenance, walk_forward_folds
+
+    assert set(scheme_provenance(None).values()) == {None}
+    cfg = small_config(prior_kind="markov", base=small_base_config(decay_half_life_days=500.0),
+                       expert_decay="regime_clock", expert_decay_half_life=300.0)
+    cfg = dataclasses.replace(cfg, markov_gate=dataclasses.replace(
+        cfg.markov_gate, fit_backend="native", memory="regime_clock", gate_half_life=200.0))
+    assert scheme_provenance(cfg) == {
+        "base_decay_half_life_days": 500.0, "expert_decay": "regime_clock",
+        "expert_decay_half_life": 300.0, "gate_memory": "regime_clock",
+        "gate_half_life": 200.0, "gate_fit_backend": "native"}
+    soft = scheme_provenance(small_config())
+    assert soft["expert_decay"] == "none" and soft["gate_memory"] is None
+    count = walk_forward_folds(torch.arange(100), n_folds=2, test_dates_per_fold=10,
+                               purge_dates=1)
+    assert fold_provenance(count) == {"fold_scheme": "count", "protocol": "main",
+                                      "test_years": None}

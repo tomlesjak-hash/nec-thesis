@@ -250,6 +250,27 @@ def test_main_mode_records_the_hash_in_every_trial_row(pilot):
             .splitlines()]
     assert rows and all(r["config"]["pilot_selection_hash"] == pilot["digest"] for r in rows)
     assert all(r["config"]["force_deviation"] is False for r in rows)
+    # brief 09 I.1: every row records the training scheme it ran under
+    chosen = pilot["selection"]["chosen"]
+    labels = pilot["panel"].date_labels
+    for r in rows:
+        c = r["config"]
+        assert (c["fold_scheme"], c["protocol"]) == ("calendar_year", "main")
+        assert (c["sample_start"], c["sample_end"]) == (labels[0], labels[-1])
+        assert r["seed"] == 0
+    sweep = [r for r in rows if r["tag"] == "pilot"]
+    starts = [r for r in rows if r["tag"] == "markov_gate_starts"]
+    assert sweep and starts
+    for r in sweep:
+        c = r["config"]
+        assert c["test_years"] == [2010, 2011]
+        for key in ("gate_memory", "gate_fit_backend", "expert_decay",
+                    "base_decay_half_life_days"):
+            assert c[key] == chosen[key], key
+        for key in ("gate_half_life", "expert_decay_half_life"):
+            if c[key] is not None or chosen[key] != math.inf:
+                assert c[key] == chosen[key], key
+    assert {tuple(r["config"]["test_years"]) for r in starts} == {(2010,), (2011,)}
 
 
 def test_main_mode_refuses_a_deviation_unless_forced(pilot):

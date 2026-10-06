@@ -1203,7 +1203,8 @@ Data/derived/runs/<run_id>/ per-security outputs (fold predictions; licensed, gi
 `results/` holds aggregate outputs only; anything per security goes to the
 `Data/derived/runs/` folder (licence rules, brief 06). `purpose` is a free-text label.
 `touches_test` is true for a run that scored a test block on a real panel (Q15's
-accounting); it is recorded, never enforced. The settings hash ignores `resume`,
+accounting); it is recorded. What is enforced (brief 09 F.3) is the pre-registration lock:
+a run that scores the test period (2010 on) needs the pilot's selection file (II.0b). The settings hash ignores `resume`,
 `resume_run_id` and `force`; the data fingerprint hashes the panel's shape, date
 range, entity set, target checksum, data source and CRSP release.
 `scripts/runs.py` lists, shows, diffs, finds and resumes runs; nothing deletes.
@@ -1240,6 +1241,81 @@ The property that matters, pinned by `tests/test_resume.py` with expert dropout 
 interrupted and resumed run equals an uninterrupted one **exactly**, interrupted mid-fit
 inside a fold, between folds, in the middle of a sweep, or with its newest checkpoint
 torn by a crash during the write.
+
+## II.0b The training scheme (brief 09; Q16)
+
+Decided 2026-10-05; the reasoning is in `Master Thesis/Advisor_Questions.md` Q16 and
+`Training_Window_and_Weighting_Theory.md` sections 4-8. RUNBOOK section 8c is the how-to.
+
+**Sample and folds** (`FoldConfig`, `nec_moe.evaluation`). The sample is 2000-2024
+(`CRSPSpec.start`, `Experiment.start`); the extracts reach further back for the feature
+windows only. `fold_scheme="calendar_year"` (the default) gives one main fold per test
+year 2010-2024 (`calendar_year_folds`): train on every date from the sample start to
+the end of the previous year minus the purge (the target horizon, 5), test on the year.
+The pilot's folds (`pilot_folds`) use the same rule with validation years 2007-2009, on
+`pilot_slice(panel)`: the dates before 2010 minus the last 5 (their labels are 2010
+returns). Every pilot fold builder asserts on the panel it receives that no date is in
+2010 or later (`PreTestViolation`). `fold_scheme="count"` keeps the earlier
+count-based split for development.
+
+**No held-out tail, fixed budgets, fresh starts, paired seeds.** In main and pilot folds
+the base trains on its whole training block (`BaseConfig.val_fraction = 0`, the default;
+a tail or early stopping is refused there), and the experts train their fixed
+`TrainConfig.steps` on every trading day's rows. Every fold starts from fresh weights
+(the harness reseeds the global RNG before building each fold's trainer). A seed fixes
+the base, the experts' initialisation and the minibatch order whatever the arm, so arms
+on one seed list are paired.
+
+**Decay weights** (`nec_moe.decay`; theory notes sections 4-6). The base's rows are
+weighted `2^(-age/H_base)` (`BaseConfig.decay_half_life_days`, age in trading days to
+the fold's last training date); the experts' rows by the regime clock,
+`w(s) = sum_k xi_s(k) rho^n_k(s,T)` with `n_k` the later regime-k experience by the
+frozen gate's **filtered** probabilities (`TrainConfig.expert_decay="regime_clock"`,
+`expert_decay_half_life` in regime-days; the Hamilton gate only). Each loss is the
+weighted mean `sum(w l) / sum(w)`; `None` or an infinite half-life skips the weighting
+and is bit-identical to an unweighted run. Per fold, `FoldResult.weights` (and the
+per-fold metrics CSV) report the Kish ESS overall and per regime and the weight mass by
+calendar year.
+
+**The gate's memory** (`nec_moe.baum_welch`, `MarkovGateConfig`). `fit_backend="native"`
+fits the order-0 Gaussian Markov switching model with a scaled Baum-Welch (validated
+against statsmodels: the same log-likelihood, parameters and filtered probabilities, on
+synthetic series and on the real market series 2000-2008). `memory="regime_clock"` adds
+a weighted second pass (each regime's emission on its own clock, transitions out of `j`
+on `j`'s; `gate_half_life` in regime-days; a pass that does not settle is reported as
+`gate_weighted_settled = 0`). Only the estimate changes: the filter, `apply_causal` and
+the Q27 gate weight are as before.
+
+**The pilot** (`nec_moe.pilot`, `scripts/run_pilot.py`, `configs/pilot_grid.json`).
+Stage 1 scores each gate half-life by the one-step predictive log-likelihood of the
+market series over the validation years (frozen filter), reports the 20 worst days apart
+and gives ties to the longer memory. Stage 2 scores every other setting by the mixture's
+regime-balanced validation loss (`v(s) = sum_k wbar_k(s) / M_k`, `wbar` the window-average
+gate weight), averaged over the 3 folds and the pilot seeds; the step budgets are read as
+milestones of one run. It writes `results/pilot/pilot_selection.json` and its SHA-256.
+
+**The lock** (`run_experiment.selection_lock`). A run that scores any date from
+`first_test_year` on needs `Experiment.pilot_selection_file`; settings that differ from
+the chosen ones need `force_deviation=True`. The hash and the deviations are in
+`run.json`; the hash and the forced flag in every trial row.
+
+**The campaign runner** (`nec_moe.campaign`, `scripts/run_campaign.py`). One job per
+(arm, depth, seed, fold), a pool of spawned one-thread workers, the panel's tensors saved
+once to `Data/derived/panel_cache/` and memory-mapped, bases cached on disk behind a lock
+file, each job resumable in the run's `checkpoints/jobs/`, combined afterwards exactly as
+a sequential run (tested equal). RUNBOOK section 8b.
+
+**What every trial row records** (`PROVENANCE_KEYS`, brief 09 I.1), besides the brief 06
+and 08 keys: `fold_scheme`, `protocol` (main or pilot), `test_years`, `sample_start` and
+`sample_end` (the panel's first and last date), `base_decay_half_life_days`,
+`expert_decay`, `expert_decay_half_life`, `gate_memory`, `gate_half_life`,
+`gate_fit_backend` (`None` where a key does not apply) and `pilot_selection_hash`; the
+seed is the row's own field.
+
+**Not decided here** (the code keeps its defaults and picks nothing): K (Q18), the
+widths and depths inside the envelope (Q8/Q17), the error function (Q20), the gate series
+(Q23), whether the filter runs through the purge gap (Q22), leave-one-episode-out
+(Q16 c), the per-expert form of the regime-clock decay, the fallback to early stopping.
 
 ## II.0c The compute envelope (brief 09 H)
 

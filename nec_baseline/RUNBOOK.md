@@ -187,17 +187,21 @@ CRSP and Compustat are licensed: nothing derived from them may leave `Quant Mode
 
 `touches_test` in `run.json` and `INDEX.csv` is `True` for any run that scored a test block
 on a real panel. Every such run is a look at the test data, which the pre-registration (Q15)
-has to count. The code records it and does not stop you. Until the pre-registration is
-written, keep real-panel runs to what you have decided to do.
+has to count. Since brief 09 the code also **stops** you: a run that would score any date
+from `first_test_year` (2010) on refuses to start without the pilot's selection file
+(section 8c). A run whose panel ends before 2010 needs no selection.
 
 ---
 
 ## 8a. Building the real data (brief 08): extracts, panel, coverage
 
 The model now uses the market-neutral target (Q25), the 57 Q26 inputs (Q26) and the
-window-average gate weight (Q27). The Q26 inputs need a new CRSP extract (with open, high,
-low, close, bid and ask, and about five years of history before 2015) and the Compustat
-extract (link history, GICS sectors, quarterly fundamentals with report and filing dates).
+window-average gate weight (Q27), on the 2000-2024 sample (Q16 (a), brief 09 A). The Q26
+inputs need a CRSP extract (with open, high, low, close, bid and ask, and about five years
+of history before 2000) and the Compustat extract (link history, GICS sectors, quarterly
+fundamentals with report and filing dates, from mid-1996). The default window of every
+step below is 2000-01-01 to 2024-12-31; the 2015-2024 extracts and panel built earlier are
+left in place.
 Run these four commands once, in this order, from `nec_baseline/`. Each one can be stopped
 with Ctrl+C and restarted with the same command; the two extracts continue where they
 stopped. Use `caffeinate -i` in front of each on the Mac.
@@ -213,10 +217,10 @@ What each writes, all inside `Data/derived/` except step 4:
 
 | step | writes | notes |
 |---|---|---|
-| 1 | `crsp_extract_ciz202512_2015-01-01_2024-12-31_StkDlySecurityData_lb1887d/` | a **new** folder: the brief 06 extract (`crsp_extract_ciz202512_2015-01-01_2024-12-31/`) is not touched. `extract.json` records the stock file and the lookback; a panel build refuses an extract made with other ones. It also copies the `MetaItemInfo` rows of `DlyCap`, `DlyShrOut` and `DlyVol`, so their units can be checked by eye. |
-| 2 | `compustat_cfz202607_2015-01-01_2024-12-31/` | reads `Data/crspdata/cfz202607_ascii/` or `Data/cfz202607_ascii.zip`, never the `crspdata 3/` copies. Prints the link-ambiguity count, the period-end check, the keyset-8 ("PRE") firm-quarter count and the filing types. |
-| 3 | `pit_panel_crsp_2015-01-01_2024-12-31_q26_market_neutral.pt` (+ `.report.json`, coverage `.csv`) | the old `pit_panel_crsp_2015-01-01_2024-12-31.pt` is left alone. `run_experiment.py`'s `panel_file` default now points at the new file. |
-| 4 | `results/feature_coverage/<date>/coverage.json`, `present_share_by_year.csv`, `rates_by_year.csv` | per year: the share of rows with each characteristic before the 0-fill, the two flag rates, the share without a sector; the keyset-8 count. No return, no model result; it refuses to write anything that names a security. |
+| 1 | `crsp_extract_ciz202512_2000-01-01_2024-12-31_StkDlySecurityData_lb1887d/` | a **new** folder: older extracts (`crsp_extract_ciz202512_2015-01-01_...`) are not touched. `extract.json` records the stock file and the lookback; a panel build refuses an extract made with other ones. It also copies the `MetaItemInfo` rows of `DlyCap`, `DlyShrOut` and `DlyVol`, so their units can be checked by eye. |
+| 2 | `compustat_cfz202607_2000-01-01_2024-12-31/` | reads `Data/crspdata/cfz202607_ascii/` or `Data/cfz202607_ascii.zip`, never the `crspdata 3/` copies. Prints the link-ambiguity count, the period-end check, the keyset-8 ("PRE") firm-quarter count and the filing types. |
+| 3 | `pit_panel_crsp_2000-01-01_2024-12-31_q26_market_neutral.pt` (+ `.report.json`, coverage `.csv`) | older panels are left alone. `run_experiment.py`'s `panel_file` default points at this file. About 12 minutes and 15 GB of memory. |
+| 4 | `results/feature_coverage/<date>/coverage.json`, `present_share_by_year.csv`, `rates_by_year.csv`, `early_years.csv` | per year: the share of rows with each characteristic before the 0-fill, the two flag rates, the share without a sector; the members' report-date and filing-date coverage by fiscal year; the keyset-8 count; the early years in one table (`--early 2000 2009`). No return, no model result; it refuses to write anything that names a security. |
 
 Step 4 reads step 3's panel if it exists and otherwise builds it in memory, so step 3 can be
 skipped if you only want the report. Things to look at in the report before training on the
@@ -249,6 +253,43 @@ Finished jobs are skipped, an interrupted job continues from its checkpoint.
 
 ---
 
+## 8c. The pilot, then the main study (brief 09)
+
+The training scheme is decided (Q16): annual refits on an expanding window, testing 2010
+to 2024 (15 folds), every setting chosen **once** on 2007-2009 and then frozen. The
+order is fixed:
+
+**1. The pilot** chooses the gate's memory, the base's and the experts' decay half-lives,
+the learning rate, the weight decay, the batch size and the step budgets, on the
+validation years 2007, 2008 and 2009 only (training blocks from 2000). It never reads a
+date from 2010 on (nor the last 5 dates of 2009, whose 5-day targets are 2010 returns).
+Check the grid in `configs/pilot_grid.json` first, then:
+
+```bash
+python3.14 scripts/run_pilot.py --dry-run          # the size: settings x folds x seeds
+caffeinate -i python3.14 scripts/run_pilot.py      # writes results/pilot/pilot_selection.json
+```
+
+It prints the chosen settings and the step-budget check. The selection file holds them,
+the gate-memory scores (with the 20 worst days apart), every setting's validation loss and
+the grid, and its SHA-256 sits next to it. If the check says the best step budget differs
+by more than a factor of 2 across the three folds, stop and decide (the fallback is
+regime-balanced early stopping, not implemented).
+
+**2. The main study** uses exactly the chosen settings. Put them in the `Experiment`
+block (or a campaign config's `experiment` block) with
+`pilot_selection_file="results/pilot/pilot_selection.json"`, and run evaluate mode or a
+campaign (section 8b). The fold scheme is `"calendar_year"` by default: one fold per year
+2010-2024, each trained on everything before it.
+
+**The lock.** A run that would score any date from 2010 on refuses to start without the
+selection file. With it, a setting that differs from the chosen one is refused too, unless
+`force_deviation=True`; a forced run records the deviations in `run.json`, and every
+trial row records the selection's hash and whether a deviation was forced. Changing the
+selection means rerunning the pilot, which writes a new hash.
+
+---
+
 ## 9. Quick reference
 
 | I want to... | command |
@@ -263,6 +304,9 @@ Finished jobs are skipped, an interrupted job continues from its checkpoint.
 | resume despite a change | add `--force` |
 | read a run's results | `python3.14 scripts/runs.py show <run_id>` |
 | compare two runs | `python3.14 scripts/runs.py diff <a> <b>` |
+| run the pilot (once) | `caffeinate -i python3.14 scripts/run_pilot.py` |
+| run a campaign | `caffeinate -i python3.14 scripts/run_campaign.py <config.json>` |
+| resume a campaign | `... scripts/run_campaign.py <config.json> --resume <run_id>` |
 | rebuild the CRSP extract (brief 08) | `python3.14 scripts/extract_crsp_v2.py` |
 | build the Compustat extract | `python3.14 scripts/extract_compustat.py` |
 | build the Q26 panel | `python3.14 scripts/build_pit_panel.py` |

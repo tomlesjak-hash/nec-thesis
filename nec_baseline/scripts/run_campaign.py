@@ -190,7 +190,8 @@ def main(config: str | Path, *, n_workers: int | None = None, resume: str | None
             run.write_metrics(f"{group}_folds", fold_metrics_frame(res))
             run.write_metrics(f"{group}_pooled", metrics)
             registry.log(exp.tag, metrics, config={
-                **trial_provenance(panel, spec.config(arm, depth), exp.portfolio_scheme),
+                **trial_provenance(panel, spec.config(arm, depth), exp.portfolio_scheme,
+                                   spec.folds),
                 "arm": arm, "depth": depth, **provenance,
             }, seed=seed)
             rows[group] = metrics

@@ -51,10 +51,11 @@ from .evaluation import (
     fold_metrics_frame,
     walk_forward_evaluate,
     walk_forward_evaluate_baseline,
+    walk_forward_folds,
 )
 from .model import NECModel
 from .multiple_testing import benjamini_hochberg, ic_pvalue
-from .registry import TrialRegistry, gate_weight_of, trial_provenance
+from .registry import TrialRegistry, gate_weight_of, scheme_provenance, trial_provenance
 from .runstore import Run
 from .train import Trainer
 
@@ -130,6 +131,8 @@ def nec_arm(
             "hidden_init": cfg.experts.hidden_init,
             # the Hamilton gate's weight (Q27); None for every other prior
             "gate_weight": gate_weight_of(cfg),
+            # the memories and the gate's estimator (brief 09 I.1)
+            **scheme_provenance(cfg),
             "nec_config": cfg.to_dict(),
         },
     )
@@ -362,6 +365,12 @@ def run_sweep(
             if arm_name is not None and rec.seed is not None:
                 completed[(arm_name, rec.seed)] = rec.metrics
 
+    # the folds every arm runs on, for the trial rows' fold provenance
+    # (brief 09 I.1): the given ones, or the count-based split
+    run_folds = folds if folds is not None else walk_forward_folds(
+        panel.date, n_folds=n_folds or 0, test_dates_per_fold=test_dates_per_fold or 0,
+        purge_dates=purge_dates, min_train_dates=min_train_dates,
+    )
     per_arm: dict[str, list[dict[str, float]]] = {a.name: [] for a in arms}
     for arm in arms:
         for seed in seeds:
@@ -430,7 +439,7 @@ def run_sweep(
                 run.write_metrics(f"{arm.name}_seed{seed}_pooled", metrics)
             registry.log(
                 tag, metrics,
-                config={**trial_provenance(panel, None, portfolio_scheme),
+                config={**trial_provenance(panel, None, portfolio_scheme, run_folds),
                         **(arm.config_record or {}), **(provenance_extra or {})},
                 seed=seed,
             )

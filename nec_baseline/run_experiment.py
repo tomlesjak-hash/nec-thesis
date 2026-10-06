@@ -736,9 +736,14 @@ def _quick(exp: Experiment, panel: Panel, purge: int, run: Run) -> dict:
     b_pred_all = (base_and_correction(trainer, test, train=train)[0]
                   if trainer.model.base is not None else None)
     _save_predictions(run.per_security_dir, 0, test, pred, b_pred_all)
+    labels = panel.date_labels
+    quick_years = (sorted({int(str(labels[int(d)])[:4]) for d in fold.test_dates})
+                   if labels else None)
     registry.log(exp.tag, trial, config={"mode": "quick",
                  **dataclasses.asdict(exp),
                  **trial_provenance(panel, trainer.cfg, exp.portfolio_scheme),
+                 # brief 09 I.1: quick mode's one chronological split
+                 "fold_scheme": "quick", "protocol": "main", "test_years": quick_years,
                  **run_provenance(exp, run)},
                  seed=exp.seeds[0])
     return results

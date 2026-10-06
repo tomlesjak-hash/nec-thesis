@@ -197,10 +197,13 @@ from .priors import (
 )
 from .registry import (
     PROVENANCE_KEYS,
+    SCHEME_KEYS,
     TrialRecord,
     TrialRegistry,
+    fold_provenance,
     gate_weight_of,
     panel_target_kind,
+    scheme_provenance,
     trial_provenance,
 )
 from .runstore import (
@@ -389,6 +392,9 @@ __all__ = [
     "TrialRecord",
     "TrialRegistry",
     "PROVENANCE_KEYS",
+    "SCHEME_KEYS",
+    "scheme_provenance",
+    "fold_provenance",
     "panel_target_kind",
     "gate_weight_of",
     "trial_provenance",

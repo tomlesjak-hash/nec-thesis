@@ -1171,25 +1171,37 @@ def _gate_report(
         return (), ()
     metrics = fit.metrics()
     if registry is not None:
-        gate_tag = str(tag or trainer.cfg.markov_gate.registry_tag)
-        for i, llf in enumerate(fit.start_llfs):
-            if math.isfinite(llf):
-                registry.log(
-                    gate_tag,
-                    {"llf": llf, "start": float(i), "fold": float(fold.fold)},
-                    config={
-                        "arm": gate_tag,
-                        "chosen": i == fit.chosen_start,
-                        "objective": trainer.cfg.train.objective,
-                        "correction_penalty_weight": (
-                            trainer.cfg.train.correction_penalty_weight
-                        ),
-                        **(provenance or {}),
-                    },
-                    seed=seed,
-                    notes=f"markov gate start {i} of {fit.n_starts}, fold {fold.fold}",
-                )
+        log_gate_starts(registry, fit, fold.fold, trainer.cfg,
+                        str(tag or trainer.cfg.markov_gate.registry_tag), seed, provenance)
     return fit.permutation, tuple(metrics.items())
+
+
+def log_gate_starts(
+    registry: TrialRegistry,
+    fit: Any,
+    fold: int,
+    cfg: Any,
+    tag: str,
+    seed: int,
+    provenance: dict[str, Any] | None = None,
+) -> None:
+    """One trial row per multi-start of a fitted gate (brief 03 §5): the
+    selection multiplicity of "best of N starts" reaches the corrections."""
+    for i, llf in enumerate(fit.start_llfs):
+        if math.isfinite(llf):
+            registry.log(
+                tag,
+                {"llf": llf, "start": float(i), "fold": float(fold)},
+                config={
+                    "arm": tag,
+                    "chosen": i == fit.chosen_start,
+                    "objective": cfg.train.objective,
+                    "correction_penalty_weight": cfg.train.correction_penalty_weight,
+                    **(provenance or {}),
+                },
+                seed=seed,
+                notes=f"markov gate start {i} of {fit.n_starts}, fold {fold}",
+            )
 
 
 def _attach_base(

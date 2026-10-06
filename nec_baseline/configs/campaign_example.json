@@ -1,0 +1,22 @@
+{
+  "_about": "An example campaign config for scripts/run_campaign.py (brief 09 G). Each job is one (arm, depth, seed, fold). Arms are sets of Experiment fields over the fixed 'experiment' block; depths give expert_hidden_dims = pyramid_dims(first_width, depth); seeds are paired across arms (brief 09 E.3). first_width and the depth list here are the current defaults inside the compute envelope (depths 1-3, first width at most 128, K at most 4; HANDBOOK); the actual widths and K are open (Q8/Q17/Q18). Only the Hamilton gate exists so far; other gates become arms as they are implemented. How a no-regime control arm should be decayed is not decided (the regime clock needs a gate), so none is listed. The pilot's selection file is required for a run that scores 2010 or later (brief 09 F.3).",
+  "campaign": "main",
+  "tag": "hamilton_depths",
+  "purpose": "the Hamilton gate over the depth scan, with the pilot's frozen settings",
+  "n_workers": 10,
+  "first_width": 64,
+  "depths": [1, 2, 3],
+  "seeds": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+  "arms": {
+    "hamilton": {"prior": "markov"}
+  },
+  "experiment": {
+    "data": "panel_file",
+    "freeze_gate": true,
+    "base_enabled": true,
+    "correction_mode": true,
+    "fold_scheme": "calendar_year",
+    "checkpoint_every": 500
+  },
+  "pilot_selection_file": "results/pilot/pilot_selection.json"
+}

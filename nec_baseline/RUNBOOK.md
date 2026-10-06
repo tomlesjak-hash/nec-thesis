@@ -226,6 +226,29 @@ of `taccruals_at` and `noa_at` (they need every balance-sheet component; see HAN
 
 ---
 
+## 8b. Campaigns: many runs in parallel (brief 09 G)
+
+A campaign is the full list of (arm, depth, seed, fold) jobs of the main study.
+`scripts/run_campaign.py` runs them in parallel worker processes, one thread
+each (10 workers by default, the M4 Pro's performance cores):
+
+```bash
+caffeinate -i python3.14 scripts/run_campaign.py configs/campaign_example.json
+```
+
+Always start a campaign through `caffeinate -i` (section 1): it runs for hours
+or days. The panel is built once and memory-mapped by every worker; each job
+checkpoints in `results/<campaign>/<run_id>/checkpoints/jobs/`. Ctrl+C once
+stops every worker at its next step (checkpointed). Resume with
+
+```bash
+caffeinate -i python3.14 scripts/run_campaign.py configs/campaign_example.json --resume <run_id>
+```
+
+Finished jobs are skipped, an interrupted job continues from its checkpoint.
+
+---
+
 ## 9. Quick reference
 
 | I want to... | command |

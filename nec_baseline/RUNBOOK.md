@@ -297,6 +297,30 @@ selection means rerunning the pilot, which writes a new hash.
 
 ---
 
+## 8d. The IC decay curve, 2000-2006 only (brief 10 C)
+
+How fast the short-horizon signals' predictive power fades with the horizon (the Q21
+follow-up): for each of 16 signals (the two short-term reversal and two momentum
+characteristics of the JKP block, and the 12 short-horizon market characteristics) and each
+horizon h = 1, 2, 3, 5, 10 days, the daily Spearman IC between the signal and the
+market-neutral forward return over (t, t+h], averaged over 2000-2006, with a
+Hansen-Hodrick t-statistic (h - 1 lags).
+
+```bash
+caffeinate -i python3.14 scripts/ic_decay.py
+```
+
+It reads the 2000-2024 panel (memory-mapped) and the CRSP extract (several GB of memory;
+the extract load dominates the run time). Every date stops at 2006-12-31: the script refuses
+an end date in 2007 or later and has no override, and it cuts the daily returns at
+2006-12-31 before building any forward return, so each horizon loses its last h dates rather
+than reading a 2007 return. Writes, aggregate only:
+`results/diagnostics/ic_decay_2000_2006.csv` and `.json` (signal, h, mean IC, t-statistic,
+number of dates, HAC lags and kernel) and `.png` (IC against h, one line per signal).
+Settings are the `Settings` block at the top of the script.
+
+---
+
 ## 9. Quick reference
 
 | I want to... | command |
@@ -318,5 +342,6 @@ selection means rerunning the pilot, which writes a new hash.
 | build the Compustat extract | `python3.14 scripts/extract_compustat.py` |
 | build the Q26 panel | `python3.14 scripts/build_pit_panel.py` |
 | feature coverage report | `python3.14 scripts/feature_coverage_report.py` |
+| IC decay curve, 2000-2006 only | `caffeinate -i python3.14 scripts/ic_decay.py` |
 
 No command here deletes anything. Old runs stay until you remove their folders yourself.

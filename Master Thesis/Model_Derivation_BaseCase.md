@@ -21,7 +21,7 @@ both candidates derived side by side in Stage 4), the number of regimes K (Q18),
 - $x_{i,t} \in \mathbb{R}^d$ — the characteristic vector for firm $i$, known at date $t$.
 - $y_{i,t} \in \mathbb{R}$ — the forward return of firm $i$ over $(t,\,t+h]$. The only
   forward-looking quantity in the data.
-- $r_t \in \mathbb{R}$ — a market-level series (market excess return), used **only** by the gate.
+- $r_t \in \mathbb{R}$ — a market-level series (daily log total return of the CRSP value-weighted S&P 500 universe index, Q23), used **only** by the gate.
 
 **Why two data objects.** The gate is a date-level object: one regime for the whole market on date
 $t$, shared by every firm. The experts are cross-sectional: one prediction per firm per date. The

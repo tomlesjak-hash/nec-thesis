@@ -23,7 +23,7 @@ detail stays in the source documents; this file points to them.
 | Target | **Market-neutral return** (`fwd_mn_ret_5d`): the forward return minus the date's equal-weighted cross-sectional mean over the stocks with a valid target. Reporting market-neutral throughout | **Decided 2026-10-01**; implemented, now the default (brief 08 A, 7bb3a4d) | Q25 |
 | Features | Three families: price/volume (CRSP), fundamentals (Compustat via CCM, point-in-time), industry (GICS, Compustat; ICB dropped because CRSP's ICB stops in Oct 2023). Rule: exactly two representatives per JKP theme (13 themes, 26 characteristics), plus a short-horizon market block (6 themes × 2), 11 sector dummies, industry momentum, within-industry reversal and 4 within-sector fundamentals: 40 characteristics (22 market, 18 fundamental), 57 inputs. Rank to [-1, 1]. Missing: minimum-count windows, fundamentals carried forward (12-month cap), then 0 plus a flag per family; rows no longer dropped. The legacy 14-feature set is kept only as `feature_set="legacy14"` | **Decided 2026-10-05**; implemented (brief 08 C, D: 488baad, 0633379; real-data fixes be77fb7, 5524da1); first coverage report run | Q26 |
 | Base | MLP, trained on the training block, then frozen | Decided, implemented | Q7; brief 02 |
-| Gate | Regime model fitted separately, then frozen; gate weight is the **average over the 5-day target window of the h-step-ahead regime probabilities** (built from the filtered probability and A; never the smoothed one); implemented as `gate_weight="window"` (brief 08 B, 3f1fac5). Memory: regime-clock forgetting, decided, not implemented | Decided. Hamilton implemented, the autoregressive variant too (brief 07, G-2); jump, Wasserstein and TVTP to come. The backprop-HMM baseline now runs on the point-in-time panel (state keyed by stock, M-5) | Q19, Q27; briefs 03, 04 B, 07 |
+| Gate | **Partly stock-specific at the industry level (Q1, decided 2026-10-08): market regime combined with an industry-level regime; implementation open (Q28), not implemented.** Market regime model fitted separately, then frozen, on the CRSP value-weighted S&P 500 index's daily log return (Q23); the filter runs through the purge gap (Q22); gate weight is the **average over the 5-day target window of the h-step-ahead regime probabilities** (built from the filtered probability and A; never the smoothed one); implemented as `gate_weight="window"` (brief 08 B, 3f1fac5). Memory: regime-clock forgetting, decided, not implemented | Decided. Hamilton implemented, the autoregressive variant too (brief 07, G-2); jump, Wasserstein and TVTP to come. The backprop-HMM baseline now runs on the point-in-time panel (state keyed by stock, M-5) | Q19, Q27; briefs 03, 04 B, 07 |
 | Experts | MLP corrections to the base, $\hat y = f_0 + \sum_k \pi_k r_k$, zero-initialised heads | Implemented. Hidden-layer initialisation is a switch, `hidden_init` (brief 06 D); which one is used is **open** (X-1) | brief 02; audit X-1 |
 | Number of regimes K | | **Open** | Q18 |
 | Error function | Only the mixture NLL is registered, behind a seam | **Open** | Q20 |
@@ -82,11 +82,16 @@ added. A decision that is later reversed keeps its row, and the reversal gets it
 | 2026-10-05 | Engineering: one process per performance core, large batches fixed in the pilot, features built once, base cached | default single-process training | Q16 |
 | 2026-10-05 | Compute envelope for the design: depth scan 1-3 (pyramid widths from a fixed first width), first width at most 128, K at most 4; runs on the laptop, 10 parallel processes | depths 1-5 and first width 256 (1-1.5 months of laptop time; Gu, Kelly & Xiu find depths 4-5 add nothing) | section 1c; Q8, Q11 |
 | 2026-10-05 | Brief 09 written: implements the sample extension, calendar-year folds, the pilot, decay weights, the weighted Baum-Welch gate, the parallel runner | — | `Code_Change_Brief_09_Training_Scheme.md` |
+| 2026-10-08 | The gate's filter runs over every trading day, including the purge gap; parameters still fitted on training only | skipping the gap (one step of A bridged 6 days) | Q22 |
+| 2026-10-08 | Gate input: CRSP value-weighted S&P 500 universe index (1000500), daily log total return; French Mkt-RF kept as a robustness check | French Mkt-RF (external file, whole market) | Q23 |
+| 2026-10-08 | Gate is partly stock-specific at the industry level: market regime combined with an industry-level regime, both frozen; how it is implemented is open (Q28) | one market-wide weight vector per date | Q1, Q28 |
+| 2026-10-08 | Framing: comparison-led; no constructive element (the differentiable jump-model gate is not pursued) | adding a design-led contribution | Q2, Q4 |
+| 2026-10-08 | Horizon stays h = 5; add an IC decay curve on 2000-2006 and a horizon profile (h = 1, 3, 5, 10) for the final model as robustness | switching to h = 3 or h = 1 | Q21 follow-up |
 
 
 ---
 
-## 1c. Compute budget (laptop, measured 2026-10-05)
+## 1c. Compute budget (laptop, measured 2026-10-05; real pipeline timed 2026-10-06)
 
 **Machine.** Apple M4 Pro: 10 performance and 4 efficiency cores, 48 GB, GPU (MPS) available.
 
@@ -105,6 +110,14 @@ in `nec_baseline/results/benchmark/compute_benchmark_20261005_233042.{csv,json}`
 - **Experts computed as one batched product:** no gain on CPU, so this option is dropped.
 - **Cost of a step:** steps × batch × (6P - 2·d·w1) FLOPs, which does not depend on the number of
   training rows (fixed step budget).
+- **The real pipeline** (timed 2026-10-06; `nec_baseline/scripts/time_real_pipeline.py`, timing only,
+  results in `nec_baseline/results/benchmark/real_pipeline_timing.json`). One job on the real
+  2000-2024 panel: Hamilton gate, K = 3, widths 64-32, batch 4,096, 2,000 steps, the 2009 pilot fold
+  (training 2000-2008, 1.13M rows), one thread. **5.57 ms per step against the benchmark's 4.19 ms:
+  an overhead factor of 1.33.** The first timing gave 24.4 ms (×5.8); most of that was an unused GRU
+  encoder and a per-row date lookup in the gate, both removed without changing any result
+  (`HANDBOOK.md` II.0c). Per job, outside the step cost: gate fit 29 s (statsmodels, K = 3, 24
+  starts), base fit 0.2 s; peak memory 3.9 GB.
 
 **What counts as one run.** One run trains one model, for one fold, from one seed. The design
 multiplies:
@@ -124,41 +137,87 @@ multiplies:
 - The hours below assume **everything is run twice**: bugs, fixes and changed settings in practice
   double the clean count.
 
-**Laptop hours.** Assumptions: everything run twice, 10 parallel runs, batch 4,096, and ×2.5 for the
-real pipeline's overhead (an assumption until one real run is timed). Widths follow the pyramid rule
-from the first width. Steps per run are set in the pilot, so three values are shown.
+**Laptop hours.** Assumptions: everything run twice, 10 parallel runs, batch 4,096, and ×1.33 for the
+real pipeline's overhead (measured 2026-10-06 for K = 3, widths 64-32; applied to every
+configuration, as the earlier ×2.5 assumption was). Widths follow the pyramid rule from the first
+width. Steps per run are set in the pilot, so three values are shown. The hours are linear in the
+overhead factor, so these are the 2026-10-05 table's values times 1.33/2.5 (0.53); the earlier
+table is in git history (commit ffc8bd3).
 
 | Depth scan | K | First width | 3k steps | 10k steps | 30k steps |
 |---|---|---|---|---|---|
-| 1-3 | 3 | 64 | 13 h | 44 h (1.8 d) | 133 h (5.5 d) |
-| 1-3 | 3 | 128 | 26 h | 86 h (3.6 d) | 258 h (10.7 d) |
-| 1-3 | 4 | 64 | 17 h | 57 h (2.4 d) | 171 h (7.1 d) |
-| 1-3 | 4 | 256 | 71 h | 237 h (9.9 d) | 710 h (29.6 d) |
-| 1-5 | 3 | 64 | 21 h | 69 h (2.9 d) | 206 h (8.6 d) |
-| 1-5 | 3 | 128 | 40 h | 132 h (5.5 d) | 397 h (16.5 d) |
-| 1-5 | 4 | 64 | 26 h | 88 h (3.7 d) | 264 h (11.0 d) |
-| 1-5 | 4 | 256 | 109 h | 364 h (15.2 d) | 1,093 h (45.6 d) |
+| 1-3 | 3 | 64 | 7 h | 23 h (1.0 d) | 71 h (2.9 d) |
+| 1-3 | 3 | 128 | 14 h | 46 h (1.9 d) | 137 h (5.7 d) |
+| 1-3 | 4 | 64 | 9 h | 30 h (1.3 d) | 91 h (3.8 d) |
+| 1-3 | 4 | 256 | 38 h | 126 h (5.2 d) | 377 h (15.7 d) |
+| 1-5 | 3 | 64 | 11 h | 37 h (1.5 d) | 110 h (4.6 d) |
+| 1-5 | 3 | 128 | 21 h | 70 h (2.9 d) | 211 h (8.8 d) |
+| 1-5 | 4 | 64 | 14 h | 47 h (1.9 d) | 140 h (5.8 d) |
+| 1-5 | 4 | 256 | 58 h | 194 h (8.1 d) | 581 h (24.2 d) |
 
 Depths 4 and 5 are extrapolated from the measured cost of going from depth 2 to depth 3.
+
+**Not in the table: the gate fits.** The campaign runner fits the gate in every job. At the measured
+29 s per fit (Hamilton gate, K = 3), the 11,160 jobs of the depth 1-3 design run twice add at most
+about 13 h at 10 workers (fewer: the no-regime control and the baselines fit no gate; the other
+gates' fit times are not measured yet). The gate depends only on the fold and its own settings, so
+fitting it once per (fold, gate) and sharing it across depths and seeds would remove most of this.
 
 **Envelope decided 2026-10-05:** depths 1-3, first width at most 128, K at most 4.
 
 **Reading.** With moderate widths (first width 64-128) and K ≤ 4, the whole study, run twice, takes
-roughly 1-6 days of machine time, or 1-2 weeks of overnight runs. That fits a laptop. Only the corner
-of wide experts (first width 256) with long training (30k steps) and a depth scan to 5 becomes
-impractical, at 1-1.5 months. Compute therefore rules out that corner only. Within the rest, the
-binding limit is statistical (Q17).
+about 1-2 days of machine time at 10,000 steps per run and about 3-6 days at 30,000, plus up to half
+a day of gate fits. That fits a laptop. The corner of wide experts (first width 256) with long
+training (30k steps) and a depth scan to 5 now takes about 24 days (was 1-1.5 months at ×2.5): still
+impractical, and still the only corner compute rules out. Within the rest, the binding limit is
+statistical (Q17).
 
 **To confirm:**
 
-- the real-pipeline overhead, from one timed real run;
+- ~~the real-pipeline overhead, from one timed real run~~: done 2026-10-06, ×1.33;
 - the steps per run, from the pilot;
+- the gate fit times of the other gates (jump, Wasserstein, TVTP) once they exist;
 - the slowdown from heat over multi-day runs (budget 10-20%).
 
 
 ---
 
 ## 2. Log (newest first)
+
+### 2026-10-08 (Q2 and Q4 decided; horizon follow-up)
+- **Decided: Q2 and Q4.** The comparison framing stands; no constructive element. The proposal is
+  comparison-led.
+- **Q21 follow-up:** h = 5 stays. IC decay curve on 2000-2006 and a horizon profile for the final model,
+  as robustness.
+- **Code_Change_Brief_10** written: Q22 (filter through the purge gap), Q23 (CRSP index as the gate
+  series), the IC decay script. Q28 and Q29 stay open, nothing coded for them.
+
+### 2026-10-08 (Q29 raised: factor-return gate)
+- **New open question Q29:** a gate variant whose regimes are defined by daily factor returns (market, size,
+  value, momentum) instead of the market return alone, motivated by momentum crashes in falling-volatility
+  rebounds. Records how the Hamilton gate infers the regime and why stock characteristics stay out of the
+  gate. Nothing decided.
+
+### 2026-10-08 (Q1 decided: industry-level gate)
+- **Decided (Tom, final): the gate is partly stock-specific, at the industry level.** Each stock's gate weight
+  combines the market regime with an industry-level regime; both frozen. **How it is implemented stays open: new Q28** (factorial, coupled, sector-only or pooled chains;
+  what the industry chain is fitted on; granularity; number of states). PDF and Model_Derivation need a
+  section once Q28 is settled.
+
+### 2026-10-08 (Q22 and Q23 decided)
+- **Decided: Q22 (b).** The gate's filter runs over every trading day, including the purge gap. The purge
+  removes labels, never information; the parameters are still fitted on the training block only.
+- **Decided: Q23 (b).** The gate is fitted on the CRSP value-weighted S&P 500 universe index (1000500),
+  daily log total return. French Mkt-RF kept as a robustness check. Clarified in Q23: the gate sees only
+  this one series, not the stock inputs, and it is not market-neutralised (only the target is).
+- Both need small code changes; they go into the next code brief.
+
+### 2026-10-06 (real pipeline timed; compute budget updated)
+- **Brief 09 implemented** (parts A-I, f76f6eb..0e515eb). The real pipeline timed once (timing only): 24.4 ms per
+  step, ×5.8 the benchmark; after removing the unused GRU encoder and vectorising the gate's date lookup (1f7e67a,
+  results unchanged) 5.57 ms, **×1.33**. Section 1c updated: the laptop-hours table rescaled from the assumed ×2.5
+  (the depth 1-3 envelope now takes about 1-2 days at 10k steps, 3-6 days at 30k), plus the per-job gate fits
+  (29 s each, at most about 13 h in total).
 
 ### 2026-10-05 (compute envelope; brief 09)
 - **Decided: the compute envelope.** Depth scan 1-3 with pyramid widths from a fixed first width; first width at
@@ -379,7 +438,7 @@ binding limit is statistical (Q17).
 
 ## 3. Open, in one place
 
-- **Advisor questions open:** Q1, Q2, Q4, Q5, Q6 (design half), Q8, Q9, Q10, Q12 to Q15, Q16 (c) and the rest of the training scheme, Q17, Q18, Q20, Q22, Q23.
+- **Advisor questions open:** Q28 (industry-gate implementation), Q29 (factor-return gate), Q5, Q6 (design half), Q8, Q9, Q10, Q12 to Q15, Q16 (c) and the rest of the training scheme, Q17, Q18, Q20.
 - **Audit findings still open:** B-2 (decided 2026-10-05 to be resolved by training on full blocks;
   not yet coded); the majors S-2 (the superseded 2026-09-25 smoke report's NLL columns)
   and X-1 (the `hidden_init` choice); and the minors and notes listed in audit section 12.
@@ -388,7 +447,7 @@ binding limit is statistical (Q17).
 
 ## 4. Parked ideas
 
-- **Future study, beyond the thesis:** `Improvements_and_Extensions.md` (created 2026-10-05). E1: how to improve the model for one-day forecasting.
+- **Future study, beyond the thesis:** `Improvements_and_Extensions.md` (created 2026-10-05). E1: how to improve the model for one-day forecasting. E2 (2026-10-08): the regime-gated MoE as a stacking meta-model over machine-learning alphas.
 - Switching the gate's input from French Mkt-RF to a CRSP index series (Q23).
 
 - Testing which historical periods matter (Q16 e, extension; diagnostic only).

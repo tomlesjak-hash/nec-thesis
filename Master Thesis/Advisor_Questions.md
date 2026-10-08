@@ -32,76 +32,100 @@ node rather than my own machine.
 
 ## OPEN
 
-### Q1. Should the regime gate be market-wide, or partly stock-specific?
-**Status:** open — raised 2026-09-10
+### Q28. How is the industry-level gate implemented?
 
-**The question.** In the model, the gate produces a weight vector over experts. Two designs:
+**Status:** open, raised 2026-10-08 when Q1 was decided (partly stock-specific, industry level). Tom wants
+the implementation kept open for now.
 
-- **Shared:** one weight vector per date, `π_t`, used by every stock in the cross-section.
-- **Partly stock-specific:** `π_{i,t}`, a function of both a market-wide state (e.g. market
-  volatility) and a stock-specific state (e.g. that stock's idiosyncratic volatility).
+**What is fixed by Q1.** Each stock's gate weight combines the shared market regime with a regime of its
+industry; both parts are fitted separately and frozen (Q19). The networks' training cost does not change,
+because frozen gate weights are only looked up per row; the extra cost is in fitting the gates.
 
-**Why it matters.** It changes what the thesis is. A shared gate makes the object of study a
-*market regime process* and keeps the work clearly distinct from per-item routing. A stock-specific
-gate makes it closer to routing — the axis I was steered away from — but is arguably more realistic,
-since a semiconductor stock can be in turmoil on a day when utilities are calm.
+**Candidate forms.**
 
-**What the literature says (checked 2026-09-10):**
-- The closest precedent, the regime-gated residual MoE for cross-sectional volatility
-  (arXiv:2608.12251), uses **both**: its gate receives market volatility (shared across all stocks)
-  *and* idiosyncratic volatility (per stock). So its gate is already partly stock-specific.
-- "Dynamic Asset Allocation with Asset-Specific Regime Forecasts" (arXiv:2406.09578) generates
-  **asset-specific** regime labels using the statistical jump model, explicitly contrasting this
-  with "broad economic regimes affecting the entire asset universe."
-- "Adaptive Market Intelligence" (arXiv:2508.02686) and arXiv:2410.07234 both gate between a
-  high-volatility expert and a stable-equity expert **based on asset classification** — i.e. exactly
-  per-stock assignment by volatility.
-- Liu, Maheu & Song (2024), *Journal of Applied Econometrics* 39(5), 723-745, identify bull and
-  bear markets using **multivariate** returns rather than the index alone.
+- **(a) Factorial gate.** Two hidden chains side by side, market and sector, independent of each other
+  (Ghahramani & Jordan 1997). One expert per pair of market state k and sector state l:
 
-**Arguments for keeping it shared.** Correlations rise and cross-sectional dispersion falls in
-downturns, so industry differences matter least exactly when the regime matters most. Only ~20-50
-distinguishable regime episodes exist in the whole record — splitting by sector leaves nothing to
-estimate on. And the experts already handle stock heterogeneity through the characteristic vector.
+$$\pi_{(k,l)}(i,t)=\pi^{\text{mkt}}_k(t)\,\pi^{\,s(i)}_l(t)$$
 
-**Arguments for making it partly stock-specific.** More realistic; the closest precedent does it;
-and it costs almost nothing to add one stock-level state variable.
+  where s(i) is stock i's sector. 2 × 2 states gives 4 experts, inside the K ≤ 4 envelope. Most
+  expressive; more experts, less data per expert.
+- **(b) Coupled chains.** As (a), but the sector chain's transition probabilities depend on the market
+  state, so sector stress is more likely when the market is stressed. More realistic, harder to fit and
+  explain.
+- **(c) Sector gate only, market regime as an input.** Each stock's gate weight is its sector's regime
+  probabilities (ordered by variance so labels mean the same in every sector); the market regime enters
+  elsewhere. Simplest to fit, but the market regime loses its central role.
+- **(d) Pooled industry chains.** One model with shared regime definitions and transition matrix, each
+  sector following its own chain. Labels comparable across sectors; one fit per fold; needs a native
+  implementation.
 
-**What I would propose.** Keep the shared gate as the core (it is what makes the comparison a
-controlled experiment), and decide the question empirically: decompose the variance in fitted gate
-weights into an across-dates component and an across-stocks-within-date component. If most variation
-is across dates, the shared gate is justified by evidence rather than assumption.
+**Sub-questions.**
 
-**Ask the advisor:** does adding a stock-specific state variable to the gate move the thesis back
-toward the routing topic that was rejected, or is it a legitimate design refinement?
+1. What the industry chain is fitted on: sector-relative returns (sector minus market; the 2026-10-08
+   suggestion, since raw sector returns mostly repeat the market) or raw sector returns.
+2. Granularity: 11 GICS sectors, or finer industry groups (fewer stocks per group).
+3. Number of states for each level (ties to Q18).
+4. How each of the five gate types gets its industry counterpart.
+5. Identification (Q10): the experts already see sector dummies, industry momentum and within-industry
+   reversal; the pilot must show the industry regime adds information beyond them.
+6. A descriptive check on 2000-2009 only: how often a sector is stressed while the market is calm.
+
+**Ask the advisor:** which form, and is the factorial expert count acceptable given the data per expert?
 
 ---
 
-### Q2. Is the comparison framing enough, or does the thesis need a constructive contribution?
-**Status:** open — raised 2026-09-10
+### Q29. Should a gate variant define regimes by factor returns instead of the market return alone?
 
-A novelty audit found that the *mechanism* is not new: gated experts for regime discovery goes back
-to Weigend, Mangeas & Srivastava (1995); an HMM has been used as an MoE gating model (REW-MSLM,
-2022); and filtering-based gating on financial data is published (MoE-F, ICLR 2025). What appears
-genuinely unclaimed is the **controlled comparison** of structurally distinct regime processes as
-the gate, plus specifically the statistical jump model and Wasserstein clustering as MoE gates.
+**Status:** open, raised 2026-10-08. Nothing decided; Q23 (the Hamilton gate on the CRSP S&P 500 index)
+stands until this is answered.
 
-Given the routing comparison was rejected for having been done already, does a regime-mechanism
-comparison stand on its own? Or should it be paired with a constructive element — the most natural
-being to make the *continuous* jump model into a differentiable gate, which nobody has done?
+**How the current gate reads the regime.** The Hamilton gate sees one series, the market's daily return.
+Each regime has its own mean and volatility; every day the filter updates its belief by Bayes' rule from
+yesterday's belief (moved forward by A) and how likely today's return is under each regime:
 
----
+$$\xi_{t\mid t}(k)=\frac{f_k(r_t)\,\big[\xi_{t-1\mid t-1}^\top A\big]_k}{\sum_{j} f_j(r_t)\,\big[\xi_{t-1\mid t-1}^\top A\big]_j}$$
 
-### Q4. Which framing for the proposal — comparison, or design-led?
-**Status:** open
+Daily means are tiny next to daily volatility, so in practice the regimes are volatility states, and the
+persistence in A stops the gate flipping on single noisy days.
 
-Two ways to write the same work:
-- **Comparison-led:** "which regime mechanism makes the best gate?" Honest, but structurally similar
-  to the rejected topic.
-- **Design-led:** "here is a differentiable persistence-penalised gate, and here is the evidence it
-  beats the alternatives." Same experiments, different emphasis.
+**Why stock characteristics do not belong in the gate.** After ranking, a characteristic is uniform on
+[-1, 1] every day, so it says which stocks, not what state the market is in. It belongs in the experts.
+Market-level versions (factor returns, market volatility and trend, cross-sectional dispersion, VIX,
+spreads) are legitimate gate inputs, and the planned gates already use some: the jump model a feature
+vector of the market series, TVTP covariates for the switching probabilities, the Wasserstein gate the
+return distribution over a window.
 
-Which reads better to the review committee?
+**The idea.** The experts predict cross-sectional returns, so the regimes that matter most may be
+**factor regimes** rather than market-volatility regimes. Example: momentum crashes happen in market
+rebounds, when volatility is falling (Daniel & Moskowitz 2016), which a market-volatility gate can miss.
+A gate variant whose observation is the vector of daily factor returns would define regimes by how the
+cross-section behaves:
+
+$$f_t=(r^{\text{mkt}}_t,\;r^{\text{size}}_t,\;r^{\text{value}}_t,\;r^{\text{mom}}_t)^\top,\qquad f_t\mid z_t=k\sim\mathcal N(\mu_k,\Sigma_k)$$
+
+Precedent for multivariate regime models: Liu, Maheu & Song (2024), JAE 39(5) (cited in Q1).
+
+**Costs and risks.**
+
+- More parameters: a 4 × 4 covariance matrix per regime (10 numbers instead of 1), so less stable
+  estimation and regime labels.
+- Overlap with the experts' inputs (Q10): the experts see size, value and momentum characteristics; a
+  gate built on their factor returns is a different object (time series, not cross-section), but the
+  pilot must check the gate adds information.
+- Data source: factors built from the CRSP/Compustat panel (consistent with Q23, but small- vs large-cap
+  spreads inside the S&P 500 are narrow) or Kenneth French's daily factors (standard, external file).
+
+**Sub-questions.**
+
+1. A sixth gate type, or the input to an existing one (Hamilton made multivariate, or the jump model's
+   feature vector)?
+2. Which factors: market, size, value, momentum; also short-term reversal or cross-sectional dispersion?
+3. Source: built from the panel, or French's factors?
+4. Interaction with Q28: should the industry level use the same kind of input?
+5. Compute and the K ≤ 4 envelope (Q18): full or diagonal covariance per regime.
+
+**Ask the advisor:** is a factor-regime gate a worthwhile addition to the comparison, or scope creep?
 
 ---
 
@@ -1375,6 +1399,167 @@ feature or a leak?
 
 ---
 
+## RESOLVED
+
+### Q2. Is the comparison framing enough, or does the thesis need a constructive contribution? [RESOLVED 2026-10-08]
+
+**Answer: the comparison framing is enough; no constructive element is added.** Tom's decision,
+2026-10-08: "Nothing is wrong with my framing." The contribution is the controlled comparison of
+structurally distinct regime processes as the gate of a residual mixture of experts (now with an
+industry-level component, Q1), including the statistical jump model and Wasserstein clustering as gates.
+The differentiable continuous jump-model gate is not pursued.
+
+*Original question, for the record:*
+
+### Q2. Is the comparison framing enough, or does the thesis need a constructive contribution?
+**Status:** open — raised 2026-09-10
+
+A novelty audit found that the *mechanism* is not new: gated experts for regime discovery goes back
+to Weigend, Mangeas & Srivastava (1995); an HMM has been used as an MoE gating model (REW-MSLM,
+2022); and filtering-based gating on financial data is published (MoE-F, ICLR 2025). What appears
+genuinely unclaimed is the **controlled comparison** of structurally distinct regime processes as
+the gate, plus specifically the statistical jump model and Wasserstein clustering as MoE gates.
+
+Given the routing comparison was rejected for having been done already, does a regime-mechanism
+comparison stand on its own? Or should it be paired with a constructive element — the most natural
+being to make the *continuous* jump model into a differentiable gate, which nobody has done?
+
+---
+
+### Q4. Which framing for the proposal — comparison, or design-led? [RESOLVED 2026-10-08]
+
+**Answer: comparison-led.** Tom's decision, 2026-10-08, together with Q2: the proposal is framed as
+"which regime mechanism makes the best gate", not as a new gate design. Q5 (positioning against Ye &
+Borde) stays open.
+
+*Original question, for the record:*
+
+### Q4. Which framing for the proposal — comparison, or design-led?
+**Status:** open
+
+Two ways to write the same work:
+- **Comparison-led:** "which regime mechanism makes the best gate?" Honest, but structurally similar
+  to the rejected topic.
+- **Design-led:** "here is a differentiable persistence-penalised gate, and here is the evidence it
+  beats the alternatives." Same experiments, different emphasis.
+
+Which reads better to the review committee?
+
+---
+
+### Q1. Should the regime gate be market-wide, or partly stock-specific? [RESOLVED 2026-10-08]
+
+**Answer: partly stock-specific, at the industry level.** Tom's decision, 2026-10-08, stated as final.
+The gate is no longer one weight vector per date shared by every stock. Each stock's gate weight combines
+the **market regime** (shared by all stocks) with the **regime of its own GICS sector**, so a stock's
+weight on date t depends on the market and on its industry. Stocks in the same sector on the same date
+share a weight; stocks in different sectors can differ.
+
+**Why.** Industries go through their own stress while the rest of the market is calmer: energy in
+2014-2016, banks in 2008 and 2023, technology in 2000-2002 and 2022. A market-wide gate cannot express
+this. The industry level keeps the market regime at the core of the thesis, which is the part best
+supported by the literature and by the descriptive checks, and stays well short of per-stock routing.
+
+**How it is implemented: open, see Q28.** Only the direction is decided here (market regime plus an
+industry-level component, both fitted separately and frozen, Q19). The form of the industry component and
+how it combines with the market regime are deliberately left open.
+
+**Consequences.**
+
+- **Q18 (K):** may become the choice of two numbers (market and industry states), depending on Q28.
+- **Q24:** the per-row likelihood stays; with a sector-level latent it is closer to exact than before.
+- **Q27 and Q16:** the window-average gate weight and the regime-clock decay will be computed per row from
+  the combined weights; the formulas carry over whichever form Q28 picks.
+- **Q10 (identification):** the experts already see sector dummies, industry momentum and
+  within-industry reversal. The pilot must check that the sector regime adds information beyond them.
+- **The five gate types:** each needs an industry-level counterpart. If that is one fit per sector per fold,
+  it is 11 extra fits per fold and gate type, about 29 s each with statsmodels; small next to training.
+- **Documents to update:** the PDF and Model_Derivation_BaseCase.md assume a shared weight vector per
+  date; both need a section on the industry-level gate.
+- **The advisor** should hear this explicitly, since it changes the object of study from market regime
+  processes alone to market and industry regimes.
+
+**Still open:** everything about the implementation, in Q28.
+
+**Correction to the original proposal below.** Its variance-decomposition test (across dates against
+across stocks within a date) cannot work with a frozen shared gate, whose weights are identical across
+stocks by construction. The descriptive check in item 5 replaces it.
+
+*Original question, for the record:*
+
+### Q1. Should the regime gate be market-wide, or partly stock-specific?
+**Status:** open — raised 2026-09-10
+
+**The question.** In the model, the gate produces a weight vector over experts. Two designs:
+
+- **Shared:** one weight vector per date, `π_t`, used by every stock in the cross-section.
+- **Partly stock-specific:** `π_{i,t}`, a function of both a market-wide state (e.g. market
+  volatility) and a stock-specific state (e.g. that stock's idiosyncratic volatility).
+
+**Why it matters.** It changes what the thesis is. A shared gate makes the object of study a
+*market regime process* and keeps the work clearly distinct from per-item routing. A stock-specific
+gate makes it closer to routing — the axis I was steered away from — but is arguably more realistic,
+since a semiconductor stock can be in turmoil on a day when utilities are calm.
+
+**What the literature says (checked 2026-09-10):**
+- The closest precedent, the regime-gated residual MoE for cross-sectional volatility
+  (arXiv:2608.12251), uses **both**: its gate receives market volatility (shared across all stocks)
+  *and* idiosyncratic volatility (per stock). So its gate is already partly stock-specific.
+- "Dynamic Asset Allocation with Asset-Specific Regime Forecasts" (arXiv:2406.09578) generates
+  **asset-specific** regime labels using the statistical jump model, explicitly contrasting this
+  with "broad economic regimes affecting the entire asset universe."
+- "Adaptive Market Intelligence" (arXiv:2508.02686) and arXiv:2410.07234 both gate between a
+  high-volatility expert and a stable-equity expert **based on asset classification** — i.e. exactly
+  per-stock assignment by volatility.
+- Liu, Maheu & Song (2024), *Journal of Applied Econometrics* 39(5), 723-745, identify bull and
+  bear markets using **multivariate** returns rather than the index alone.
+
+**Arguments for keeping it shared.** Correlations rise and cross-sectional dispersion falls in
+downturns, so industry differences matter least exactly when the regime matters most. Only ~20-50
+distinguishable regime episodes exist in the whole record — splitting by sector leaves nothing to
+estimate on. And the experts already handle stock heterogeneity through the characteristic vector.
+
+**Arguments for making it partly stock-specific.** More realistic; the closest precedent does it;
+and it costs almost nothing to add one stock-level state variable.
+
+**What I would propose.** Keep the shared gate as the core (it is what makes the comparison a
+controlled experiment), and decide the question empirically: decompose the variance in fitted gate
+weights into an across-dates component and an across-stocks-within-date component. If most variation
+is across dates, the shared gate is justified by evidence rather than assumption.
+
+**Ask the advisor:** does adding a stock-specific state variable to the gate move the thesis back
+toward the routing topic that was rejected, or is it a legitimate design refinement?
+
+---
+
+### Q22. Should the gate's filter run through the purge gap? [RESOLVED 2026-10-08]
+
+**Answer: (b). The filter runs over every trading day, including the purge gap.** Tom's decision,
+2026-10-08. The gate's parameters are still estimated on the training block only and then frozen; only
+its regime belief is updated with the gap's market returns.
+
+**Why.**
+
+1. **The purge is for labels, not information.** The gap exists because the gap days' 5-day targets
+   reach into the test block. Their market returns are public by the first test date, so feeding them to
+   the filter is not look-ahead: a live trader's filter would have processed them.
+2. **It removes a mis-specification.** The transition matrix A describes one trading day. Skipping the
+   gap makes one step of A bridge h + 1 = 6 days at every fold boundary (15 times under annual refits).
+3. **Consistency with the rest of the gate.** The window-average gate weight (Q27) and the regime-clock
+   decay (Q16) both start from the filtered probability, so the state at the start of each test year
+   should be exact.
+4. **Simpler to state in the methodology:** "the purge removes labels, never information; the filter
+   runs over every trading day."
+5. **Small in size.** On the smoke panel the largest change in a regime probability was 0.008, on the
+   first test date of a fold. This is a correctness point, not a results point.
+
+**Implementation.** `evaluation.py` applies the gate to `train_dates + test_dates`; it will apply it to
+the contiguous range from the first training date to the last test date. Test: the test-date
+probabilities equal those of a single filter pass over the full series with the frozen parameters.
+The same applies to the pilot (`pilot.py`). Goes into the next code brief.
+
+*Original question, for the record:*
+
 ### Q22. Should the gate's filter run through the purge gap?
 
 **Status:** open, raised 2026-09-26 from audit finding G-1. Nothing decided; the code keeps its
@@ -1407,6 +1592,47 @@ and with a monthly horizon it becomes about a month of unseen market data at eve
 **Ask the advisor:** (a) or (b), and is it worth a sentence in the methodology either way?
 
 ---
+
+### Q23. Which market series should the Hamilton gate be fitted on? [RESOLVED 2026-10-08]
+
+**Answer: (b). The CRSP value-weighted index of the S&P 500 universe (INDNO 1000500), daily total
+return including dividends, as a log return.** Tom's decision, 2026-10-08. French's Mkt-RF stays
+registered as a robustness check.
+
+**Why.**
+
+1. **One market definition.** The universe, the market-model features (beta, idiosyncratic volatility,
+   coskewness) and the gate now all use the same index. The regime should describe the market the
+   experts trade in.
+2. **Provenance.** Same licensed CRSP release as everything else; no external file, no publication lag.
+3. **Precedent.** Nystrup, Madsen & Lindström (2017), whose method the gate memory follows (Q16), fit
+   their HMMs on S&P 500 daily log returns.
+4. **The risk-free rate is immaterial.** About 0.005% a day against a daily volatility of about 1%; the
+   gate separates regimes mainly by variance.
+
+**What the gate sees (clarified 2026-10-08).**
+
+- **One series only.** The Hamilton gate is univariate: its only input is the market's daily return. It
+  does not see the 57 stock inputs. The gate answers "what state is the market in"; the experts answer
+  "which stocks beat which in that state" (Q1: one shared weight vector per date; Q19: fitted
+  separately and frozen). Later gates may use a few market-level inputs (the jump model's features of
+  the same series, TVTP's covariates), never stock characteristics.
+- **Not market-neutral.** Market-neutralising applies to the target only. The gate's input is the market
+  itself, and the market minus the market is zero. The market's own level and volatility are exactly the
+  regime signal.
+- **Two different "markets" in the pipeline, on purpose.**
+  - The **gate and the market-model features** use the value-weighted index (1000500), the standard
+    measure of the market's state, dominated by the large caps that drive aggregate volatility.
+  - The **target** is demeaned by the **equal-weighted** mean of the universe's 5-day returns on each
+    date (Q25), so it sums to zero across stocks and matches an equal-weighted long-short book.
+  - The networks never see the market return as an input: it is identical across stocks on a date, so
+    ranking would remove it. It enters the networks only through the features built from it.
+
+**Implementation.** A new `SERIES_REGISTRY` entry reading the CRSP market series already stored with
+the panel (`market.parquet`; it is not one of the panel's sequence features), made the default. Goes
+into the next code brief.
+
+*Original question, for the record:*
 
 ### Q23. Which market series should the Hamilton gate be fitted on?
 
@@ -1442,8 +1668,6 @@ Whichever is not chosen can stay registered as a robustness check.
 departing from the literature's standard excess-return series?
 
 ---
-
-## RESOLVED
 
 ### Q27. Which gate weight: filtered, one-step predicted, or averaged over the 5-day window? [RESOLVED 2026-10-05]
 
@@ -2075,6 +2299,14 @@ should be the one-step predicted probability, the filtered probability, or an av
 *Sources:* Fischer & Krauss (2018), EJOR 270(2); Krauss, Do & Huck (2017), EJOR; Blitz, Hanauer,
 Hoogteijling & Howard (2023), JFDS 5(4); Nagel (2012), RFS 25(7); Daniel & Moskowitz (2016), JFE 122(2);
 Roll (1984), JF 39(4); Gu, Kelly & Xiu (2020), RFS 33(5).
+
+**Follow-up (2026-10-08): horizon robustness.** h = 5 stays primary. Two additions, neither a change of
+design: (1) an **IC decay curve**, the daily cross-sectional rank IC of the main signals against the
+market-neutral forward return at h = 1, 2, 3, 5, 10, on 2000-2006 only (before the pilot's validation
+years and the test period), to show how fast the signals' predictive power fades; (2) a **horizon profile**
+(h = 1, 3, 5, 10) for the final best model only, reported as robustness (also Improvements E1). A 3-day
+horizon was discussed: fresher signals and less overlap, but more noise, about 5/3 the turnover, and
+windows that sometimes contain a weekend and sometimes not; no evidence it beats 5.
 
 *Original question, for the record:*
 

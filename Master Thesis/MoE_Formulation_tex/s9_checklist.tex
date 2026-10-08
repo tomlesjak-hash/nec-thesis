@@ -30,7 +30,7 @@ Base pre-trained and frozen & $f_0$ fitted first, never updated & decided (Q7) \
 Filtered, never smoothed, as the basis of the gate & on training and test dates alike & decided (base-case derivation) \\
 Gate weight for the $h$-day target & window average $\bar w_k(t)$ of the $1$- to $h$-step-ahead probabilities (Section 8.9) & decided (Q27) \\
 Number of regimes $K$ & e.g.\ 2 or 3 & \textbf{open} (Q18) \\
-Gate series $m_t$ & French Mkt-RF (code default) vs CRSP index returns & \textbf{open} (Q23) \\
+Gate series $m_t$ & CRSP value-weighted S\&P 500 index, daily log return; filter runs through the purge gap & \textbf{decided} (Q23, Q22) \\
 Frequency and horizon $h$ & daily gate, daily cross-section, $h=5$ (overlapping targets) & decided (Q21) \\
 Filter through the purge gap & run forward continuously or restart & \textbf{open} (Q22) \\
 Likelihood for the experts & $\ell_{\text{row}}$, the composite likelihood of the per-date model (Section 7.3) & decided (Q24) \\

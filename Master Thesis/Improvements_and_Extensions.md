@@ -62,3 +62,50 @@ h = 1; the gate timing item (predicted vs filtered) matters most at h = 1.
   liquidity provision, and why it depends on market conditions.
 - Da, Liu & Schaumburg (2014), "A closer look at the short-term return reversal", *Management Science*
   60(3). Separating liquidity-driven from news-driven reversal.
+
+---
+
+## E2. The regime-gated MoE as a meta-model over machine-learning alphas (added 2026-10-08)
+
+**The idea.** In industry, the model that combines signals sits above a layer of "alphas". Many of those
+alphas are full machine-learning models in their own right: text sentiment, revenue nowcasts from
+alternative data, takeover or index-addition probabilities, residual mean reversion, supply-chain graph
+models, and price-chart CNNs. Combining their outputs with a second model is called **stacking**
+(Wolpert 1992; Breiman 1996).
+
+The extension: use the thesis's regime-gated residual MoE as the second-level model (the meta-model)
+over model-based alphas instead of raw characteristics.
+
+- The base learns the average weighting of the alphas.
+- Each expert learns how that weighting should shift in its regime, for example trusting momentum less
+  in rebound regimes and reversal more in stress.
+- Elliott & Timmermann (2005) show that when the best combination weights depend on a hidden regime, the
+  optimal combination is a regime-probability-weighted mix of regime-specific weights. Structurally,
+  that is this architecture.
+
+**Conditions for doing it properly.**
+
+1. **Nested walk-forward.** Every alpha prediction the MoE trains on must be out of sample: for each
+   date, it must come from an alpha model trained only on earlier data. That requires an inner
+   walk-forward for each alpha model inside each MoE fold. Test-year predictions come from alpha models
+   trained up to the year before. This is the stacking leakage rule, and it multiplies compute.
+2. **A fair comparison of meta-models.** The MoE, gradient-boosted trees and ridge regression must be
+   compared on the same alpha inputs, folds, seeds (paired) and out-of-sample protocol.
+3. **Sizing.** Model-based alphas are few, strong and correlated, which favours small, strongly
+   regularised experts that reweight the alphas rather than relearn them.
+4. **Aligned retraining schedules** between the alpha models and the meta-model.
+
+**Open empirical question.** The thesis tests regime gating on raw characteristics. With strong alphas
+as inputs, the meta-model's job shifts from finding signal to reweighting signals across regimes. That
+could make regime gating matter more, because alpha performance is known to depend on conditions
+(momentum crashes, reversal paying more in stress). It could also matter less, if the alpha models
+already adapt.
+
+**Reading, about two hours.**
+
+- Elliott & Timmermann (2005), "Optimal forecast combination under regime switching", *International
+  Economic Review* 46(4). Regime-dependent combination weights.
+- Wolpert (1992), "Stacked generalization", *Neural Networks* 5(2). The original stacking idea and why
+  out-of-sample level-0 predictions are needed.
+- Isichenko (2021), *Quantitative Portfolio Management*, chapters 1-2. How alphas, combination, risk and
+  the optimiser fit together in practice.

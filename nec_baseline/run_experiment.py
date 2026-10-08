@@ -651,8 +651,8 @@ def _quick(exp: Experiment, panel: Panel, purge: int, run: Run) -> dict:
     if exp.figures:
         plot_training_dashboard(history, n_experts=exp.n_experts,
                                 path=out / "dashboard.png")
-        # the dates the model has a prior for: the training rows it trained
-        # on and the test block (not the purge gap, which the gate skips)
+        # the dates the experts trained on and the test block; the gate also
+        # covers the purge gap (Q22), but nothing is trained or scored there
         scored = panel.subset_dates(torch.cat([torch.unique(expert_train.date),
                                                fold.test_dates]))
         plot_gate_utilization(trainer, scored, path=out / "utilization.png")

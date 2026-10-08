@@ -256,8 +256,10 @@ Finished jobs are skipped, an interrupted job continues from its checkpoint.
 ## 8c. The pilot, then the main study (brief 09)
 
 The training scheme is decided (Q16): annual refits on an expanding window, testing 2010
-to 2024 (15 folds), every setting chosen **once** on 2007-2009 and then frozen. The
-order is fixed:
+to 2024 (15 folds), every setting chosen **once** on 2007-2009 and then frozen. In every
+fold, pilot and main, the gate is fitted on the training block only and its frozen filter
+then runs over every date from the first training date to the last test date, the purge
+gap included (Q22); the gap days' rows are still left out of training. The order is fixed:
 
 **1. The pilot** chooses the gate's memory, the base's and the experts' decay half-lives,
 the learning rate, the weight decay, the batch size and the step budgets, on the

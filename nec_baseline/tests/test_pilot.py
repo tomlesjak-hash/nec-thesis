@@ -22,6 +22,7 @@ from nec_moe import (
     BaseCache,
     FoldConfig,
     PilotGrid,
+    gate_span_dates,
     load_pilot_grid,
     load_selection,
     pilot_folds,
@@ -191,7 +192,7 @@ def test_step_milestones_equal_separate_budgets(pilot):
 
     gate = MarkovSwitchingRegimePrior(2, cfg.markov_gate, horizon=1)
     gate.fit(sliced.subset_dates(fold.train_dates))
-    gate.apply_causal(sliced.subset_dates(torch.cat([fold.train_dates, fold.test_dates])))
+    gate.apply_causal(sliced.subset_dates(gate_span_dates(sliced, fold)))
     state = gate.gate_state()
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeadParameterWarning)

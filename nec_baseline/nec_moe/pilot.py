@@ -67,6 +67,7 @@ from .evaluation import (
     assert_pre_test_panel,
     expert_stage_seed,
     fold_decay_weights,
+    gate_span_dates,
     pilot_folds,
     pilot_slice,
 )
@@ -272,10 +273,12 @@ def gate_memory_selection(
     Every candidate is fitted with the native estimator (the regime-clock
     memory needs it; the infinite half-life is the same estimator at full
     memory, so the candidates differ only in memory). For each fold the gate
-    is fitted on the training block and its frozen filter run through the
-    training block and the validation year, exactly the dates the main
-    harness gives the gate. Returns the report and the fitted gate states,
-    keyed by (fold, half-life), for reuse in stage 2.
+    is fitted on the training block and its frozen filter run over every date
+    from the first training date to the end of the validation year, the purge
+    gap included (Q22), exactly the dates the main harness gives the gate;
+    only the validation dates' one-step log densities are summed. Returns the
+    report and the fitted gate states, keyed by (fold, half-life), for reuse
+    in stage 2.
     """
     k = base_cfg.experts.n_experts
     horizon = base_cfg.data.horizon_periods
@@ -291,7 +294,9 @@ def gate_memory_selection(
             train = panel.subset_dates(fold.train_dates)
             gate = MarkovSwitchingRegimePrior(k, mg, horizon=horizon)
             gate.fit(train)
-            scored = panel.subset_dates(torch.cat([fold.train_dates, fold.test_dates]))
+            # the frozen filter over the contiguous span, the purge gap
+            # included (Q22); only the validation dates are scored below
+            scored = panel.subset_dates(gate_span_dates(panel, fold))
             gate.apply_causal(scored)
             dates, log_c = gate.predictive_log_density(scored)
             val = log_c[torch.isin(dates, fold.test_dates).numpy()]

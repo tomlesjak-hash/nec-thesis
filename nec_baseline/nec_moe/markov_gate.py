@@ -1031,7 +1031,9 @@ class MarkovSwitchingRegimePrior(PrecomputedRegimePrior):
         market series, the gate's own forecasting score (Nystrup, Madsen &
         Lindström 2017), by which the pilot chooses the gate's memory (brief
         09 F.2). The filter starts at ``panel``'s first date, so pass the
-        training block and the dates to score. Nothing is re-estimated."""
+        contiguous span from the first training date, purge gap included
+        (:func:`~nec_moe.evaluation.gate_span_dates`, Q22), and keep only the
+        dates to score. Nothing is re-estimated."""
         if self.fit_result is None:
             raise ValueError("predictive_log_density before fit: nothing is frozen yet")
         dates, series = date_level_series(panel, self.cfg)

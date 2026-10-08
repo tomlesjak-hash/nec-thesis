@@ -80,6 +80,7 @@ __all__ = [
     "pilot_slice",
     "assert_pre_test_panel",
     "PreTestViolation",
+    "gate_span_dates",
     "rank_ic_by_date",
     "IcSummary",
     "ic_summary",
@@ -1060,11 +1061,16 @@ def _fit_gate(
        which is what makes the harness's existing purge discipline cover the
        gate for free — the panel handed over has already had the label-overlap
        dates removed.
-    2. ``apply_causal(panel)`` extends the gate to the test dates by running
-       the *frozen* fitted model forward. That is legal because a filter at
-       date ``t`` conditions only on the series through ``t``; re-fitting
-       would not be, and the precomputed prior refuses to overwrite a fitted
-       row so the two populations can never be confused.
+    2. ``apply_causal(panel)`` runs the *frozen* fitted model forward over
+       :func:`gate_span_dates`: every panel date from the first training date
+       to the last test date, **the purge gap included** (Q22, decided
+       2026-10-08). The purge removes the gap days' rows from training because
+       their labels reach into the test block; their market returns are
+       public by the first test date, so the filter sees them and one step of
+       ``A`` stays one trading day. Legal because a filter at date ``t``
+       conditions only on the series through ``t``; re-fitting would not be,
+       and the precomputed prior refuses to overwrite a fitted row so the two
+       populations can never be confused.
 
     Non-precomputed priors inherit a no-op ``fit`` and are untouched.
     """
@@ -1077,11 +1083,26 @@ def _fit_gate(
     trainer.model.prior.fit(train)
     prior = trainer.model.prior
     if getattr(prior, "precomputed", False):
-        # the gate must cover the test dates too, and only this path may
-        # produce them
+        # the gate must cover the gap and the test dates too, and only this
+        # path may produce them
         prior.apply_causal(  # type: ignore[operator]
-            panel.subset_dates(torch.cat([fold.train_dates, fold.test_dates]))
+            panel.subset_dates(gate_span_dates(panel, fold))
         )
+
+
+def gate_span_dates(panel: Panel, fold: WalkForwardFold) -> Tensor:
+    """The dates the gate's frozen filter runs over for ``fold``: every date
+    of ``panel`` from the fold's first training date to its last test date,
+    the purge gap included (Q22, decided 2026-10-08; brief 10 A).
+
+    Only the gate's market series uses the gap; the purge still removes the
+    gap days' rows from the training of the base and the experts, whose
+    labels reach into the test block. Nothing after the last test date is
+    included (the filter is causal, so later dates could not change it
+    anyway)."""
+    dates = torch.unique(panel.date, sorted=True)
+    lo, hi = int(fold.train_dates.min()), int(fold.test_dates.max())
+    return dates[(dates >= lo) & (dates <= hi)]
 
 
 def _heartbeat(run: Run, fold: int) -> Callable[[int], None]:

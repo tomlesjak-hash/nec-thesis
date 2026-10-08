@@ -32,6 +32,13 @@ Usage (from ``nec_baseline/``)::
     python3.14 scripts/smoke_run_2026_09.py          # brief 04 C, free data
     python3.14 scripts/smoke_run_2026_09.py --crsp   # brief 06 F, CRSP panel
 
+**Historical gate application.** This script applies the frozen gate to the
+training and test dates only, skipping the purge gap, which was the harness's
+rule when the run was made. Since brief 10 A (Q22, decided 2026-10-08) the
+harness runs the filter through the gap (``gate_span_dates``); the script's
+"span" comparison is that rule. The script is left as it ran so the 2026-09-25
+report reproduces.
+
 Outputs: ``Master Thesis/Smoke_Run_2026-09-25.md`` with figures in
 ``Master Thesis/Smoke_Run_2026-09-25_figures/``; the trial registry and the raw
 numbers in the run store, ``results/smoke/<run_id>/`` (brief 07 B; the
@@ -280,9 +287,10 @@ def gate_preflight(
             st.gate.append({"fold": fold.fold, "error": str(e)})
             raise StopRun(f"C.5: the gate failed to converge on fold {fold.fold}: {e}") from e
         fit_s = time.perf_counter() - t0
-        # exactly the harness's application (brief 03 section 3.2: the model
-        # constructed over train plus test), so the plotted gate is the gate
-        # the mixture used
+        # the harness's application when this run was made (brief 03 section
+        # 3.2: the model constructed over train plus test), so the plotted
+        # gate is the gate the mixture used; since brief 10 A (Q22) the
+        # harness runs through the purge gap instead (see the docstring)
         codes = torch.cat([fold.train_dates, fold.test_dates])
         prior.apply_causal(panel.subset_dates(codes))
         fit = prior.fit_result

@@ -501,6 +501,20 @@ consistent weight for it. Gates still to come (jump model, Wasserstein, TVTP) mu
 a transition matrix before they can serve `"predicted"` or `"window"`. Every trial row
 records `gate_weight` (`None` without a Hamilton gate).
 
+**Across folds: the filter runs through the purge gap** (Q22, decided 2026-10-08; brief
+10 A). In each fold the gate is fitted on `fold.train_dates` only (`_fit_gate` refuses a
+fit panel that reaches the test block), then its frozen filter runs over
+`gate_span_dates(panel, fold)`: every panel date from the first training date to the last
+test date, the `h` purge-gap days included. The gap days' market returns are public by the
+first test date, so the filter uses them and one step of `A` is one trading day at the
+fold boundary, as everywhere else; skipping them would make that one step bridge `h + 1`
+days. The purge is unchanged for labels: the gap days' rows stay out of the base's and the
+experts' training, because their targets reach into the test block. Fitted training rows
+are never overwritten (`_remember_filtered(only_after=fit_max_date)`); gap dates get
+filtered probabilities from the causal application, like test dates. The pilot's gate
+stage uses the same span and sums only the validation dates' contributions.
+`tests/test_gate_span.py` checks all of it, for both fit backends.
+
 ## I.9 `losses.py` — the fused objective, and the two levers
 
 ### `mixture_nll` — five lines that carry everything
@@ -1288,7 +1302,8 @@ the Q27 gate weight are as before.
 
 **The pilot** (`nec_moe.pilot`, `scripts/run_pilot.py`, `configs/pilot_grid.json`).
 Stage 1 scores each gate half-life by the one-step predictive log-likelihood of the
-market series over the validation years (frozen filter), reports the 20 worst days apart
+market series over the validation years (frozen filter, run from the first training date
+through the purge gap, Q22), reports the 20 worst days apart
 and gives ties to the longer memory. Stage 2 scores every other setting by the mixture's
 regime-balanced validation loss (`v(s) = sum_k wbar_k(s) / M_k`, `wbar` the window-average
 gate weight), averaged over the 3 folds and the pilot seeds; the step budgets are read as
@@ -1314,7 +1329,8 @@ seed is the row's own field.
 
 **Not decided here** (the code keeps its defaults and picks nothing): K (Q18), the
 widths and depths inside the envelope (Q8/Q17), the error function (Q20), the gate series
-(Q23), whether the filter runs through the purge gap (Q22), leave-one-episode-out
+(Q23), whether the filter runs through the purge gap (Q22, since decided: it does, brief
+10 A, section I.8 `markov`), leave-one-episode-out
 (Q16 c), the per-expert form of the regime-clock decay, the fallback to early stopping.
 
 ## II.0c The compute envelope (brief 09 H)

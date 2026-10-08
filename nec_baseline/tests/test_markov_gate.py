@@ -43,6 +43,7 @@ from nec_moe import (
     Trainer,
     TrialRegistry,
     date_level_series,
+    gate_span_dates,
     walk_forward_evaluate,
     walk_forward_folds,
 )
@@ -236,7 +237,7 @@ def test_frozen_apply_matches_a_manual_filter_run():
     cfg = _markov_cfg()
     prior = MarkovSwitchingRegimePrior(2, cfg.markov_gate)
     prior.fit(train)
-    full = panel.subset_dates(torch.cat([folds[0].train_dates, folds[0].test_dates]))
+    full = panel.subset_dates(gate_span_dates(panel, folds[0]))  # Q22: gap included
     prior.apply_causal(full)
 
     # by hand: same series, same model spec, same frozen params, filter only
@@ -634,9 +635,7 @@ def test_markov_gate_runs_through_the_harness_and_is_date_level():
     trainer = Trainer(NECModel(cfg))
     train = panel.subset_dates(folds[0].train_dates)
     trainer.model.prior.fit(train)
-    trainer.model.prior.apply_causal(
-        panel.subset_dates(torch.cat([folds[0].train_dates, folds[0].test_dates]))
-    )
+    trainer.model.prior.apply_causal(panel.subset_dates(gate_span_dates(panel, folds[0])))
     test = panel.subset_dates(folds[0].test_dates)
     pi = trainer.model(
         test.x_seq, test.x_snap, PriorContext(date=test.date)

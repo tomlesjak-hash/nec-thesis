@@ -191,17 +191,133 @@ def _french_market_excess(panel: Panel, cfg: MarkovGateConfig) -> np.ndarray:
     return factors["mkt_rf"].reindex(labels).to_numpy(dtype=float)
 
 
+def _crsp_market_log_return(panel: Panel, cfg: MarkovGateConfig) -> np.ndarray:
+    """CRSP S&P 500 index daily total return as a log return, aligned to the
+    panel's dates: the gate's series (Q23, decided 2026-10-08; brief 10 B).
+
+    ``log(1 + DlyTotRet)`` of the panel's market index (``CRSPSpec.market_indno``,
+    INDNO 1000500, the CRSP value-weighted S&P 500 universe index), the series
+    the panel's own market features use. **Units: decimals** (0.01 is about a
+    1% day), the units the French path hands the fit (``load_french_factors``
+    turns French's percent into decimals), so starting values, the variance
+    floor and convergence behave alike under both series. The return for date
+    ``t`` is known at the close of ``t``, strictly before the target's window
+    ``(t, t + h]``.
+
+    Read from ``panel.metadata[MARKET_LOG_RETURN_KEY]``, stored at build time
+    (:func:`nec_moe.crsp.build_crsp_panel`), so the gate reads no file during
+    a run. A panel built before brief 10 has no such entry: the series then
+    comes from the CRSP extract's ``market.parquet``, located from the build
+    metadata (:func:`_market_log_return_from_extract`). Aligned by calendar
+    date through ``date_labels``; a panel date without a return raises, never
+    forward-filled.
+    """
+    from .crsp import MARKET_LOG_RETURN_KEY
+
+    if panel.date_labels is None:
+        raise ValueError(
+            "series='crsp_market_log_return' aligns the CRSP market series by "
+            "calendar date, but this panel carries no date_labels (synthetic "
+            "panels do not) — use series='sequence_channel' there"
+        )
+    stored = (panel.metadata or {}).get(MARKET_LOG_RETURN_KEY)
+    by_date = stored if stored is not None else _market_log_return_from_extract(panel, cfg)
+    codes = torch.unique(panel.date, sorted=True)
+    labels = [_iso_day(panel.date_labels[int(c)]) for c in codes]
+    missing = [d for d in labels if d not in by_date]
+    if missing:
+        raise ValueError(
+            f"{len(missing)} panel date(s) have no CRSP market return, first "
+            f"{missing[:5]}: refused rather than forward-filled"
+        )
+    return np.asarray([by_date[d] for d in labels], dtype=float)
+
+
+def _iso_day(label: str) -> str:
+    import pandas as pd
+
+    return str(pd.Timestamp(label).date())
+
+
+#: market.parquet files already read, by (path, modification time)
+_EXTRACT_MARKET: dict[tuple[str, int], dict[str, float]] = {}
+
+
+def _market_log_return_from_extract(panel: Panel, cfg: MarkovGateConfig) -> dict[str, float]:
+    """The CRSP market log return of a panel built before brief 10, from the
+    extract it was built from.
+
+    Located from the build metadata (release, stock file, window, market
+    index): first the extract of the panel's own window, then the default
+    window's extract of the same release and stock file, which is the one
+    sub-window panels are built from (``scripts/build_pit_panel.py``,
+    ``run_experiment``'s ``data="crsp"``). The extract's ``extract.json`` must
+    be complete and name the panel's ``market_indno``. Raises if neither
+    extract is there.
+    """
+    import json
+
+    import pandas as pd
+
+    from .crsp import CRSPSpec, market_log_return_by_date
+
+    meta = panel.metadata or {}
+    needed = ("crsp_release", "crsp_stock_file", "market_indno", "start", "end")
+    absent = [k for k in needed if meta.get(k) is None]
+    if absent:
+        raise ValueError(
+            "series='crsp_market_log_return': the panel carries no stored market "
+            "series (built before brief 10) and its build metadata lacks "
+            f"{absent} to locate the CRSP extract. Rebuild the panel "
+            "(scripts/build_pit_panel.py), or choose another series"
+        )
+    common: dict = {"release": meta["crsp_release"], "stock_file": meta["crsp_stock_file"]}
+    if cfg.crsp_dir is not None:
+        common["crsp_dir"] = cfg.crsp_dir
+    tried: list[str] = []
+    for spec in (CRSPSpec(**common, start=meta["start"], end=meta["end"]), CRSPSpec(**common)):
+        root = spec.extract_dir
+        if str(root) in tried:
+            continue
+        tried.append(str(root))
+        info_path, market_path = root / "extract.json", root / "market.parquet"
+        if not (info_path.exists() and market_path.exists()):
+            continue
+        info = json.loads(info_path.read_text())
+        if not info.get("complete") or int(info.get("market_indno", -1)) != int(
+            meta["market_indno"]
+        ):
+            continue
+        key = (str(market_path), market_path.stat().st_mtime_ns)
+        if key not in _EXTRACT_MARKET:
+            raw = pd.read_parquet(market_path)["DlyTotRet"].astype(float)
+            raw.index = pd.DatetimeIndex(raw.index).astype("datetime64[ns]")
+            _EXTRACT_MARKET[key] = market_log_return_by_date(
+                np.log1p(raw), [str(d.date()) for d in raw.index]
+            )
+        return _EXTRACT_MARKET[key]
+    raise FileNotFoundError(
+        "series='crsp_market_log_return': the panel carries no stored market series "
+        "(built before brief 10) and no complete CRSP extract with market_indno "
+        f"{meta['market_indno']} was found at {tried}. Rebuild the panel "
+        "(scripts/build_pit_panel.py), or set markov_gate.crsp_dir"
+    )
+
+
 #: Which date-level series the Hamilton gate is fitted on. A registry, not a
 #: hardcoded choice, because the series is a modelling decision (§2). Every
 #: entry must be knowable at date ``t``: the target ``y`` is excluded by
 #: construction, being a forward return.
 #:
-#: ``market_excess_return`` is the French Mkt-RF series brief 03 §2
-#: specified. (It previously read a sequence feature named ``mkt_ret_1d``,
+#: ``crsp_market_log_return`` is the decided series (Q23, 2026-10-08; brief
+#: 10 B), the default. ``market_excess_return`` is the French Mkt-RF series
+#: brief 03 §2 specified, kept for the robustness check. (It previously read
+#: a sequence feature named ``mkt_ret_1d``,
 #: which is neither an excess return nor present in the point-in-time panel,
 #: whose sequence features are ret_1d / rel_ret_1d / vol_20d / volume_z_20d;
 #: that reader lives on under the honest name ``sequence_feature``.)
 SERIES_REGISTRY: dict[str, Callable[[Panel, MarkovGateConfig], np.ndarray]] = {
+    "crsp_market_log_return": _crsp_market_log_return,
     "market_excess_return": _french_market_excess,
     "sequence_feature": _named_sequence_feature,
     "sequence_channel": _raw_sequence_channel,

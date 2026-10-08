@@ -271,9 +271,11 @@ def test_scheme_and_fold_provenance():
     assert scheme_provenance(cfg) == {
         "base_decay_half_life_days": 500.0, "expert_decay": "regime_clock",
         "expert_decay_half_life": 300.0, "gate_memory": "regime_clock",
-        "gate_half_life": 200.0, "gate_fit_backend": "native"}
+        "gate_half_life": 200.0, "gate_fit_backend": "native",
+        "gate_series": "crsp_market_log_return"}  # brief 10 B: the default series
     soft = scheme_provenance(small_config())
     assert soft["expert_decay"] == "none" and soft["gate_memory"] is None
+    assert soft["gate_series"] is None
     count = walk_forward_folds(torch.arange(100), n_folds=2, test_dates_per_fold=10,
                                purge_dates=1)
     assert fold_provenance(count) == {"fold_scheme": "count", "protocol": "main",

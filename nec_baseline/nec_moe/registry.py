@@ -52,13 +52,15 @@ PROVENANCE_KEYS: tuple[str, ...] = (
     "fold_scheme", "protocol", "test_years", "sample_start", "sample_end",
     "base_decay_half_life_days", "expert_decay", "expert_decay_half_life",
     "gate_memory", "gate_half_life", "gate_fit_backend", "pilot_selection_hash",
+    # brief 10 B: the Hamilton gate's input series (Q23)
+    "gate_series",
 )
 
 #: The model-config part of the brief 09 keys (:func:`scheme_provenance`),
 #: named as the ``Experiment`` fields and the pilot's selection file name them.
 SCHEME_KEYS: tuple[str, ...] = (
     "base_decay_half_life_days", "expert_decay", "expert_decay_half_life",
-    "gate_memory", "gate_half_life", "gate_fit_backend",
+    "gate_memory", "gate_half_life", "gate_fit_backend", "gate_series",
 )
 
 #: Target-name prefixes of the Stage B target kinds (``StageBSpec.target``),
@@ -112,7 +114,8 @@ def gate_weight_of(cfg: Any) -> str | None:
 
 
 def scheme_provenance(cfg: Any) -> dict[str, Any]:
-    """The memories and the gate estimator of a model config (brief 09 I.1):
+    """The memories, the gate estimator and the gate's series (brief 09 I.1,
+    brief 10 B) of a model config:
     ``None`` where a key does not apply (no base, no regime-clock decay, no
     Hamilton gate, or no config at all, e.g. a baseline model)."""
     out: dict[str, Any] = dict.fromkeys(SCHEME_KEYS)
@@ -130,6 +133,7 @@ def scheme_provenance(cfg: Any) -> dict[str, Any]:
         out["gate_memory"] = mg.memory
         out["gate_half_life"] = mg.gate_half_life
         out["gate_fit_backend"] = mg.fit_backend
+        out["gate_series"] = mg.series  # brief 10 B (Q23)
     return out
 
 

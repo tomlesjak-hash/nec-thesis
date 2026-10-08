@@ -222,6 +222,11 @@ What each writes, all inside `Data/derived/` except step 4:
 | 3 | `pit_panel_crsp_2000-01-01_2024-12-31_q26_market_neutral.pt` (+ `.report.json`, coverage `.csv`) | older panels are left alone. `run_experiment.py`'s `panel_file` default points at this file. About 12 minutes and 15 GB of memory. |
 | 4 | `results/feature_coverage/<date>/coverage.json`, `present_share_by_year.csv`, `rates_by_year.csv`, `early_years.csv` | per year: the share of rows with each characteristic before the 0-fill, the two flag rates, the share without a sector; the members' report-date and filing-date coverage by fiscal year; the keyset-8 count; the early years in one table (`--early 2000 2009`). No return, no model result; it refuses to write anything that names a security. |
 
+Step 3 also stores the gate's series with the panel: the CRSP S&P 500 index's daily log
+return (Q23, brief 10 B). The 2000-2024 panel built before that change does not carry it,
+and the gate reads it from the step 1 extract's `market.parquet` instead, with the same
+values; rebuilding the panel is not needed.
+
 Step 4 reads step 3's panel if it exists and otherwise builds it in memory, so step 3 can be
 skipped if you only want the report. Things to look at in the report before training on the
 panel: the period-end mapping counts (`not_in_fiscalmarketdata` should be about 0), the

@@ -492,7 +492,8 @@ def test_ordering_rule_is_config_and_degenerate_sorts_are_refused():
 
 def test_series_is_a_registry_choice_and_must_be_causal():
     assert set(SERIES_REGISTRY) == {
-        "market_excess_return", "sequence_feature", "sequence_channel",
+        "crsp_market_log_return", "market_excess_return", "sequence_feature",
+        "sequence_channel",
     }
     panel = _sticky_panel(n_dates=60, n_entities=4)
     cfg = _markov_cfg()
@@ -509,12 +510,10 @@ def test_series_is_a_registry_choice_and_must_be_causal():
             panel,
             dataclasses.replace(cfg.markov_gate, series="sequence_feature"),
         )
-    # the French path needs calendar dates to align on, and says so
-    with pytest.raises(ValueError, match="no date_labels"):
-        date_level_series(
-            panel,
-            dataclasses.replace(cfg.markov_gate, series="market_excess_return"),
-        )
+    # the French and CRSP paths need calendar dates to align on, and say so
+    for key in ("market_excess_return", "crsp_market_log_return"):
+        with pytest.raises(ValueError, match="no date_labels"):
+            date_level_series(panel, dataclasses.replace(cfg.markov_gate, series=key))
 
 
 def _french_fixture_dir(tmp_path: Path, rows: list[tuple[str, float]]) -> Path:

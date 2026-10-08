@@ -346,7 +346,14 @@ class MarkovGateConfig:
     - ``series`` / ``series_feature`` / ``series_channel``: which date-level
       series to fit on. Must be knowable at date ``t`` — the panel's feature
       contract guarantees that for sequence features, and the target ``y`` is
-      excluded by construction because it is a *forward* return.
+      excluded by construction because it is a *forward* return. Default
+      ``"crsp_market_log_return"`` (Q23, decided 2026-10-08; brief 10 B): the
+      CRSP S&P 500 index's daily total return as a log return, in decimals;
+      French Mkt-RF (``"market_excess_return"``, also decimals) stays
+      registered for the robustness check. ``crsp_dir``: where the CRSP
+      extracts live, read only for a panel built before brief 10 that does
+      not carry the series itself (``None``: ``CRSPSpec``'s default,
+      ``Quant Model/Data``).
     - ``k_regimes``: states in the chain. Ties to ``experts.n_experts``
       (validated); the value itself is open (Q18).
     - ``trend`` / ``switching_trend`` / ``switching_variance``: the emission.
@@ -401,10 +408,13 @@ class MarkovGateConfig:
       M-step's variance floor, relative to the series' variance.
     """
 
-    series: str = "market_excess_return"  # registry key
+    series: str = "crsp_market_log_return"  # registry key (Q23, brief 10 B)
     # where the cached Kenneth French daily factors live, for the
     # market_excess_return key (read cache-first; never downloaded in a run)
     context_dir: str = "data_cache"
+    # crsp_market_log_return on a panel built before brief 10: the CRSP data
+    # folder whose derived/ extract holds market.parquet (None: CRSPSpec's)
+    crsp_dir: str | None = None
     series_feature: str = "mkt_ret_1d"  # sequence-feature name, "sequence_feature" key
     series_channel: int = 0  # channel index for the raw-channel key
     k_regimes: int = 2

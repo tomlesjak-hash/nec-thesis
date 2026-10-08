@@ -1,0 +1,369 @@
+{
+  "what": "brief 10 B.6: Hamilton gate fits on the two candidate series, 2009 pilot fold's training block; a fit diagnostic, nothing scored",
+  "created": "2026-10-09T02:50:23",
+  "settings": {
+    "start": "2000-01-01",
+    "end": "2008-12-31",
+    "purge_dates": 5,
+    "k_values": [
+      2,
+      3
+    ],
+    "backends": [
+      "statsmodels",
+      "native"
+    ],
+    "series": [
+      "crsp_market_log_return",
+      "market_excess_return"
+    ],
+    "context_dir": "data_cache",
+    "horizon": 5,
+    "stress_threshold": 0.5,
+    "out": "results/benchmark/gate_series_comparison.json"
+  },
+  "window": {
+    "first": "2000-01-03",
+    "last": "2008-12-23",
+    "dates": 2258
+  },
+  "units": "decimals for both series (0.01 is about a 1% day)",
+  "series_sd_daily": {
+    "crsp_market_log_return": 0.013585565480398342,
+    "market_excess_return": 0.01365101562332943
+  },
+  "series_correlation": 0.9922868618209152,
+  "fits": [
+    {
+      "series": "crsp_market_log_return",
+      "k": 2,
+      "backend": "statsmodels",
+      "seconds": 4.4,
+      "n_starts": 24,
+      "n_converged": 24,
+      "n_failed": 0,
+      "n_nonconverged": 0,
+      "n_distinct_optima": 1,
+      "best_minus_second_optimum": null,
+      "llf": 6956.0227845323525,
+      "variances": [
+        5.726089757024275e-05,
+        0.00041241789103809465
+      ],
+      "sd_annualised": [
+        0.1201238785075689,
+        0.3223806888472072
+      ],
+      "means": [
+        0.00042831567086417017,
+        -0.0012248804502829392
+      ],
+      "transition_diagonal": [
+        0.9908996237504869,
+        0.9850322432503037
+      ],
+      "expected_durations_days": [
+        109.88556655044933,
+        66.81027870260452
+      ],
+      "stress_share": 0.3511957484499557,
+      "warnings": []
+    },
+    {
+      "series": "market_excess_return",
+      "k": 2,
+      "backend": "statsmodels",
+      "seconds": 4.1,
+      "n_starts": 24,
+      "n_converged": 24,
+      "n_failed": 0,
+      "n_nonconverged": 0,
+      "n_distinct_optima": 1,
+      "best_minus_second_optimum": null,
+      "llf": 6920.435223917168,
+      "variances": [
+        6.400624901169761e-05,
+        0.00042932635018968715
+      ],
+      "sd_annualised": [
+        0.12700226277884893,
+        0.32892284847331776
+      ],
+      "means": [
+        0.0003720338108150725,
+        -0.0012726000246849798
+      ],
+      "transition_diagonal": [
+        0.9925156927255402,
+        0.9866134791009384
+      ],
+      "expected_durations_days": [
+        133.61290007593604,
+        74.70200865036585
+      ],
+      "stress_share": 0.32063773250664307,
+      "warnings": []
+    },
+    {
+      "series": "crsp_market_log_return",
+      "k": 2,
+      "backend": "native",
+      "seconds": 4.0,
+      "n_starts": 24,
+      "n_converged": 24,
+      "n_failed": 0,
+      "n_nonconverged": 0,
+      "n_distinct_optima": 1,
+      "best_minus_second_optimum": null,
+      "llf": 6956.022784532353,
+      "variances": [
+        5.726089888233746e-05,
+        0.00041241790527299973
+      ],
+      "sd_annualised": [
+        0.12012387988384757,
+        0.3223806944108098
+      ],
+      "means": [
+        0.00042831556409165345,
+        -0.001224880468649994
+      ],
+      "transition_diagonal": [
+        0.9908996225418878,
+        0.98503224260951
+      ],
+      "expected_durations_days": [
+        109.88555195681313,
+        66.8102758423491
+      ],
+      "stress_share": 0.3511957484499557,
+      "warnings": []
+    },
+    {
+      "series": "market_excess_return",
+      "k": 2,
+      "backend": "native",
+      "seconds": 8.6,
+      "n_starts": 24,
+      "n_converged": 24,
+      "n_failed": 0,
+      "n_nonconverged": 0,
+      "n_distinct_optima": 1,
+      "best_minus_second_optimum": null,
+      "llf": 6920.4352239171685,
+      "variances": [
+        6.400624865399831e-05,
+        0.0004293263465943413
+      ],
+      "sd_annualised": [
+        0.12700226242397247,
+        0.32892284709605385
+      ],
+      "means": [
+        0.0003720337433999963,
+        -0.0012726000660640711
+      ],
+      "transition_diagonal": [
+        0.9925156924096467,
+        0.9866134744078267
+      ],
+      "expected_durations_days": [
+        133.61289443647632,
+        74.70198246098049
+      ],
+      "stress_share": 0.32063773250664307,
+      "warnings": []
+    },
+    {
+      "series": "crsp_market_log_return",
+      "k": 3,
+      "backend": "statsmodels",
+      "seconds": 50.5,
+      "n_starts": 24,
+      "n_converged": 24,
+      "n_failed": 0,
+      "n_nonconverged": 0,
+      "n_distinct_optima": 1,
+      "best_minus_second_optimum": null,
+      "llf": 7078.28659087722,
+      "variances": [
+        4.3533663498235695e-05,
+        0.0001737981058462154,
+        0.0012791430555402462
+      ],
+      "sd_annualised": [
+        0.10474007447751503,
+        0.2092776210521476,
+        0.5677535116546105
+      ],
+      "means": [
+        0.0005598736807690782,
+        -0.0005054628054966188,
+        -0.002847065636128853
+      ],
+      "transition_diagonal": [
+        0.9936874911080666,
+        0.9877201124961085,
+        0.9507099069617011
+      ],
+      "expected_durations_days": [
+        158.41561843625797,
+        81.43397076586389,
+        20.28805259553862
+      ],
+      "stress_share": 0.05978742249778565,
+      "warnings": []
+    },
+    {
+      "series": "market_excess_return",
+      "k": 3,
+      "backend": "statsmodels",
+      "seconds": 42.1,
+      "n_starts": 24,
+      "n_converged": 24,
+      "n_failed": 0,
+      "n_nonconverged": 0,
+      "n_distinct_optima": 1,
+      "best_minus_second_optimum": null,
+      "llf": 7033.6964364030455,
+      "variances": [
+        4.260377868407616e-05,
+        0.0001599662875542531,
+        0.0010362894524704098
+      ],
+      "sd_annualised": [
+        0.10361540536226838,
+        0.20077725086192355,
+        0.5110234260995706
+      ],
+      "means": [
+        0.0006160948397240633,
+        -0.0005337403787460172,
+        -0.0020990663071366383
+      ],
+      "transition_diagonal": [
+        0.9907643120741954,
+        0.9833744050901496,
+        0.9516408907721605
+      ],
+      "expected_durations_days": [
+        108.2756377254785,
+        60.148223592739946,
+        20.67862737687314
+      ],
+      "stress_share": 0.07484499557130203,
+      "warnings": []
+    },
+    {
+      "series": "crsp_market_log_return",
+      "k": 3,
+      "backend": "native",
+      "seconds": 24.0,
+      "n_starts": 24,
+      "n_converged": 24,
+      "n_failed": 0,
+      "n_nonconverged": 0,
+      "n_distinct_optima": 1,
+      "best_minus_second_optimum": null,
+      "llf": 7078.286590984782,
+      "variances": [
+        4.353366551864197e-05,
+        0.00017379812758760188,
+        0.0012791431898147114
+      ],
+      "sd_annualised": [
+        0.1047400769080192,
+        0.20927763414200687,
+        0.5677535414537784
+      ],
+      "means": [
+        0.0005598736429624177,
+        -0.0005054627231620026,
+        -0.0028470666206605244
+      ],
+      "transition_diagonal": [
+        0.9936874994214692,
+        0.9877201227958059,
+        0.9507100287473614
+      ],
+      "expected_durations_days": [
+        158.4158270655936,
+        81.4340390682781,
+        20.28810272325871
+      ],
+      "stress_share": 0.05978742249778565,
+      "warnings": []
+    },
+    {
+      "series": "market_excess_return",
+      "k": 3,
+      "backend": "native",
+      "seconds": 21.9,
+      "n_starts": 24,
+      "n_converged": 24,
+      "n_failed": 0,
+      "n_nonconverged": 0,
+      "n_distinct_optima": 1,
+      "best_minus_second_optimum": null,
+      "llf": 7033.696436554601,
+      "variances": [
+        4.260378931149425e-05,
+        0.00015996631957203097,
+        0.0010362903219342345
+      ],
+      "sd_annualised": [
+        0.10361541828558407,
+        0.20077727095503564,
+        0.511023640478038
+      ],
+      "means": [
+        0.0006160947127384401,
+        -0.0005337414328203124,
+        -0.002099062832235981
+      ],
+      "transition_diagonal": [
+        0.990764321200515,
+        0.9833743290003949,
+        0.9516401793676273
+      ],
+      "expected_durations_days": [
+        108.27574471903112,
+        60.14794831581548,
+        20.6783231807644
+      ],
+      "stress_share": 0.07484499557130203,
+      "warnings": []
+    }
+  ],
+  "stress_probability_agreement": [
+    {
+      "k": 2,
+      "backend": "statsmodels",
+      "stress_probability_pearson": 0.9699337417822486,
+      "stress_probability_spearman": 0.9892521521507822,
+      "both_stressed_or_both_calm_share": 0.9526129317980514
+    },
+    {
+      "k": 2,
+      "backend": "native",
+      "stress_probability_pearson": 0.9699337431949493,
+      "stress_probability_spearman": 0.9892521891791868,
+      "both_stressed_or_both_calm_share": 0.9526129317980514
+    },
+    {
+      "k": 3,
+      "backend": "statsmodels",
+      "stress_probability_pearson": 0.960998317449407,
+      "stress_probability_spearman": 0.9883955746528487,
+      "both_stressed_or_both_calm_share": 0.9840566873339238
+    },
+    {
+      "k": 3,
+      "backend": "native",
+      "stress_probability_pearson": 0.9609987282902144,
+      "stress_probability_spearman": 0.9883955746528487,
+      "both_stressed_or_both_calm_share": 0.9840566873339238
+    }
+  ],
+  "stress_regime": "the highest-variance regime (canonical order: ascending variance)"
+}

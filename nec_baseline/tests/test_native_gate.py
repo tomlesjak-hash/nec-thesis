@@ -289,8 +289,9 @@ REPO = Path(__file__).resolve().parents[1]
 WINDOW = ("2000-01-01", "2008-12-31")  # the 2009 pilot fold's training years
 
 
-def _date_panel(dates: pd.DatetimeIndex) -> Panel:
-    """A minimal one-row-per-date panel: the gate reads only the dates."""
+def _date_panel(dates: pd.DatetimeIndex, metadata: dict | None = None) -> Panel:
+    """A minimal one-row-per-date panel: the gate reads only the dates (and,
+    for the CRSP series, the market series in ``metadata``)."""
     n = len(dates)
     return Panel(
         x_seq=torch.zeros(n, 1, 1), x_snap=torch.zeros(n, 1), y=torch.zeros(n),
@@ -298,11 +299,13 @@ def _date_panel(dates: pd.DatetimeIndex) -> Panel:
         schema=FeatureSchema(sequence_features=("s",), snapshot_features=("x",),
                              target="fwd_ret_1d"),
         date_labels=tuple(str(d.date()) for d in dates),
+        metadata=dict(metadata or {}),
     )
 
 
-def _compare_backends_on(series_cfg: dict, dates: pd.DatetimeIndex) -> None:
-    panel = _date_panel(dates)
+def _compare_backends_on(series_cfg: dict, dates: pd.DatetimeIndex,
+                         metadata: dict | None = None) -> None:
+    panel = _date_panel(dates, metadata)
     fits = {}
     for backend in ("statsmodels", "native"):
         cfg = MarkovGateConfig(fit_backend=backend, **series_cfg)
@@ -353,21 +356,24 @@ def _crsp_available() -> bool:
 
 @pytest.mark.crsp_data
 @pytest.mark.skipif(not _crsp_available(), reason="CRSP files not under Data/")
-def test_native_matches_statsmodels_on_the_crsp_sp500_index_2000_2008(monkeypatch):
-    """The CRSP S&P 500 index return (INDNO 1000500; Q23 option (b)),
-    2000-2008, through a temporary series key: both backends agree. A
-    gate-fit diagnostic: nothing is scored."""
-    from nec_moe import markov_gate as mg
-    from nec_moe.crsp import CRSPSpec, read_index_returns
+def test_native_matches_statsmodels_on_the_crsp_sp500_index_2000_2008():
+    """The CRSP S&P 500 index return (INDNO 1000500; Q23, decided 2026-10-08:
+    the gate's series), 2000-2008, through the registered key: both backends
+    agree. A gate-fit diagnostic: nothing is scored."""
+    from nec_moe.crsp import (
+        MARKET_LOG_RETURN_KEY,
+        CRSPSpec,
+        market_log_return_by_date,
+        read_index_returns,
+    )
 
     ret = read_index_returns(CRSPSpec(), 1000500)
     ret = ret[(ret.index >= WINDOW[0]) & (ret.index <= WINDOW[1])]
-
-    def crsp_series(panel, cfg):
-        return np.log1p(ret.reindex(pd.to_datetime(list(panel.date_labels))).to_numpy())
-
-    monkeypatch.setitem(mg.SERIES_REGISTRY, "crsp_sp500_test", crsp_series)
-    _compare_backends_on({"series": "crsp_sp500_test"}, pd.DatetimeIndex(ret.index))
+    dates = pd.DatetimeIndex(ret.index)
+    labels = [str(d.date()) for d in dates]
+    stored = market_log_return_by_date(np.log1p(ret.astype(float)), labels)
+    _compare_backends_on({"series": "crsp_market_log_return"}, dates,
+                         metadata={MARKET_LOG_RETURN_KEY: stored})
 
 
 def test_hmm_params_permute_consistently():

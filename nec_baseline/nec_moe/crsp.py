@@ -120,7 +120,7 @@ import hashlib
 import json
 import math
 import zipfile
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO, Any, Literal, Protocol
@@ -170,6 +170,8 @@ __all__ = [
     "missing_return_split",
     "crsp_daily_frames",
     "build_crsp_panel",
+    "MARKET_LOG_RETURN_KEY",
+    "market_log_return_by_date",
 ]
 
 #: ``Quant Model/Data/``: the licensed files, gitignored. Derived files go to
@@ -1101,6 +1103,25 @@ def _summary(x: np.ndarray) -> dict[str, float]:
     return {"min": float(np.min(x)), "median": float(np.median(x)), "max": float(np.max(x))}
 
 
+#: ``Panel.metadata`` key of the market series a CRSP panel carries for the
+#: Hamilton gate (Q23, decided 2026-10-08; brief 10 B): ``{ISO date:
+#: log(1 + DlyTotRet)}`` of ``market_indno`` on every date of the panel.
+MARKET_LOG_RETURN_KEY = "market_log_return"
+
+
+def market_log_return_by_date(mkt_ret: pd.Series, labels: Sequence[str]) -> dict[str, float]:
+    """``{ISO date: log return}`` of the market series on ``labels``' dates.
+
+    ``mkt_ret`` is already ``log1p(DlyTotRet)`` (decimals: 0.01 is about 1%).
+    A date without a finite value is left out, so the gate's reader raises for
+    it rather than inventing a return (never forward-filled)."""
+    days = pd.DatetimeIndex(pd.to_datetime(list(labels))).normalize()
+    values = mkt_ret.reindex(days).to_numpy(dtype=float)
+    return {
+        str(d.date()): float(v) for d, v in zip(days, values, strict=True) if np.isfinite(v)
+    }
+
+
 def build_crsp_panel(
     spec: CRSPSpec,
     stage_b: StageBSpec | None = None,
@@ -1198,6 +1219,12 @@ def build_crsp_panel(
         universe=universe,
     )
     panel = filter_point_in_time(candidates, universe)
+    # the gate's series (Q23, brief 10 B), stored with the panel so the gate
+    # never reads a file during a run
+    assert panel.date_labels is not None
+    panel.metadata[MARKET_LOG_RETURN_KEY] = market_log_return_by_date(
+        mkt_ret, panel.date_labels
+    )
 
     # rows whose forward window used the post-delisting fill
     assert panel.date_labels is not None and panel.entity_labels is not None

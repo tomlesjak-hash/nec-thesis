@@ -481,7 +481,28 @@ Three structural facts:
 
 `nec_moe/markov_gate.py`: Hamilton's Markov switching model, fitted by maximum likelihood
 on each fold's training block, canonically ordered, frozen, and applied to later dates by
-the filter alone (brief 03). The table it serves is `MarkovGateConfig.gate_weight`, built
+the filter alone (brief 03).
+
+**Its input series** (Q23, decided 2026-10-08; brief 10 B). `MarkovGateConfig.series` /
+`Experiment.gate_series` default to `"crsp_market_log_return"`: `log(1 + DlyTotRet)` of the
+panel's market index (`CRSPSpec.market_indno`, INDNO 1000500, the CRSP value-weighted S&P
+500 universe index), the series the panel's own market features use, in decimals (0.01 is
+about a 1% day). `build_crsp_panel` stores it with the panel
+(`panel.metadata["market_log_return"]`, `{ISO date: value}`), so the gate reads no file
+during a run; a panel built before brief 10 (the current 2000-2024 panel) has no such
+entry, and the gate then reads `market.parquet` of the extract its build metadata names
+(the panel's own window first, then the default window's; `MarkovGateConfig.crsp_dir`
+moves the data folder). A panel date without a return raises; nothing is forward-filled.
+French Mkt-RF (`"market_excess_return"`, also passed to the fit in decimals) stays
+registered for the robustness check. Every trial row records the series
+(`gate_series`, `None` without a Hamilton gate), and the run's `settings.json` has the
+`Experiment` field. The backprop-HMM baseline (`hmm` above) does not read the series
+registry: its filter is per entity and updated with each row's own realised target (through
+the experts' likelihood), so it has its own input and is unchanged. `scripts/gate_series_comparison.py` compares the two series' fits on the
+2000-2008 training block (`results/benchmark/gate_series_comparison.json`; fits only,
+nothing scored).
+
+The table it serves is `MarkovGateConfig.gate_weight`, built
 from the filtered probability `ξ_t` and the frozen canonical transition matrix `A` by
 `gate_weight_probs`:
 
@@ -1021,9 +1042,10 @@ derives `abs_mkt` and `mkt_vol_20d` (annualized 20-day realized market vol).
 **Diagnostics only, never training inputs** (Decision B): the moment VIX enters
 training, "do learned experts correspond to volatility regimes?" stops being a testable
 question. One exception, by brief 03 §2: the Hamilton gate's registered series
-`market_excess_return` is French daily Mkt-RF, so that series is the gate's input (never
-a target or an expert feature). These are the only free downloads left; CRSP has no
-equivalent of either.
+`market_excess_return` is French daily Mkt-RF (never a target or an expert feature). It was
+the gate's input until Q23 (decided 2026-10-08; brief 10 B) made the CRSP S&P 500 index log
+return the default; French Mkt-RF is kept for the robustness check. These are the only
+free downloads left; CRSP has no equivalent of either.
 
 ## I.16 `alignment.py` — the interpretability tooling
 
@@ -1329,8 +1351,9 @@ seed is the row's own field.
 
 **Not decided here** (the code keeps its defaults and picks nothing): K (Q18), the
 widths and depths inside the envelope (Q8/Q17), the error function (Q20), the gate series
-(Q23), whether the filter runs through the purge gap (Q22, since decided: it does, brief
-10 A, section I.8 `markov`), leave-one-episode-out
+(Q23, since decided: the CRSP S&P 500 index log return, brief 10 B), whether the filter
+runs through the purge gap (Q22, since decided: it does, brief 10 A; both in section I.8
+`markov`), leave-one-episode-out
 (Q16 c), the per-expert form of the regime-clock decay, the fallback to early stopping.
 
 ## II.0c The compute envelope (brief 09 H)

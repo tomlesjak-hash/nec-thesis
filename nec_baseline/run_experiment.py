@@ -252,7 +252,9 @@ class Experiment:
     # Fitted by maximum likelihood on each fold's training block, canonically
     # reordered, and applied to the test block with FROZEN parameters through
     # the filter. Nothing here is chosen yet.
-    gate_series: str = "market_excess_return"  # registry key (see SERIES_REGISTRY)
+    # registry key (see SERIES_REGISTRY); the CRSP S&P 500 index log return
+    # (Q23, decided 2026-10-08); "market_excess_return" is French Mkt-RF
+    gate_series: str = "crsp_market_log_return"
     gate_context_dir: str = "data_cache"       # cached French factors (market_excess_return)
     gate_series_feature: str = "mkt_ret_1d"    # name, for series="sequence_feature"
     gate_series_channel: int = 0               # channel index for "sequence_channel"

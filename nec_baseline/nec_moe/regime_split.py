@@ -151,7 +151,7 @@ def series_panel(
     its own key (``crsp_market_log_return``). Nothing else is in the panel:
     the gate reads only the dates and the series."""
     n = len(labels)
-    x = np.asarray(values, dtype=float)
+    x = np.array(values, dtype=float)  # a writable copy (pandas may hand a read-only view)
     if x.shape != (n,):
         raise ValueError(f"{n} labels but values of shape {x.shape}")
     x_seq = torch.zeros(n, 1, 1, dtype=torch.float32)

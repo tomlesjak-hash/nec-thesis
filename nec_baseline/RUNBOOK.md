@@ -321,6 +321,32 @@ Settings are the `Settings` block at the top of the script.
 
 ---
 
+## 8e. The regime-split diagnostics, 2000-2006 only (brief 11)
+
+Three descriptive checks on the pre-pilot years. Run them in this order, from `nec_baseline/`. Each
+refuses an end date in 2007 or later (no override) and cuts the data at 2006-12-31 before computing
+anything. All outputs go to `results/diagnostics/` and are aggregate only.
+
+```bash
+python3.14 scripts/ic_regime_split.py regimes                      # A: about a minute
+caffeinate -i python3.14 scripts/ic_regime_split.py ic             # B: the panel and the extract
+caffeinate -i python3.14 scripts/sector_regimes.py                 # C: the panel and the extract
+```
+
+| part | writes | what to look at |
+|---|---|---|
+| A | `market_regimes_2000_2006.json`, `.png` | convergence and multi-start trace, the regime sds and durations for K = 2 and 3, the stress shading against the 2000-02 bear market |
+| B | `ic_regime_2000_2006.csv`, `.json`, `.png`, `ic_regime_contrast_2000_2006.png` | `primary_results` in the JSON (five one-sided tests, Holm), then the contrast figure; exploratory rows carry BH q-values |
+| C | `sector_regimes_2000_2006.csv`, `.json`, `.png` | which sectors were too thin to fit, sector-relative stress while the market is calm, the heat strips |
+
+B and C read the 2000-2024 panel (memory-mapped) and the CRSP extract, like `scripts/ic_decay.py`.
+B also refits part A's gate itself (the same deterministic fit), so A is needed only for its figure
+and parameters. Every output carries the caveat that the gate's parameters are fitted on all of
+2000-2006: the results describe these years, they do not forecast. HANDBOOK II.0d explains the
+regression, the two HAC choices and how far to trust their t-statistics.
+
+---
+
 ## 9. Quick reference
 
 | I want to... | command |
@@ -343,5 +369,8 @@ Settings are the `Settings` block at the top of the script.
 | build the Q26 panel | `python3.14 scripts/build_pit_panel.py` |
 | feature coverage report | `python3.14 scripts/feature_coverage_report.py` |
 | IC decay curve, 2000-2006 only | `caffeinate -i python3.14 scripts/ic_decay.py` |
+| market regimes 2000-2006 (brief 11 A) | `python3.14 scripts/ic_regime_split.py regimes` |
+| IC split by regime (brief 11 B) | `caffeinate -i python3.14 scripts/ic_regime_split.py ic` |
+| sector regimes 2000-2006 (brief 11 C) | `caffeinate -i python3.14 scripts/sector_regimes.py` |
 
 No command here deletes anything. Old runs stay until you remove their folders yourself.

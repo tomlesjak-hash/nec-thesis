@@ -1422,6 +1422,67 @@ Under the hood, every experiment is the same seven moves:
 The rest of Part II is one section per move, plus data acquisition, extension guides,
 and a dictionary of the package's error messages.
 
+## II.0d The pre-pilot diagnostics: the regime split (brief 11)
+
+Descriptive checks on **2000-2006 only**, before the pilot's validation years. They motivate the
+design and decide nothing: not K (Q18), not the industry gate (Q28), not the gate's memory, not the
+features (Q26). Tom runs them (RUNBOOK 8e); development only tests them on synthetic data.
+
+**The date guard.** Every script refuses an end date on or after 2007-01-01, with no override field
+(`ic_decay.check_end`). The market series and the CRSP extract are cut at the end date before
+anything is computed, so a forward window that would cross it is missing: the last scored date moves
+back by h. Nothing is read from before the start either: sector returns begin on the window's second
+date, because the first date's previous-day market equity would lie in 1999.
+
+**A, the market's regimes** (`nec_moe.regime_split`, `scripts/ic_regime_split.py regimes`). The
+Hamilton gate on the CRSP index log return (`crsp_market_log_return`), K = 2 and K = 3, fitted on the
+whole span with full memory, the default estimator and multi-start, canonical order by variance (the
+last regime is stress). Only filtered probabilities are used; a horizon's regime weight is Q27's window
+average (`gate_weight_probs(..., "window", h)`), the filtered probability itself the robustness
+variant. The parameter-free `stress_vol` state is 1 when the trailing 20-day sd is above its 2000-2006
+median. **Caveat, written into every output:** the parameters are estimated on all of 2000-2006, so the
+probabilities are causal in the data they filter but not in the parameters. This is an in-sample
+description, not a forecast.
+
+**B, the IC curve split by regime** (`ic_regime_split.py ic`). The daily IC is brief 10 C's
+(`ic_decay.daily_ics`: Spearman with average ranks, market-neutral forward log return), for its 16
+signals plus `ret_20d_ind_rel` and `ind_mom_12_1`. Per signal, horizon and K:
+
+- the regime-weighted mean IC with Kish's effective number of dates;
+- the pure-regime IC `c_k` from `IC_t = sum_k c_k w_k(t) + e_t` (no intercept; the weights sum to 1),
+  and the contrast `c_stress - c_calm`. Sandwich standard errors under Hansen-Hodrick (uniform, lag
+  h - 1) and Newey-West (Bartlett, lag max(h - 1, 20)). They are computed through
+  `evaluation.hac_variance` on the scalar series `z_t = a'(X'X)^-1 x_t e_t`, which is exactly the
+  matrix sandwich (tested against it), with the estimator's T/(T - 1);
+- robustness: the filtered weight, the hard split `1[wbar_stress > 0.5]` (for K = 3, stress against
+  the pooled rest), and `stress_vol`.
+
+**The families, fixed before the run** (`PRIMARY_HYPOTHESES`, `PRIMARY_SPEC`, written into the JSON).
+Five one-sided primary tests at K = 2, h = 5, Hansen-Hodrick, on the soft regression with window
+weights, Holm-adjusted: H1, reversal stronger in stress (`ret_5d`, `ret_20d`, `ret_20d_ind_rel`); H2,
+momentum weaker in stress (`mom_12_1`, `ind_mom_12_1`). Every other (signal, h, K) contrast of that
+specification is exploratory, two-sided, with Benjamini-Hochberg q-values (175 tests at the defaults).
+The remaining variants are robustness checks with raw p-values only.
+
+**How far to trust the t-statistics** (`contrast_size_simulation`, 5,000 synthetic runs, T = 1,750, a
+persistent filtered regime weight, an IC with no regime effect). When the IC noise is only the target's
+overlap, the 5% test rejects 4.6%, 5.7% and 6.3% of the time at h = 1, 5 and 10 under Hansen-Hodrick, and
+5.8%, 7.2% and 8.4% under Newey-West. When the IC also drifts slowly (AR(1), autocorrelation 0.98), both
+over-reject: 7.9% and 9.0% for a drift sd of 0.03, and 20.3% and 16.1% for 0.10. Newey-West's 20 lags
+do not cover a drift that slow. Read a primary result near the boundary with that in mind.
+
+**C, sector regimes** (`scripts/sector_regimes.py`). Each GICS sector's daily return is the mean of
+the universe rows' simple returns, weighted by the previous trading day's market equity (`DlyCap`), as a
+log return; equal weights are the robustness variant. The universe rows are the panel's rows, the same
+set the industry signals are built on. A sector-date with fewer than 5 names is skipped, and a sector
+with any skipped date is reported (thin dates, median names) and not fitted, because a Hamilton fit
+needs an unbroken series. Real Estate (GICS 60, inside Financials until 2016) is expected to be empty.
+The relative (sector minus the index) and raw series each get a 2-state gate. The measures are: the
+share of days stressed, stressed while the market is calm, P(sector stress | market calm), the
+correlation with the market's stress probability, durations, episodes of at least 5 days, and the
+co-stress matrix. The expectation written before the run: raw sector regimes largely copy the market's,
+relative ones should not.
+
 ## II.1 Setup and health checks
 
 ```bash

@@ -10,7 +10,8 @@ Grouped by topic. Each entry says what has to be decided and why it matters; the
 Q1 fixed the direction (market regime combined with an industry regime, both frozen). Open: the form
 (factorial, coupled chains, sector-only, pooled chains), what the industry chain is fitted on
 (sector-relative or raw sector returns), granularity (11 sectors or finer), states per level, how each
-gate type gets an industry version, and identification against the industry inputs. Section~\ref{sec:industrygate}.
+gate type gets an industry version, and identification against the industry inputs. Section~\ref{sec:industrygate}. The descriptive check on 2000--2006 (Section~\ref{sec:diagnostics}) found sector-own stress on 6--9\% of days,
+concentrated in a few sectors, with relative regimes still correlated 0.64 with the market's.
 \end{openbox}
 
 \begin{openbox}{Q29. A gate defined by factor returns?}
@@ -66,7 +67,8 @@ no-gate mixture, jointly trained priors.
 
 \begin{openbox}{Q9. Primary metric family}
 Forecast accuracy (rank IC, ICIR) or portfolio performance; they can disagree, so one must be primary,
-fixed in advance.
+fixed in advance. Also open: whether transaction costs enter headline results (Q9 (c)). The reporting additions
+(legs, deciles, years and episodes, execution lag) are decided.
 \end{openbox}
 
 \begin{openbox}{Q15. Adaptive overfitting}
@@ -96,6 +98,7 @@ Open: whether adopting a very recent paper's architecture wholesale is acceptabl
 \item The long-short book's default scheme (non-overlapping or staggered).
 \item The hidden-layer initialisation of the experts (audit X-1).
 \item The experts' regime-clock decay as a mixture over regimes (default) or per expert.
+\item Clipping outliers in the training target (held for later, with Q20).
 \item The post-delisting fill (``cash'' default, not a decision).
 \item Restated Compustat values: whether the ``prior to amendment'' keysets fix them.
 \end{itemize}

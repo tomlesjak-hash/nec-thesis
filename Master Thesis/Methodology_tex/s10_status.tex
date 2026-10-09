@@ -18,7 +18,9 @@ Brief & Content & Status\\
 08 & Market-neutral target, the 57-input feature set, point-in-time Compustat, GICS, window-average gate weight & done\\
 09 & Sample 2000--2024, calendar-year folds, decay weights, native and weighted Baum--Welch, pilot runner,
 parallel campaign runner, real-pipeline timing & done (commits f76f6eb--0e515eb)\\
-10 & Gate filter through the purge gap (Q22), CRSP index as the gate series (Q23), IC decay script & written, to run\\
+10 & Gate filter through the purge gap (Q22), CRSP index as the gate series (Q23), IC decay script & done; IC decay run\\
+11 & Regime-split IC curve and sector regimes on 2000--2006 (descriptive) & done; run 2026-10-09\\
+12 & Evaluation additions: legs, decile monotonicity, years and episodes, execution lag & written, to run\\
 \bottomrule
 \end{tabularx}}
 
@@ -44,8 +46,9 @@ parallel campaign runner, real-pipeline timing & done (commits f76f6eb--0e515eb)
 \item \texttt{MoE\_HMM\_Gate\_Formulation.pdf}: the mathematics (gate, EM, per-row likelihood, gate weight).
 \item \texttt{Model\_Derivation\_BaseCase.md}: the base-case derivation.
 \item \texttt{Training\_Window\_and\_Weighting\_Theory.md}: theory of the training window and weights.
-\item \texttt{Improvements\_and\_Extensions.md}: future work (E1 one-day forecasting; E2 the MoE as a
-  stacking meta-model over machine-learning alphas).
+\item \texttt{Improvements\_and\_Extensions.md}: future work: E1 one-day forecasting; E2 the MoE as a stacking
+  meta-model over machine-learning alphas; E3 residual short-term reversal as an input; E4 recurrent or transformer
+  experts on raw price sequences.
 \end{itemize}
 The formulation PDF and the derivation still describe one shared gate weight per date; they will get a
 section on the industry-level gate once Q28 is settled.

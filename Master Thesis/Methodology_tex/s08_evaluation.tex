@@ -37,6 +37,46 @@
 \end{itemize}
 \end{whybox}
 
+\subsection{Reporting additions (decided 2026-10-09)}
+
+\dec{2026-10-09, Q9 update} Four additions to every arm's evaluation (gates, control, base, baselines), adopted after
+reviewing the LightGBM pipeline in \texttt{OP model/lgbm}. They are reporting only and were fixed before any
+test-period number was computed. \impl{brief 12}
+\begin{enumerate}
+\item \textbf{Long leg against short leg}: the long-short spread split into the long leg (mean market-neutral return of
+  the top quantile) and the short leg (minus the mean of the bottom quantile), plus the rank IC computed separately
+  within the upper and lower halves of the forecast distribution.
+\item \textbf{Decile monotonicity}: mean return by forecast decile, and the monotonic relation test of Patton \&
+  Timmermann (2010), with a stationary bootstrap.
+\item \textbf{By calendar year and named episode}: 2010--2024 year by year, and eight episodes fixed in advance:
+  euro debt and flash crash 2010; US downgrade 2011; China devaluation and oil 2015--16; the 2018 fourth-quarter
+  sell-off; the COVID crash; the 2020 rebound; the 2022 bear market; the 2023 regional-bank stress.
+\item \textbf{Execution lag}: a setting \texttt{execution\_lag}; with lag $L$ the forecast made at the close of $t$ is
+  scored against the return over $(t+L,\,t+L+h]$. Evaluation only; every headline table at $L=0$ and $L=1$.
+\end{enumerate}
+
+\begin{whybox}
+\begin{itemize}
+\item \textbf{Legs}: in the LightGBM pipeline nearly all the edge sat in the short leg (IC 0.028 against 0.004). If the
+  regime gain lives only in the short leg during stress, that changes how it could be used (shorting is costlier and
+  constrained).
+\item \textbf{Monotonicity}: a good spread can come from one extreme decile. A forecast that orders stocks well should
+  raise returns steadily from decile 1 to 10.
+\item \textbf{Years and episodes}: one headline number can hide an edge that lived in one year. Fixing the episode
+  dates now means they cannot be chosen to flatter a gate.
+\item \textbf{Execution lag}: the book assumes trading at the close at which the signal is computed. The IC decay curve
+  showed several signals carry most of their information in the first two or three days, so a one-day delay is the
+  honest check.
+\end{itemize}
+\end{whybox}
+
+\paragraph{Turnover without trading.} Nothing is traded, but the evaluation builds a paper long-short book every
+rebalance, so its turnover, $\tfrac12\sum_i|w_{i,t}-w_{i,t-1}|$, measures how stable the forecasts' rankings are (0: same
+names; 1: whole book replaced). A gate that switches regime moves every stock's expert weights at once, so its
+forecasts jump and turnover spikes; this makes turnover an assumption-free measure of how usable each gate's forecasts
+are. A cost-adjusted return additionally needs an assumed cost per unit traded, which is why it stays with
+\open{Q9 (c)}.
+
 \open{Q9} Which metric family is primary: forecast accuracy or portfolio performance. In Gu, Kelly \& Xiu
 the two families favour different depths, so the primary family must be fixed in advance.
 

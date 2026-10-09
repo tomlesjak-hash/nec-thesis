@@ -4,6 +4,7 @@
 \usepackage{booktabs,tabularx,array,longtable}
 \usepackage{enumitem}
 \usepackage{tikz}
+\usepackage{graphicx}
 \usetikzlibrary{positioning,fit,arrows.meta,backgrounds,shapes.geometric}
 \usepackage[most]{tcolorbox}
 \usepackage[hidelinks]{hyperref}
@@ -33,6 +34,9 @@
 \definecolor{wbg}{RGB}{240,244,251}
 \definecolor{wfr}{RGB}{60,90,150}
 \newtcolorbox{whybox}[1][Why we chose this]{colback=wbg,colframe=wfr,fonttitle=\bfseries,title={#1},breakable,before skip=8pt,after skip=8pt}
+\definecolor{wnbg}{RGB}{253,246,227}
+\definecolor{wnfr}{RGB}{176,120,20}
+\newtcolorbox{warnbox}[1]{colback=wnbg,colframe=wnfr,fonttitle=\bfseries,title={#1},breakable}
 \newcommand{\giveup}[1]{\par\smallskip\textit{What we give up:} #1}
 
 \newcommand{\dec}[1]{\textcolor{decg}{\textbf{[Decided #1]}}}
@@ -49,15 +53,15 @@
 \title{Methodology to Date\\[4pt]
 \large A regime-gated residual mixture of experts for the cross-section of US equity returns}
 \author{Tom Kores Lesjak\\ \small Master Thesis, SAIF / SJTU}
-\date{State of the design on 8 October 2026 (revised with motivations)}
+\date{State of the design on 9 October 2026}
 
 \begin{document}
 \maketitle
 \begin{abstract}
-\noindent This document records the methodology of the thesis as it stands on 8 October 2026: what the model
+\noindent This document records the methodology of the thesis as it stands on 9 October 2026: what the model
 is, what data it uses and how the data are prepared, what it predicts and over which horizon, how the
-regime gate works, how everything is trained and evaluated, what the compute budget allows, and what
-is implemented. Every design choice is labelled \dec{date} or \open{question}, with the question numbers of
+regime gate works, how everything is trained and evaluated, what the compute budget allows, what the pre-pilot diagnostics on 2000--2006 found, and
+what is implemented. Every design choice is labelled \dec{date} or \open{question}, with the question numbers of
 \texttt{Advisor\_Questions.md}, where the full reasoning lives. Each decision is followed by a blue
 box explaining \emph{why} it was made and what it costs: the alternative it beat and what was knowingly
 given up. The last sections list every open question
@@ -74,6 +78,7 @@ and the decision register.
 \input{s06_gate}
 \input{s07_training}
 \input{s08_evaluation}
+\input{s085_diagnostics}
 \input{s09_compute}
 \input{s10_status}
 \input{s11_open}

@@ -421,3 +421,144 @@ def test_the_primary_hypotheses_are_fixed(irs):
     with pytest.raises(ValueError, match="primary hypotheses are fixed"):
         irs.Settings(horizons=(1, 2, 3)).validate()
     assert len(irs.SIGNALS) == 18 and irs.SIGNALS[-2:] == ("ret_20d_ind_rel", "ind_mom_12_1")
+
+
+# --------------------------------------------------------------------------- #
+# Part C: sector regimes
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture(scope="module")
+def sec():
+    mod = _load("sector_regimes")
+    yield mod
+    sys.modules.pop("sector_regimes_script", None)
+
+
+def _sector_world(t_len=700, seed=13, episode=(300, 450), sectors=(10, 20, 45), per=8,
+                  thin_sector=None, start="2003-06-02"):
+    """Calm market, quiet sectors, and one sector-only stress episode in the
+    first sector; long rows as sector_rows makes them."""
+    rng = np.random.default_rng(seed)
+    days = pd.bdate_range(start, periods=t_len)
+    m = rng.normal(0.0, 0.008, t_len)
+    rows = []
+    for j, code in enumerate(sectors):
+        f_sd = np.full(t_len, 0.002)
+        if j == 0:
+            f_sd[episode[0]:episode[1]] = 0.02
+        f = rng.normal(0.0, f_sd)
+        names = per if code != thin_sector else 4
+        for i in range(names):
+            r = m + f + rng.normal(0.0, 0.004, t_len)
+            for t in range(1, t_len):
+                rows.append((days[t], f"{code}{i:02d}", code, r[t], 1.0 + i))
+    frame = pd.DataFrame(rows, columns=["date", "permno", "sector", "ret", "me_prev"])
+    return frame, pd.Series(np.log1p(m), index=days)
+
+
+def test_a_sector_only_stress_episode_is_found_in_the_relative_series_not_the_market(irs, sec):
+    rows, log_ret = _sector_world()
+    s = sec.Settings()
+    ret, _ = rs.sector_returns(rows, "value", s.min_sector_names)
+    dates = log_ret.index[1:]
+    relative = ret.reindex(dates).sub(log_ret.reindex(dates), axis=0)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        fits = sec.fit_sectors(relative, s)
+        market = irs.fit_market(log_ret, s.regime_settings())[2]
+    in_ep = np.zeros(len(dates), dtype=bool)
+    in_ep[299:449] = True  # days 300..449 of the calendar, one date shifted
+    p10 = fits[10].stress
+    assert p10[in_ep].mean() > 0.8 and p10[~in_ep].mean() < 0.1
+    pm = pd.Series(market.stress, index=list(market.labels)).loc[list(fits[10].labels)]
+    assert abs(pm[in_ep].mean() - pm[~in_ep].mean()) < 0.15  # the market did not see it
+    m = rs.sector_measures(fits[10], market, 0.5, 5)
+    assert m["stress_episodes"] >= 1
+    assert m["share_stressed_while_market_calm"] == pytest.approx(
+        ((p10 > 0.5) & (pm.to_numpy() <= 0.5)).mean())
+    assert m["corr_with_market_stress"] < 0.3
+
+
+def test_value_weights_use_the_previous_days_market_equity():
+    days = pd.bdate_range("2004-03-01", periods=4)
+    ret = pd.DataFrame({"A": [0.0, 0.10, 0.10, 0.0], "B": [0.0, 0.0, 0.0, 0.0]}, index=days)
+    cap = pd.DataFrame({"A": [1.0, 9.0, 9.0, 9.0], "B": [1.0, 1.0, 1.0, 1.0]}, index=days)
+    sector = pd.DataFrame(10.0, index=days, columns=["A", "B"])
+    universe = pd.DataFrame(True, index=days, columns=["A", "B"])
+    rows = rs.sector_rows(ret, cap, sector, universe)
+    assert rows["date"].min() == days[1]  # no previous day for the first date
+    out, counts = rs.sector_returns(rows, "value", 2)
+    # day 1: A's cap jumped to 9 that day, but the weights are day 0's (1:1)
+    assert out.loc[days[1], 10] == pytest.approx(np.log1p(0.05))
+    # day 2: day 1's caps, 9:1
+    assert out.loc[days[2], 10] == pytest.approx(np.log1p(0.09))
+    eq, _ = rs.sector_returns(rows, "equal", 2)
+    assert eq.loc[days[2], 10] == pytest.approx(np.log1p(0.05))
+    assert (counts[10] == 2).all()
+    # a non-member row is not in the sector
+    universe.loc[days[2], "B"] = False
+    solo, n = rs.sector_returns(rs.sector_rows(ret, cap, sector, universe), "value", 2)
+    assert np.isnan(solo.loc[days[2], 10]) and n.loc[days[2], 10] == 1
+
+
+def test_thin_sectors_are_skipped_and_reported(sec):
+    rows, log_ret = _sector_world(t_len=200, sectors=(10, 20), thin_sector=20)
+    ret, counts = rs.sector_returns(rows, "value", 5)
+    assert ret[20].isna().all() and ret[10].notna().all()
+    thin = rs.thin_sectors(counts, log_ret.index[1:], 5)
+    assert thin[10]["fitted"] and thin[10]["thin_dates"] == 0
+    assert not thin[20]["fitted"] and thin[20]["thin_dates"] == 199
+    assert thin[20]["median_names"] == 4.0
+    # sectors without a single name (Real Estate before 2016) are reported too
+    assert not thin[60]["fitted"] and thin[60]["median_names"] == 0.0
+    assert set(thin) == set(rs.SECTOR_NAMES)
+    with pytest.raises(ValueError, match="gap"):
+        sec.fit_sectors(ret.reindex(log_ret.index[1:]), sec.Settings())
+
+
+def test_stress_episodes_and_the_co_stress_matrix():
+    p = np.array([0.6, 0.7, 0.2, 0.8, 0.9, 0.8, 0.9, 0.8, 0.1, 0.6])
+    assert rs.stress_episodes(p, 0.5, 2) == 2
+    assert rs.stress_episodes(p, 0.5, 3) == 1
+    assert rs.stress_episodes(p, 0.5, 1) == 3  # the trailing one-day run counts
+    labels = tuple(str(d.date()) for d in pd.bdate_range("2005-01-03", periods=10))
+
+    def fit(stress):
+        f = np.column_stack([1 - stress, stress])
+        return rs.RegimeFit(2, labels, f, np.eye(2), np.zeros(2), np.ones(2), np.ones(2),
+                            0.0, "x", 1, 1, 0, (0.0,), ("converged",), 1)
+
+    co = rs.co_stress({10: fit(p), 20: fit(1 - p)}, 0.5)
+    assert co.loc[10, 10] == pytest.approx((p > 0.5).mean())
+    assert co.loc[10, 20] == co.loc[20, 10] == pytest.approx(((p > 0.5) & (1 - p > 0.5)).mean())
+
+
+def test_part_c_guard_and_outputs(sec, tmp_path):
+    with pytest.raises(ValueError, match="no override"):
+        sec.Settings(end="2007-01-01").validate()
+    rows, log_ret = _sector_world(t_len=500, episode=(200, 320), start="2004-11-01")
+    assert log_ret.index[-1] <= pd.Timestamp("2006-12-31")
+    late_rows = rows.assign(date=rows["date"] + pd.Timedelta(days=800))
+    late_rows = late_rows[late_rows["date"] > pd.Timestamp("2006-12-31")]
+    s = sec.Settings()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        report = sec.run_sectors(s, root=tmp_path, rows=pd.concat([rows, late_rows]),
+                                 log_ret=log_ret)
+    out = tmp_path / "results" / "diagnostics"
+    for name in ("sector_regimes_2000_2006.csv", "sector_regimes_2000_2006.json",
+                 "sector_regimes_2000_2006.png"):
+        assert (out / name).stat().st_size > 0
+    saved = json.loads((out / "sector_regimes_2000_2006.json").read_text(),
+                       parse_constant=lambda c: pytest.fail(f"non-JSON constant {c}"))
+    assert saved["caveat"] == rs.IN_SAMPLE_CAVEAT
+    assert saved["sector_dates"]["last"] <= "2006-12-31"
+    assert {k for k, t in saved["thin_sectors"].items() if t["fitted"]} == {"10", "20", "45"}
+    m = pd.DataFrame(saved["measures"])
+    assert len(m) == 3 * 2 * 2  # sectors x {relative, raw} x {value, equal}
+    assert set(m["series"]) == {"relative", "raw"} and set(m["weighting"]) == {"value", "equal"}
+    assert "permno" not in m.columns  # sector level only
+    co = saved["co_stress"]["value"]["relative"]
+    assert co["sectors"] == [10, 20, 45] and len(co["share_both_stressed"]) == 3
+    assert report["market_gate"]["k"] == 2

@@ -34,6 +34,17 @@ the probabilities are causal in the data they filter, not in the parameters.
   estimator's demeaning changes nothing; its ``T - 1`` divisor inflates the
   variance by ``T / (T - 1)``. One HAC implementation, as brief 11 asks;
 - the hypothesis families (:data:`PRIMARY_HYPOTHESES`), fixed before any run.
+
+**Part C, sector regimes** (a descriptive input to Q28). Each GICS sector's
+daily return is the value-weighted (previous day's market equity) mean of
+its members' simple returns over the date's universe rows, as a log return
+(:func:`sector_returns`, through :func:`nec_moe.characteristics._sector_mean`);
+a sector-date with fewer than ``min_sector_names`` names is skipped, and a
+sector with any skipped date is reported as too thin and not fitted (a
+Hamilton fit needs an unbroken daily series). Two series per sector, the
+sector-relative (sector minus the market) and the raw log return, each get a
+2-state gate; :func:`sector_measures` and :func:`co_stress` compare them
+with the market's.
 """
 
 from __future__ import annotations
@@ -49,6 +60,7 @@ import pandas as pd
 import torch
 
 from . import baum_welch as bw
+from .characteristics import _sector_mean
 from .config import MarkovGateConfig
 from .data import FeatureSchema, Panel
 from .decay import kish_ess
@@ -75,6 +87,13 @@ __all__ = [
     "PRIMARY_SPEC",
     "p_value",
     "contrast_size_simulation",
+    "SECTOR_NAMES",
+    "sector_rows",
+    "sector_returns",
+    "thin_sectors",
+    "stress_episodes",
+    "sector_measures",
+    "co_stress",
 ]
 
 #: Written into every output of brief 11 (A.4), and into the figure captions.
@@ -442,3 +461,118 @@ def contrast_size_simulation(
     return {c: rejects[c] / n_sims for c in HAC_CHOICES} | {
         "mean_contrast": float(np.mean(contrasts)), "sd_contrast": float(np.std(contrasts)),
         "n_sims": float(n_sims), "t_len": float(t_len), "h": float(h), "alpha": alpha}
+
+
+# --------------------------------------------------------------------------- #
+# Part C: do sectors have their own regimes?
+# --------------------------------------------------------------------------- #
+
+#: GICS sector codes and names (Real Estate, 60, was part of Financials until
+#: 2016; Communication Services, 50, was Telecommunication Services until 2018).
+SECTOR_NAMES: dict[int, str] = {
+    10: "Energy", 15: "Materials", 20: "Industrials", 25: "Consumer Discretionary",
+    30: "Consumer Staples", 35: "Health Care", 40: "Financials",
+    45: "Information Technology", 50: "Communication Services", 55: "Utilities",
+    60: "Real Estate",
+}
+
+
+def sector_rows(simple_ret: pd.DataFrame, cap: pd.DataFrame, sector: pd.DataFrame,
+                universe: pd.DataFrame) -> pd.DataFrame:
+    """Long rows ``(date, permno, sector, ret, me_prev)`` of the universe:
+    each member's simple return on date t and its market equity on the
+    **previous** trading day of the frame's calendar (dates x names frames,
+    one calendar). A row missing any of them is dropped."""
+    me_prev = cap.shift(1)
+    long = pd.DataFrame({
+        "ret": simple_ret.stack(future_stack=True),
+        "me_prev": me_prev.reindex_like(simple_ret).stack(future_stack=True),
+        "sector": sector.reindex_like(simple_ret).stack(future_stack=True),
+        "member": universe.reindex_like(simple_ret).fillna(False).astype(bool)
+        .stack(future_stack=True),
+    })
+    long = long[long["member"]].drop(columns="member").dropna()
+    long.index = long.index.set_names(["date", "permno"])
+    return long.reset_index()
+
+
+def sector_returns(rows: pd.DataFrame, weighting: str, min_names: int
+                   ) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """``(log returns, name counts)``, dates x sector codes: the
+    ``weighting`` ("value": previous day's market equity; "equal") mean of the
+    members' simple returns, as ``log(1 + mean)``. A sector-date with fewer
+    than ``min_names`` names is missing (skipped)."""
+    if weighting not in ("value", "equal"):
+        raise ValueError(f"weighting {weighting!r}: use 'value' or 'equal'")
+    w = rows["me_prev"] if weighting == "value" else pd.Series(1.0, index=rows.index)
+    mean = _sector_mean(rows["ret"], w, rows["date"], rows["sector"])
+    per = pd.DataFrame({"date": rows["date"], "sector": rows["sector"].astype(int),
+                        "mean": mean})
+    grouped = per.groupby(["date", "sector"])
+    ret = grouped["mean"].first().unstack("sector")
+    counts = grouped.size().unstack("sector").fillna(0).astype(int)
+    ret = np.log1p(ret.where(counts >= min_names))
+    return ret.sort_index(), counts.reindex(ret.index).sort_index()
+
+
+def thin_sectors(counts: pd.DataFrame, dates: pd.DatetimeIndex, min_names: int
+                 ) -> dict[int, dict[str, Any]]:
+    """Per GICS sector: dates below ``min_names`` (absent counts as 0), the
+    median and minimum name count, and whether the sector is gap-free (fitted)."""
+    full = counts.reindex(index=dates, columns=list(SECTOR_NAMES), fill_value=0).fillna(0)
+    return {
+        int(code): {
+            "name": SECTOR_NAMES[int(code)],
+            "thin_dates": int((full[code] < min_names).sum()),
+            "median_names": float(full[code].median()),
+            "min_names": int(full[code].min()),
+            "fitted": bool((full[code] >= min_names).all()),
+        }
+        for code in full.columns
+    }
+
+
+def stress_episodes(p: np.ndarray, threshold: float, min_days: int) -> int:
+    """Runs of consecutive days with ``p > threshold`` lasting at least
+    ``min_days``."""
+    above = np.asarray(p, dtype=float) > threshold
+    n, run = 0, 0
+    for flag in [*above.tolist(), False]:
+        if flag:
+            run += 1
+        else:
+            n += int(run >= min_days)
+            run = 0
+    return n
+
+
+def sector_measures(sector: RegimeFit, market: RegimeFit, threshold: float,
+                    min_episode_days: int) -> dict[str, Any]:
+    """C.4 for one sector series against the market's K = 2 gate, on their
+    common dates (filtered stress probabilities)."""
+    ps = pd.Series(sector.stress, index=list(sector.labels))
+    pm = pd.Series(market.stress, index=list(market.labels))
+    common = ps.index.intersection(pm.index)
+    s_on, m_on = ps.loc[common] > threshold, pm.loc[common] > threshold
+    calm = ~m_on
+    return {
+        "dates": int(len(common)),
+        "share_stressed": float(s_on.mean()),
+        "share_stressed_while_market_calm": float((s_on & calm).mean()),
+        "p_stress_given_market_calm": float(s_on[calm].mean()) if calm.any() else None,
+        "corr_with_market_stress": float(np.corrcoef(ps.loc[common], pm.loc[common])[0, 1]),
+        "expected_durations_days": sector.expected_durations.tolist(),
+        "sd_daily": np.sqrt(sector.variances).tolist(),
+        "stress_episodes": stress_episodes(sector.stress, threshold, min_episode_days),
+        "llf": sector.llf,
+        "n_converged": sector.n_converged,
+        "n_starts": sector.n_starts,
+    }
+
+
+def co_stress(fits: dict[int, RegimeFit], threshold: float) -> pd.DataFrame:
+    """Sectors x sectors: the share of common days both are stressed
+    (``p > threshold``); the diagonal is each sector's own share."""
+    on = pd.DataFrame({c: pd.Series(f.stress > threshold, index=list(f.labels))
+                       for c, f in fits.items()}).dropna().astype(float)
+    return (on.T @ on) / len(on)

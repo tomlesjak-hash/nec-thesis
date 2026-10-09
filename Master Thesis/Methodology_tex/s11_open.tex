@@ -1,0 +1,113 @@
+\section{Open questions}
+\label{sec:open}
+
+Grouped by topic. Each entry says what has to be decided and why it matters; the full discussion is in
+\texttt{Advisor\_Questions.md}.
+
+\subsection{Gate design}
+
+\begin{openbox}{Q28. How is the industry-level gate implemented?}
+Q1 fixed the direction (market regime combined with an industry regime, both frozen). Open: the form
+(factorial, coupled chains, sector-only, pooled chains), what the industry chain is fitted on
+(sector-relative or raw sector returns), granularity (11 sectors or finer), states per level, how each
+gate type gets an industry version, and identification against the industry inputs. Section~\ref{sec:industrygate}.
+\end{openbox}
+
+\begin{openbox}{Q29. A gate defined by factor returns?}
+A gate variant whose observation is the vector of daily factor returns (market, size, value, momentum),
+so regimes describe how the cross-section behaves. Open: a sixth gate type or an input to an existing
+one; which factors; built from the panel or French's factors; full or simplified covariance; how it
+relates to Q28.
+\end{openbox}
+
+\begin{openbox}{Q13. Should a recurrent gate be added?}
+A GRU router has memory without a regime process. Without such an arm, a win for regime gates over
+memoryless references cannot tell ``memory helps'' from ``regime structure helps''.
+\end{openbox}
+
+\subsection{Model size and structure}
+
+\begin{openbox}{Q18. How many regimes, $K$?}
+$K$ is an input to every gate and is held fixed across gates (no sweep). The data cap it: what counts
+is the number of regime episodes, not days, and an over-specified mixture is estimated far more slowly.
+With the industry-level gate it may become two numbers. Must be argued, not tuned.
+\end{openbox}
+
+\begin{openbox}{Q17. What can learning theory say about network size?}
+Classical VC bounds are vacuous at this scale (bounds of order 0.5 against an attainable $R^2$ of about
+0.004). Whether another strand (e.g.\ norm-based or PAC-Bayes bounds) gives a usable argument, or the
+size is set by the envelope and the pilot.
+\end{openbox}
+
+\begin{openbox}{Q8. Widths inside the envelope}
+Depths 1--3, first width at most 128, pyramid rule. Which first width, and how the capacity-matched
+baseline is sized.
+\end{openbox}
+
+\begin{openbox}{Q6 (design half) and Q14. The residual construction}
+Whether ``we chose the architecture that isolates the variable under study'' is enough justification
+for the residual design on a returns target; whether the experts are held to small corrections by a
+shrinkage penalty $\alpha$ (untested in the literature) or only by zero initialisation; the role of the
+five construction arms.
+\end{openbox}
+
+\subsection{Training and evaluation}
+
+\begin{openbox}{Q20. The error function}
+Mixture likelihood (current), squared or Huber error on the point forecast, or a rank/IC objective.
+Under a frozen gate the likelihood lets the realised target re-weight experts after the gate has
+assigned them; squared error does not. Also decides what the noise scales mean.
+\end{openbox}
+
+\begin{openbox}{Q12. Baselines}
+Which of: capacity-matched network, one-expert network, penalised linear model, gradient-boosted trees,
+no-gate mixture, jointly trained priors.
+\end{openbox}
+
+\begin{openbox}{Q9. Primary metric family}
+Forecast accuracy (rank IC, ICIR) or portfolio performance; they can disagree, so one must be primary,
+fixed in advance.
+\end{openbox}
+
+\begin{openbox}{Q15. Adaptive overfitting}
+The formal multiple-testing correction across the gate-by-depth grid and the pre-registration document.
+\end{openbox}
+
+\begin{openbox}{Q10. Is the frozen base really isolated?}
+Which diagnostics are reported as evidence that the correction term is regime-conditional and not
+relearned general signal, and whether a structural option is needed.
+\end{openbox}
+
+\begin{openbox}{Q16 (c). Leave-one-episode-out}
+Whether training without a crisis and testing on it is a headline result or a robustness check.
+\end{openbox}
+
+\subsection{Positioning}
+
+\begin{openbox}{Q5. Positioning against Ye \& Borde (2026)}
+Their RG-ResMoE has no regime model (its ``regime'' is two rolling volatilities fed to a learned gate)
+and predicts volatility, not returns. Adopting their architecture leaves the contribution in the gate.
+Open: whether adopting a very recent paper's architecture wholesale is acceptable, clearly attributed.
+\end{openbox}
+
+\subsection{Smaller open items}
+
+\begin{itemize}
+\item The long-short book's default scheme (non-overlapping or staggered).
+\item The hidden-layer initialisation of the experts (audit X-1).
+\item The experts' regime-clock decay as a mixture over regimes (default) or per expert.
+\item The post-delisting fill (``cash'' default, not a decision).
+\item Restated Compustat values: whether the ``prior to amendment'' keysets fix them.
+\end{itemize}
+
+\subsection{A suggested order}
+
+\begin{enumerate}
+\item \textbf{Q18 with Q28}: $K$ and the industry-gate form decide the number of experts and what gets
+  built next.
+\item \textbf{Q20}: the loss changes what every run optimises.
+\item \textbf{Q12 and Q9}: what results mean, fixed before any are seen.
+\item \textbf{Q8, Q6/Q14, Q17}: sizes and construction inside the envelope.
+\item \textbf{Q15}: pre-registration, after which the pilot is run.
+\item Q29, Q13, Q16 (c), Q5, Q10 alongside, as they do not block the pilot.
+\end{enumerate}

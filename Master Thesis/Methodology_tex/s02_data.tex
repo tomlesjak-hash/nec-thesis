@@ -1,0 +1,110 @@
+\section{Data}
+\label{sec:data}
+
+\subsection{Sources}
+
+\begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{5cm}X@{}}
+\toprule
+Source & What it provides \\
+\midrule
+CRSP daily stock file (CIZ format, release \texttt{ciz202512}) & daily returns including delisting
+returns, prices, open/high/low/close, closing bid and ask, volume, shares outstanding, market
+capitalisation, index membership spells, index returns \\
+CRSP/Compustat Merged (release \texttt{cfz202607}) & quarterly income statement, balance sheet and
+cash flow; report dates (RDQ) and filing dates; the dated GICS sector history; the link from
+Compustat firms (gvkey) to CRSP securities (PERMNO) \\
+\bottomrule
+\end{tabularx}
+
+\dec{2026-09-18 and 2026-09-26, Q3, brief 06} CRSP and Compustat through the university replace all free data
+(yfinance, Stooq, Wikipedia). Wind remains a possible China extension only.
+
+\begin{whybox}
+\begin{itemize}
+\item \textbf{Free data is survivorship-biased.} Free sources mostly cover firms that exist today; firms that
+  were delisted, merged or went bankrupt disappear, and they are exactly the firms with the worst returns.
+  A model trained on survivors learns a world that is too optimistic. CRSP keeps every security and its
+  delisting return.
+\item \textbf{Point-in-time membership.} CRSP records who was in the S\&P 500 on each day; Wikipedia's list is
+  today's list.
+\item \textbf{Fundamentals with dates.} Compustat records when each quarter's numbers were reported and filed,
+  which is what makes look-ahead-free fundamentals possible.
+\item \textbf{Comparability.} CRSP and Compustat are the standard data of the literature this thesis builds on
+  (Gu, Kelly \& Xiu; Jensen, Kelly \& Pedersen), so results can be set beside theirs.
+\end{itemize}
+\giveup{nothing material; the cost is licence discipline (no licensed data leave \texttt{Data/}).}
+\end{whybox}
+
+\subsection{Sample period}
+
+\dec{2026-10-05, Q16 (a)} \textbf{2000--2024} (previously 2015--2024). Feature history reaches further back (about
+1995, for the five-year windows); the \emph{sample} is what is trained and tested on.
+
+\begin{whybox}
+\begin{itemize}
+\item \textbf{The research question is about regimes, so the binding quantity is the number of stress
+  episodes, not the number of days.} 2015--2024 contains essentially one major crisis (COVID). 2000--2024
+  contains 2000--02, 2008--09, 2010, 2011, 2015--16, 2018, 2020 and 2022. A study about behaviour at
+  regime transitions cannot rest on one transition, and a stress expert cannot specialise if it has seen
+  almost no stress.
+\item \textbf{2000 is the earliest start with sector data}: Compustat's dated GICS history begins in mid-1999,
+  and the industry block and the industry-level gate need it.
+\item \textbf{A fairly homogeneous market structure.} Almost all of the sample is after decimalisation (2001),
+  so quoted spreads and short-horizon features mean roughly the same thing throughout.
+\end{itemize}
+\giveup{the pre-2000 episodes (1987, 1998); in exchange, every data source is consistent over the whole
+sample.}
+\end{whybox}
+
+\subsection{Universe}
+
+\dec{2026-09-26, brief 06} The \textbf{S\&P 500, point in time}, from CRSP membership spells of index 1000500
+(index 1000502 has no constituents), bounds inclusive: 502--508 members a day. Dual-class companies are
+kept as two securities.
+
+\begin{whybox}
+\begin{itemize}
+\item \textbf{Short-horizon signals must be tradeable to mean anything.} At a 5-day horizon, effects in
+  microcaps are often unimplementable after costs, and their returns are noisy and partly driven by
+  bid--ask bounce. Large caps keep the study close to what a fund could actually trade.
+\item \textbf{Clean data.} Quotes, open/high/low prices and fundamentals are essentially complete for S\&P 500
+  members, so missing-value handling plays a small role.
+\item \textbf{Point in time, so no survivorship.} A stock is in the universe exactly on the days it was in the
+  index.
+\item \textbf{The closest precedent uses large caps too}, which keeps the comparison meaningful.
+\end{itemize}
+\giveup{breadth. By the fundamental law of active management, performance grows with the square root of the
+number of independent bets, so 500 names offer less than 3,000; size and value spreads are also narrower
+inside the S\&P 500.}
+\end{whybox}
+
+\subsection{Returns and delistings}
+
+\begin{itemize}
+\item Daily log return $\log(1+\text{DlyRet})$.
+\item \dec{2026-09-26} \textbf{Delisting returns are already in CRSP's daily return} (checked on the data:
+  delisting days carry the delisting return), so they are not compounded in again.
+\item A forward window that runs past a delisting is completed by a post-delisting fill, default ``cash''
+  (zero return). This default is \textbf{not a decision} and is recorded on every run.
+\end{itemize}
+
+\begin{whybox}
+Leaving out delisting returns biases returns upward, because delistings for poor performance carry large
+negative final returns (Shumway 1997). Adding them a second time would bias them downward. Checking the data
+showed the CIZ daily return already contains them, so the right rule is to use it as is. Log returns are
+used because they add up across days (a 5-day return is the sum of five daily ones) and are closer to
+Gaussian, which suits the likelihood.
+\end{whybox}
+
+\subsection{Licence and integrity rules}
+
+CRSP and Compustat data, and anything derived per security, stay in \texttt{Data/}, outside version
+control; \texttt{results/} holds aggregate outputs only. No out-of-sample performance number on the real
+panel (any date from 2010, and the pilot's validation years) is computed by an assistant; pilot and
+scored runs are run by Tom, after pre-registration.
+
+\begin{whybox}
+The licence forbids redistribution, and a public repository is redistribution. The integrity rule exists
+because the comparison is between small effects: one look at test results that feeds back into a choice
+contaminates every later number.
+\end{whybox}

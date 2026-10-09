@@ -1,0 +1,175 @@
+\section{Overview}
+
+\subsection{The research question}
+
+Do structurally different \emph{regime processes}, used as the gate of a mixture of experts, change how
+well a model predicts which US stocks will outperform which over the next week? The thesis compares
+gates, not network architectures: the experts, the base network, the data and the training protocol
+are held fixed, and only the process that produces the regime weights varies across arms.
+
+\dec{2026-10-08, Q2 and Q4} The thesis is \textbf{comparison-led}: ``which regime mechanism makes the best
+gate''. No constructive element (such as a new differentiable gate) is added.
+
+\begin{whybox}
+\begin{itemize}
+\item \textbf{The mechanism itself is not new, the comparison is.} A novelty audit found that gated experts for
+  regime discovery go back to Weigend, Mangeas \& Srivastava (1995), that an HMM has been used as a
+  mixture-of-experts gate (2022), and that filtering-based gating on financial data is published (MoE-F,
+  ICLR 2025). What nobody has done is a \emph{controlled} comparison of structurally different regime
+  processes (Markov switching, jump models, distributional clustering, covariate-driven switching) as the
+  gate of the same model on the same data. That is a genuine gap, and it is the thesis.
+\item \textbf{A comparison is informative whichever gate wins.} A design-led thesis (``here is a new gate and it
+  beats the others'') succeeds only if the new gate wins. A comparison produces a result in every case,
+  including ``the regime process does not matter'', which is itself useful to practitioners who must pick
+  one.
+\item \textbf{It fits the time and compute available.} A new differentiable gate would need its own
+  derivation, implementation and validation on top of the comparison.
+\end{itemize}
+\giveup{a ``new method'' headline. Positioning against the closest precedent (Ye \& Borde) is still open
+(Q5).}
+\end{whybox}
+
+\subsection{The model in one line}
+
+For stock $i$ on date $t$, with characteristic vector $x_{i,t}$,
+\begin{equation}
+\hat y_{i,t} \;=\; \underbrace{f_0(x_{i,t})}_{\text{frozen base}} \;+\; \sum_{k=1}^{K}
+\underbrace{\pi_k(i,t)}_{\text{frozen gate}}\;\underbrace{r_k(x_{i,t})}_{\text{expert correction}} .
+\label{eq:model}
+\end{equation}
+
+\begin{itemize}
+\item $f_0$ is the \textbf{base}: a multilayer perceptron (MLP, a feed-forward neural network) trained
+  first, then frozen. It captures the regime-independent relation between characteristics and returns.
+\item $r_k$ are $K$ \textbf{experts}: small MLPs whose outputs start at zero and learn only
+  \emph{corrections} to the base (the residual design).
+\item $\pi_k(i,t)$ are the \textbf{gate weights}: probabilities of the regimes, produced by a regime model
+  fitted separately on market (and, now, industry) series and then frozen. Before 8 October the
+  weight was the same for every stock on a date; it is now partly stock-specific through the stock's
+  industry (Q1, Section~\ref{sec:industrygate}).
+\end{itemize}
+
+\subsection{Design principles and why}
+
+\paragraph{The gate is fitted separately and frozen.} \dec{2026-09-21, Q19} Every gate is fitted on its own
+data (the market series) before the experts are trained, and its weights are then fixed inputs.
+
+\begin{whybox}
+\begin{itemize}
+\item \textbf{We want to see how the market regime itself affects the cross-section of returns}, even though
+  training the gate together with the experts would give a better-optimised model. The question is
+  ``when the market is in state $k$, how does the relation between characteristics and returns change?''.
+  That question needs a regime that is defined by the market, not by what helps the loss.
+\item \textbf{Joint training would turn the gate into a learned router.} If the gate received gradients from
+  the experts' loss, it would move its boundaries to wherever they reduce prediction error, whether or not
+  those boundaries correspond to market states. Any improvement could then come from the extra capacity
+  and the freedom to place boundaries, not from the regime structure, and we could no longer attribute it.
+\item \textbf{It is what makes the gates comparable.} Under joint training every gate type would be reshaped
+  by the same gradient and the differences between them would wash out. Frozen, every arm receives a
+  regime assignment it cannot influence, and the only thing that differs across arms is the process that
+  produced it. That is a controlled experiment.
+\item \textbf{Two of the gates cannot be trained by backpropagation at all} (the jump model and Wasserstein
+  clustering are fitted by discrete optimisation). Joint training would favour the differentiable gates
+  for a reason unrelated to the question.
+\item \textbf{The regimes stay interpretable.} A frozen gate's regimes are calm and stressed market states that
+  can be checked against history (2008, 2020). A jointly trained gate's ``regimes'' have no fixed meaning.
+\end{itemize}
+\giveup{the best achievable fitted loss. Jointly trained routing does better on the training criterion
+(the DeepSeek mixture-of-experts work makes this point). We keep jointly trained gates as baseline arms,
+so the gap between a co-adapted partition and the frozen ones is reported, not hidden.}
+\end{whybox}
+
+\paragraph{The base is pre-trained and frozen.} \dec{2026-09-21, Q7}
+
+\begin{whybox}
+\begin{itemize}
+\item \textbf{Same logic as the gate.} We measure what regime-conditional corrections add to a fixed
+  baseline. If the base kept learning during expert training it could reorganise itself around the
+  mixture, and part of any gain would be the base improving, not the regimes helping.
+\item \textbf{It defines the headline number.} The thesis reports the \emph{improvement over the base}. That
+  number only means something if the base is the same object in every arm.
+\item \textbf{It is shared across all gates.} The base never sees regime information, so one base per fold and
+  seed serves every gate arm: a large compute saving, and a guarantee that every gate is compared on top
+  of an identical foundation.
+\end{itemize}
+\giveup{the configuration likely to fit best (base and experts trained together, as in DeepSeekMoE's
+shared expert). It is kept as construction arm B, so its effect is still measured.}
+\end{whybox}
+
+\paragraph{Residual mixture.} The experts correct a base instead of each producing a full forecast.
+
+\begin{whybox}
+\begin{itemize}
+\item \textbf{It isolates the gate's contribution in one term}, $\sum_k\pi_k r_k$, which can be measured,
+  plotted through time, and tested for concentration at regime transitions. In a standard mixture the
+  gate's effect is tangled up with each expert's full forecast.
+\item \textbf{The signal is weak.} Predictable variation in weekly returns is a fraction of a percent of
+  their variance. Learning a small correction to an already good forecaster is a much easier problem, with
+  less estimation noise, than learning $K$ full forecasters from scratch.
+\item \textbf{Evidence from the closest precedent} (Ye \& Borde): a frozen base with zero-initialised experts
+  was more accurate and far more stable than a standard mixture (0 of 30 seeds collapsed against 24 of 30).
+  Their stability measure is volatility-specific, so the transfer to returns is checked, not assumed
+  (Q6).
+\end{itemize}
+\giveup{experts cannot replace the base forecast entirely in a regime where the base is badly wrong; they
+can only move it.}
+\end{whybox}
+
+\paragraph{Report the full mechanism-by-depth grid.} \dec{2026-09-19, Q11}
+
+\begin{whybox}
+Which expert depth is best may depend on the gate: a sharp gate gives each expert fewer effective
+observations and favours smaller experts, a diffuse gate the opposite. Fixing one depth for all gates could
+handicap some; tuning depth per gate would break the control. Reporting the whole grid contains the
+fixed-depth comparison as one column and shows the interaction instead of hiding it. If the ranking of
+gates is the same at every depth, the conclusion is robust; if it changes, that is a finding.
+\giveup{compute (one full comparison per depth) and a larger multiple-testing burden (Q15).}
+\end{whybox}
+
+\paragraph{No width sweep and no sweep over $K$.} \dec{2026-09-18, advisor meeting}
+
+\begin{whybox}
+The advisor's point was scope: everything as first written was impossible, and some choices must be
+made by argument. Widths follow a pyramid rule from one first width, since the first layer carries most of
+the parameters anyway. $K$ is fixed by argument and held across all gates, because a sweep over $K$
+multiplies cost and multiple testing, and because the data, not a search, limit how many regimes can be
+estimated (Q18).
+\giveup{the chance that a different width or $K$ would favour some gate; this is acknowledged, not tested.}
+\end{whybox}
+
+\paragraph{Research integrity.} No out-of-sample number on the real panel is computed before the design
+is pre-registered; licensed data never leave \texttt{Data/}.
+
+\begin{whybox}
+The effects studied are small, and the design has many arms. If test results could influence choices,
+selection noise could exceed the true differences between gates (Q15). Fixing everything on pre-2010 data
+and writing it down before scoring is the only reliable protection.
+\end{whybox}
+
+\subsection{The pipeline at a glance}
+
+\begin{center}
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[node distance=5mm and 6mm, box/.style={draw,rounded corners,align=center,
+  minimum width=27mm,minimum height=9mm,font=\small}, >=Latex]
+\node[box,fill=gray!10] (crsp) {CRSP daily\\(prices, quotes,\\membership)};
+\node[box,fill=gray!10,below=of crsp] (comp) {Compustat\\(fundamentals,\\GICS, link)};
+\node[box,right=12mm of crsp,yshift=-7mm] (panel) {Point-in-time\\panel: 57 ranked\\inputs, target};
+\node[box,above=of panel] (mkt) {Market index\\daily log return};
+\node[box,right=of panel] (base) {Base $f_0$\\(MLP, frozen)};
+\node[box,right=of mkt] (gate) {Gate: market \&\\industry regimes\\(frozen)};
+\node[box,right=of base,yshift=7mm] (exp) {Experts $r_k$\\(trained)};
+\node[box,right=of exp] (eval) {Walk-forward\\evaluation};
+\draw[->] (crsp) -- (panel); \draw[->] (comp) -- (panel);
+\draw[->] (crsp.north) |- (mkt);
+\draw[->] (panel) -- (base); \draw[->] (mkt) -- (gate);
+\draw[->] (base) -- (exp); \draw[->] (gate) -| (exp);
+\draw[->] (panel.south) -- ++(0,-6mm) -| (exp.south);
+\draw[->] (exp) -- (eval);
+\end{tikzpicture}}
+\end{center}
+
+Order of work set by the advisor (18 September): data, then compute budget, then parameters; start
+experimenting with the base and a generic loss before refining the loss. The reason: the architecture
+choices can only be settled once the compute budget is calculated rather than guessed, and the budget
+depends on the data.

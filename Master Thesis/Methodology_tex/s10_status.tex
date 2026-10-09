@@ -1,0 +1,51 @@
+\section{Implementation status}
+\label{sec:status}
+
+The code lives in \texttt{nec\_baseline} (package \texttt{nec\_moe}). Each block of decisions is turned into
+a written code brief and implemented by Claude Code, with tests pinning every claim.
+
+{\small
+\begin{tabularx}{\textwidth}{@{}l X l@{}}
+\toprule
+Brief & Content & Status\\
+\midrule
+02 & Residual design: frozen base, zero-initialised experts, loss registry seam & done\\
+03 & Gate interface (fit on the training block, apply causally) and the Hamilton gate & done\\
+04 & Objective, multi-start fits, smoke runs & done\\
+05 & Full code audit; critical findings fixed and pinned by tests & done\\
+06 & CRSP data layer, S\&P 500 universe, delisting rule, provenance on every run & done\\
+07 & Fixes, run store, exact resume, autoregressive Hamilton gate & done\\
+08 & Market-neutral target, the 57-input feature set, point-in-time Compustat, GICS, window-average gate weight & done\\
+09 & Sample 2000--2024, calendar-year folds, decay weights, native and weighted Baum--Welch, pilot runner,
+parallel campaign runner, real-pipeline timing & done (commits f76f6eb--0e515eb)\\
+10 & Gate filter through the purge gap (Q22), CRSP index as the gate series (Q23), IC decay script & written, to run\\
+\bottomrule
+\end{tabularx}}
+
+\subsection{What exists and what does not}
+
+\begin{itemize}
+\item \textbf{Built}: the 2000--2024 extracts and the point-in-time panel; feature coverage reports; the
+  Hamilton and autoregressive Hamilton gates with the window-average weight and regime-clock memory;
+  base and experts with decay weights; the per-row mixture likelihood; walk-forward evaluation with
+  purge, Hansen--Hodrick statistics, the three NLLs and the long-short book; the pilot and campaign
+  runners; the run store with exact resume.
+\item \textbf{Not yet built}: the jump, Wasserstein and TVTP gates; the industry-level gate (waits on Q28);
+  the diagnostics of Section~\ref{sec:evaluation} (decomposition, permutation test); the baselines beyond
+  the existing priors (waits on Q12); the pre-registration document.
+\item \textbf{Not yet run}: the pilot (run by Tom after review) and therefore every scored result.
+\end{itemize}
+
+\subsection{Documents}
+
+\begin{itemize}
+\item \texttt{Advisor\_Questions.md}: every question, open and resolved, with full reasoning.
+\item \texttt{Progress\_Tracker.md}: current state, decision register, compute budget, log.
+\item \texttt{MoE\_HMM\_Gate\_Formulation.pdf}: the mathematics (gate, EM, per-row likelihood, gate weight).
+\item \texttt{Model\_Derivation\_BaseCase.md}: the base-case derivation.
+\item \texttt{Training\_Window\_and\_Weighting\_Theory.md}: theory of the training window and weights.
+\item \texttt{Improvements\_and\_Extensions.md}: future work (E1 one-day forecasting; E2 the MoE as a
+  stacking meta-model over machine-learning alphas).
+\end{itemize}
+The formulation PDF and the derivation still describe one shared gate weight per date; they will get a
+section on the industry-level gate once Q28 is settled.

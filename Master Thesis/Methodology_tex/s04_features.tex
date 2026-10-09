@@ -1,0 +1,200 @@
+\section{Inputs: the characteristics and how they are prepared}
+\label{sec:features}
+
+\dec{2026-10-05, Q26} 40 characteristics and 57 model inputs, in four blocks. Implemented as
+\texttt{feature\_set="q26"}; the old 14 price features survive only as \texttt{"legacy14"}.
+
+\subsection{The selection rule}
+
+\textbf{Exactly two representatives per theme} of Jensen, Kelly \& Pedersen (2023, ``JKP''), who cluster 153
+published characteristics into 13 themes. Representatives were chosen to be robust in large caps, well
+documented, computable from CRSP and Compustat, and not near-copies of each other. PCA on training data is
+used only as a redundancy diagnostic.
+
+\begin{whybox}
+\begin{itemize}
+\item \textbf{A rule, fixed before any result, instead of a search.} Picking features by how well they
+  predict would be selection on outcomes. A rule stated in advance cannot be tuned to the data.
+\item \textbf{Fewer, well-chosen inputs suit a weak signal and 500 stocks.} Hundreds of characteristics raise
+  estimation variance and give the experts more room to relearn general signal (the identification risk of
+  Q10). Two per theme covers every documented source of return predictability with about 40 inputs.
+\item \textbf{Two, not one, per theme}: one representative can be noisy or fail in a subperiod; two let the
+  network combine them, while the fixed count keeps themes balanced so no theme dominates by sheer number
+  of inputs.
+\item \textbf{Why not PCA as the selector}: principal components mix themes into uninterpretable
+  combinations, change from fold to fold, and would have to be re-estimated inside each training block. As a
+  diagnostic it still shows whether two representatives are redundant.
+\end{itemize}
+\end{whybox}
+
+\subsection{Block A: JKP themes (26 characteristics)}
+
+{\small
+\begin{tabularx}{\textwidth}{@{}l X X l@{}}
+\toprule
+Theme & Representative 1 & Representative 2 & Data\\
+\midrule
+Short-term reversal & 5-day return & 20-day return & CRSP\\
+Momentum & 12-month return skipping the last month & price / 52-week high & CRSP\\
+Low risk & 21-day volatility & beta (Frazzini--Pedersen) & CRSP\\
+Size & log market cap & Amihud illiquidity, 126 days & CRSP\\
+Seasonality & same-calendar-month return, years 2--5 back & coskewness with the market, 21 days & CRSP\\
+Value & book-to-market & earnings-to-price & both\\
+Profitability & quarterly ROE & operating cash flow / assets & Compustat\\
+Quality & gross profitability / assets & earnings consistency & Compustat\\
+Investment & asset growth & sales growth & Compustat\\
+Accruals & operating accruals & total accruals & Compustat\\
+Debt issuance & 3-year debt growth & net operating assets / assets & Compustat\\
+Low leverage & net debt / market cap & cash / assets & both\\
+Profit growth & standardised unexpected earnings (SUE) & revenue surprise & Compustat\\
+\bottomrule
+\end{tabularx}}
+
+\subsection{Block B: short-horizon market themes (12 characteristics)}
+
+{\small
+\begin{tabularx}{\textwidth}{@{}l X X@{}}
+\toprule
+Theme & Representative 1 & Representative 2\\
+\midrule
+Volatility dynamics & idiosyncratic volatility, 21 days & volatility shock: 5-day / 60-day volatility\\
+Tails and asymmetry & realised skewness, 21 days & maximum daily return, 21 days\\
+Volume and liquidity & abnormal volume (today vs trailing average) & quoted spread, 21-day average\\
+Price path & overnight (close-to-open) return, 20 days & price / 50-day moving average\\
+Earnings timing & announcement expected in the next 5 days (0/1) & trading days since last announcement\\
+Return dynamics & variance ratio, 5-day vs 1-day, 60 days & return--volume correlation, 60 days\\
+\bottomrule
+\end{tabularx}}
+
+\begin{whybox}[Why a short-horizon block]
+The JKP themes come from the \emph{monthly} anomaly literature, and 8 of 13 are accounting-based.
+Fundamentals barely change from week to week, while the signals known to predict weekly returns are
+market-based: price trends, liquidity and volatility dominate the feature importance of Gu, Kelly \& Xiu.
+Applying the same two-per-theme rule to six short-horizon themes, each with evidence at a daily or weekly
+horizon, matches the inputs to the target's horizon without abandoning the rule. Several were also
+confirmed in Tom's own Trexquant work (volatility term structure, the overnight/intraday split, days to
+earnings, volume relative to its own average). Levels are expressed as surprises against the stock's own
+history (volume, volatility) because a raw level mostly acts as a static tilt.
+\end{whybox}
+
+\subsection{Block C: industry (17 inputs) and Block D: flags (2)}
+
+\begin{itemize}
+\item 11 \textbf{GICS sector dummies} (0/1); \dec{2026-10-05} GICS from Compustat.
+\item \textbf{Industry momentum} (the sector's 12-month return skipping the last month; Moskowitz \&
+  Grinblatt 1999) and \textbf{within-industry reversal} (the stock's 20-day return minus its sector's).
+\item 4 \textbf{within-sector ranks}: book-to-market, earnings-to-price, quarterly ROE, operating cash
+  flow / assets.
+\item 2 \textbf{missing-data flags}: one for price/volume inputs, one for fundamentals.
+\end{itemize}
+Total: $26+12+11+2+4+2=57$ inputs.
+
+\begin{whybox}
+\begin{itemize}
+\item \textbf{Industries differ in what ``cheap'' or ``profitable'' means.} A bank's book-to-market is not
+  comparable with a software firm's. A universe-wide rank of such ratios partly just sorts industries;
+  ranking within the sector compares a firm with its peers.
+\item \textbf{Sector dummies} let the experts learn sector-specific shifts, which matters more now that the gate
+  has an industry level.
+\item \textbf{Industry momentum} is a documented, separate source of predictability. \textbf{Within-industry
+  reversal} separates a stock's own overreaction from news that moved its whole industry, which is the
+  part of short-term reversal most associated with liquidity provision.
+\item \textbf{GICS, not ICB}: CRSP stops filling ICB for S\&P 500 members in October 2023, and Compustat's
+  GICS history is dated, so each stock gets the sector it had \emph{at the time}, not today's.
+\end{itemize}
+\end{whybox}
+
+\subsection{Scaling: ranks mapped to $[-1,1]$}
+
+\dec{2026-10-05, Q26 part 2} On each date each characteristic is ranked across the universe (ties get the
+average rank) and mapped linearly:
+\begin{equation}
+x_{i,t} = \frac{2\,(\mathrm{rank}_{i,t}-1)}{N_t-1}-1 \in [-1,1].
+\end{equation}
+Dummies and flags are not ranked.
+
+\begin{whybox}
+\begin{itemize}
+\item \textbf{Robust to outliers and scale.} Characteristics like illiquidity or accruals have extreme tails
+  that destabilise neural network training; ranks remove them.
+\item \textbf{Comparable over time.} A book-to-market of 0.5 means different things in 2000 and 2021; being in
+  the top decile means the same thing.
+\item \textbf{Only cross-sectional information survives}, which is exactly what the market-neutral target
+  measures. This is the convention of Gu, Kelly \& Xiu.
+\item \textbf{$[-1,1]$ rather than $[-0.5,0.5]$}: input variance $1/3$ instead of $1/12$, closer to the unit
+  variance that standard weight initialisations assume, so the first layer starts in a sensible range.
+\end{itemize}
+\giveup{the information in absolute levels and in how far apart stocks are, which ranking discards.}
+\end{whybox}
+
+\subsection{Missing values: causal handling}
+
+\dec{2026-10-05, Q26 part 3}
+\begin{enumerate}
+\item Price/volume windows need at least 80\% of their days present.
+\item Fundamentals carry the firm's last point-in-time value forward for at most 12 months.
+\item Anything still missing is set to 0 after ranking (the median) and the family's flag is set to 1.
+\item Rows are no longer dropped for a missing characteristic.
+\end{enumerate}
+
+\begin{whybox}
+\begin{itemize}
+\item \textbf{Never use the future.} Interpolation fills a gap with a later value, which is look-ahead.
+  Every rule here uses only data available at $t$.
+\item \textbf{Keep every stock.} At forecast time every stock in the universe needs a forecast. A training rule
+  that drops incomplete rows trains on a different population from the one it is used on, and missingness
+  is not random (new listings, distressed firms).
+\item \textbf{Carrying fundamentals forward is barely an imputation}: between two reports the latest filing is
+  exactly what the market knows. The 12-month cap stops a stale value standing in for a firm that stopped
+  reporting.
+\item \textbf{80\% windows}: an average over 16 of 20 days estimates the same quantity with little extra noise;
+  requiring all 20 would discard many stock-days around trading halts.
+\item \textbf{Zero plus a flag}: in rank space zero is the median, the neutral ``no information'' value, and
+  the flag lets the model learn a separate shift for stocks with missing data instead of the fill
+  distorting the feature.
+\end{itemize}
+Four Compustat items (IVAOQ, IVSTQ, MIBQ, PSTKQ) count as 0 when blank in total accruals and net operating
+assets: blank there usually means ``none'', and the strict rule left those features on only about 5\% of
+rows (79\% after the change).
+\end{whybox}
+
+\subsection{Point-in-time fundamentals}
+
+\dec{2026-10-05, Q26 part 5} A quarter's numbers become usable \textbf{one trading day after the later of its
+report date and its filing date}; surprises (SUE, revenue surprise) are dated by the report date; flows are
+trailing four-quarter sums; market values come from CRSP on day $t$.
+
+\begin{whybox}
+\begin{itemize}
+\item \textbf{The quarter end is not when investors learn the numbers.} Firms report weeks later, and some items
+  appear only in the filing. Using the quarter end plus a fixed lag either leaks information (lag too short)
+  or wastes it (too long). Report and filing dates say exactly when the numbers became public.
+\item \textbf{One trading day after}, because many announcements come after the close; this removes any
+  ambiguity about whether the close of the announcement day could have reacted.
+\item \textbf{Surprises by the report date}, because the announcement is the event the market reacts to.
+\item \textbf{Trailing four-quarter sums} remove seasonality from flows such as earnings and cash flow.
+\end{itemize}
+\giveup{restatements: standard Compustat values may be revised after first release (a known limitation).}
+\end{whybox}
+
+Every characteristic has a no-look-ahead test: its value at $t$ computed from data truncated at $t$ equals
+its value from the full data.
+
+\subsection{What is deliberately not an input}
+
+\begin{itemize}
+\item \textbf{Market-wide series} (VIX, rates, FOMC dates, macro data, the market return): identical across
+  stocks on a date, so ranking removes them. They belong in the gate. This is also what the closest
+  precedent found on its volatility target: appending regime variables to the input made 30 of 30 seeds
+  collapse, while feeding them through the gate made none collapse.
+\item \textbf{Intraday data, trade counts} (28\% coverage), analyst estimates, options, news: not in the data.
+\item Near-copies of included features (position in the 20-day range, high/low ratio, up/down volatility
+  ratio).
+\end{itemize}
+
+\begin{keybox}{Scoping future alphas}
+A new input must be one number per stock per day, known by the close of $t$, varying across stocks; only
+its ordering matters. Signals that pay off over 1--10 days fit best. A machine-learning alpha must be
+trained inside the same walk-forward folds on out-of-sample predictions only (Improvements item E2).
+Inputs added after seeing test results are a forking-paths problem.
+\end{keybox}

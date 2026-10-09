@@ -1,0 +1,144 @@
+\section{The model: base, experts and likelihood}
+\label{sec:model}
+
+\subsection{Why multilayer perceptrons on a characteristic snapshot}
+
+Each input is a point-in-time vector of characteristics for one stock-day, with no time axis. Base and
+experts are MLPs on that vector.
+
+\begin{whybox}
+\begin{itemize}
+\item \textbf{The input format decides the architecture.} Finance mixture-of-experts papers split into those
+  using characteristic snapshots (small MLPs: Gu, Kelly \& Xiu, Ye \& Borde) and those using raw price
+  sequences (recurrent or transformer experts). The characteristics already summarise each stock's history
+  (momentum, volatility, reversal), so a snapshot model is the natural choice.
+\item \textbf{Sequence experts would compete with the gate.} An expert with its own memory of recent market
+  history could learn the market state itself and absorb exactly the differences between gates the thesis
+  tries to measure.
+\item \textbf{Benchmark class and feasibility.} Gu, Kelly \& Xiu establish feed-forward networks as the
+  benchmark for this problem, and find shallow networks suffice because the signal is weak. Small MLPs make
+  thousands of runs feasible on a laptop.
+\end{itemize}
+\giveup{the possibility that a sequence model finds patterns the characteristics miss.}
+\end{whybox}
+
+\subsection{The base network}
+
+\dec{2026-09-21, Q7} The base $f_0$ is an MLP trained on the training block, then frozen (motivation in
+Section~1.3). Its own out-of-sample performance is reported beside every result, the headline quantity is
+the \emph{improvement over the base}, and its training protocol is fixed in advance.
+
+\begin{whybox}[Why the base protocol is fixed in advance]
+An undertrained base leaves general signal for the experts to pick up and makes them look good; an
+overtrained one leaves nothing and makes them look useless. Because the base is shared across gates this
+does not bias the comparison \emph{between} gates, but it does set the ``does the residual help'' number,
+so it must not be tuned after seeing expert results. A null result is possible (the base may capture
+most of a weak signal), and how it is reported is decided before results are seen.
+\end{whybox}
+
+\subsection{The experts}
+
+Each expert $r_k$ is an MLP on the same 57 inputs, with a \textbf{zero-initialised output layer}, a learned
+\textbf{noise scale} $s_k$, and \textbf{pyramid widths} (first hidden width $w$, each further layer half the
+previous).
+
+\begin{whybox}
+\begin{itemize}
+\item \textbf{Same inputs as the base}: an expert must be able to express a regime-specific version of the
+  same characteristic-return relation (for example ``reversal is stronger in stress''), so it needs the
+  same characteristics.
+\item \textbf{Zero initialisation}: the model starts exactly at the base and moves away only where the data
+  justify it. It is tested in the closest precedent: random initialisation lost accuracy and made 13 of
+  30 seeds collapse.
+\item \textbf{A noise scale per expert}: return dispersion is higher in stress, so each regime's expert should be
+  allowed its own uncertainty. This is also what the NLL's variance gain measures.
+\item \textbf{Pyramid widths}: the convention of Gu, Kelly \& Xiu (e.g.\ 32--16--8). It reduces the width
+  choice to one number, which is what makes ``no width sweep'' workable.
+\end{itemize}
+\end{whybox}
+
+Open details: \open{Q14} whether a shrinkage penalty on the aggregate correction is used (weight
+$\alpha$; zero initialisation is tested in the literature, the penalty is not); \open{audit X-1} the
+hidden-layer initialisation; \open{Q8} the first width inside the envelope. The load-balancing penalty used
+with trained gates is \textbf{inert} under a frozen gate (its gradient is exactly zero), so it is removed or
+documented as such.
+
+\subsection{Depth, width and number of experts}
+
+\dec{2026-09-19, Q11} the full gate-by-expert-depth grid; \dec{2026-10-05} the envelope: depths
+\textbf{1--3}, first width \textbf{at most 128}, $K$ \textbf{at most 4}; base depth swept standalone.
+
+\begin{whybox}
+\begin{itemize}
+\item \textbf{Depths 1--3}: Gu, Kelly \& Xiu find performance peaks at three or four layers and their own
+  tests cannot separate any pair of depths; deeper adds cost without evidence of benefit. Depths 4--5
+  with width 256 would take about a month of laptop time, the only corner compute rules out.
+\item \textbf{Base depth standalone}: the base is trained before any gate exists, so its best depth cannot
+  depend on a gate, and sweeping it is a clean replication of Gu, Kelly \& Xiu on this panel.
+\item \textbf{$K\le4$}: the data cap the number of regimes (next item), and the closest precedent found
+  $K=2$ about as good as $K=4$ and $K=6$ worse and less stable.
+\end{itemize}
+\end{whybox}
+
+\open{Q18} \textbf{$K$}, the number of regimes, is an input to every gate, not an output, and the usable
+count is regime \emph{episodes}, not days; over-specifying a mixture slows estimation dramatically
+(Heinrich \& Kahn 2018). With the industry-level gate it may become two numbers (Q28). \open{Q17} what
+learning theory can say about network size.
+
+\subsection{The likelihood the experts are trained on}
+
+Each expert defines a Gaussian component centred on the base plus its correction:
+\begin{equation}
+p(y_{i,t}\mid x_{i,t}) \;=\; \sum_{k=1}^{K}\pi_k(i,t)\,\N\!\big(y_{i,t};\,f_0(x_{i,t})+r_k(x_{i,t}),\,s_k^2\big).
+\end{equation}
+\dec{2026-10-05, Q24} The objective is the \textbf{per-row} likelihood, one log-sum-exp per stock-day,
+\begin{equation}
+\ell(\psi) \;=\; \sum_{t}\sum_{i\in\mathcal S_t} w_{i,t}\,\log\sum_{k}\pi_k(i,t)\,
+\N\!\big(y_{i,t};\,f_0+r_k,\,s_k^2\big),
+\end{equation}
+with sample weights $w_{i,t}$ (Section~\ref{sec:weights}), read as the \textbf{composite (independence)
+likelihood} of the per-date model in which all stocks on a date share one regime.
+
+\begin{whybox}
+\begin{itemize}
+\item \textbf{The alternative is the per-date likelihood}, where the product over all of about 500 stocks sits inside the
+  sum over regimes. It is the ``literal'' model, but it treats 500 correlated returns as independent
+  evidence about the regime, so the realised cross-section can overrule the gate almost completely; in
+  simulation it becomes distorted whenever regimes are close.
+\item \textbf{The per-row form is consistent}: each term is the exact one-stock marginal of the per-date model,
+  so its score has mean zero and the estimates converge to the right values even though cross-stock
+  dependence is ignored (composite likelihood theory; Varin, Reid \& Firth 2011).
+\item \textbf{It is robust} when the independence assumption fails, which for stock returns it partly does.
+\item \textbf{It keeps the gate in charge}, which is the point of freezing it.
+\item \textbf{Inference does not rely on it}: significance comes from walk-forward rank ICs with
+  overlap-corrected standard errors, so its understated standard errors do no harm.
+\end{itemize}
+With the industry-level gate the latent is per industry and date, and the per-row form is closer to exact.
+\giveup{statistical efficiency (the full joint likelihood would use the dependence between stocks if it
+were correctly specified).}
+\end{whybox}
+
+\open{Q20} Whether the mixture likelihood stays the training objective at all, against squared or Huber
+error on the point forecast or a rank/IC objective. Under the likelihood each expert's gradient is
+weighted by its posterior responsibility, which depends on the realised target, so the outcome partly
+re-assigns experts after the frozen gate has assigned them; under squared error the gate's weight alone
+decides.
+
+\subsection{The point forecast and the NLL}
+
+The forecast used for ranking and portfolios is the mixture mean, equation~\eqref{eq:model}. The NLL is
+reported three ways (\texttt{NLL\_single}, \texttt{NLL\_base}, \texttt{NLL\_full}), with the
+volatility-only gain next to the correction gain, so that a gain from the experts' different noise
+scales is never mistaken for better return forecasts.
+
+\subsection{Planned construction arms}
+
+A construction pilot (one gate held fixed) with five arms: (A) standard MoE, joint training; (B) residual
+MoE with the base pre-trained and then unfrozen; (C) residual MoE, frozen base (the design); (D) C with
+randomly initialised experts; (E) C with $\alpha=0$. \open{Q6 design half, Q14}
+
+\begin{whybox}[Why run them]
+They test the construction instead of assuming it. A versus C checks that the residual advantage found
+for volatility survives on returns; B versus C isolates the effect of freezing the base, the one cell
+the literature has not tested; D and E separate zero initialisation from the shrinkage penalty.
+\end{whybox}

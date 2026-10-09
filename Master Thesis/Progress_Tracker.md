@@ -23,7 +23,7 @@ detail stays in the source documents; this file points to them.
 | Target | **Market-neutral return** (`fwd_mn_ret_5d`): the forward return minus the date's equal-weighted cross-sectional mean over the stocks with a valid target. Reporting market-neutral throughout | **Decided 2026-10-01**; implemented, now the default (brief 08 A, 7bb3a4d) | Q25 |
 | Features | Three families: price/volume (CRSP), fundamentals (Compustat via CCM, point-in-time), industry (GICS, Compustat; ICB dropped because CRSP's ICB stops in Oct 2023). Rule: exactly two representatives per JKP theme (13 themes, 26 characteristics), plus a short-horizon market block (6 themes × 2), 11 sector dummies, industry momentum, within-industry reversal and 4 within-sector fundamentals: 40 characteristics (22 market, 18 fundamental), 57 inputs. Rank to [-1, 1]. Missing: minimum-count windows, fundamentals carried forward (12-month cap), then 0 plus a flag per family; rows no longer dropped. The legacy 14-feature set is kept only as `feature_set="legacy14"` | **Decided 2026-10-05**; implemented (brief 08 C, D: 488baad, 0633379; real-data fixes be77fb7, 5524da1); first coverage report run | Q26 |
 | Base | MLP, trained on the training block, then frozen | Decided, implemented | Q7; brief 02 |
-| Gate | **Partly stock-specific at the industry level (Q1, decided 2026-10-08): market regime combined with an industry-level regime; implementation open (Q28), not implemented.** Market regime model fitted separately, then frozen, on the CRSP value-weighted S&P 500 index's daily log return (Q23); the filter runs through the purge gap (Q22); gate weight is the **average over the 5-day target window of the h-step-ahead regime probabilities** (built from the filtered probability and A; never the smoothed one); implemented as `gate_weight="window"` (brief 08 B, 3f1fac5). Memory: regime-clock forgetting, decided, not implemented | Decided. Hamilton implemented, the autoregressive variant too (brief 07, G-2); jump, Wasserstein and TVTP to come. The backprop-HMM baseline now runs on the point-in-time panel (state keyed by stock, M-5) | Q19, Q27; briefs 03, 04 B, 07 |
+| Gate | **Partly stock-specific at the industry level (Q1, decided 2026-10-08): market regime combined with an industry-level regime; implementation open (Q28), not implemented.** Market regime model fitted separately, then frozen, on the CRSP value-weighted S&P 500 index's daily log return (Q23); the filter runs through the purge gap (Q22); gate weight is the **average over the 5-day target window of the h-step-ahead regime probabilities** (built from the filtered probability and A; never the smoothed one); implemented as `gate_weight="window"` (brief 08 B, 3f1fac5). Memory: regime-clock forgetting, implemented (brief 09 D) | Decided. Hamilton implemented, the autoregressive variant too (brief 07, G-2); jump, Wasserstein and TVTP to come. The backprop-HMM baseline now runs on the point-in-time panel (state keyed by stock, M-5) | Q19, Q27; briefs 03, 04 B, 07 |
 | Experts | MLP corrections to the base, $\hat y = f_0 + \sum_k \pi_k r_k$, zero-initialised heads | Implemented. Hidden-layer initialisation is a switch, `hidden_init` (brief 06 D); which one is used is **open** (X-1) | brief 02; audit X-1 |
 | Number of regimes K | | **Open** | Q18 |
 | Error function | Only the mixture NLL is registered, behind a seam | **Open** | Q20 |
@@ -32,7 +32,7 @@ detail stays in the source documents; this file points to them.
 | Runs and resume | Every run in `results/<campaign>/<run_id>/` with settings, status, registry, metrics, figures, log and `SUMMARY.md`, one row in `results/INDEX.csv`; per-stock outputs only in `Data/derived/runs/`. Ctrl+C checkpoints and stops; resume is exact and refuses changed settings or data unless forced | Implemented (brief 07 B, C); how-to in `nec_baseline/RUNBOOK.md` | `runstore.py`, `scripts/runs.py` |
 | Likelihood for the experts | Per row: the composite (independence) likelihood of the per-date model; one log-sum-exp per row. Already what the code does (`losses.mixture_nll`) | **Decided 2026-10-05**; no code change | Q24; PDF Section 7.3 and Appendix D |
 | Gate through the purge gap | Whether the filter sees the gap's market returns | **Open** | Q22 |
-| Training window and weighting | Expanding window. Experts: regime-clock decay; base: calendar decay, long half-life; gate: regime-clock forgetting (weighted Baum-Welch), memory chosen by predictive log-likelihood. Half-lives from a preset grid, chosen once in the pilot | **Decided 2026-10-05**; not implemented (needs a brief). Test 2010-2024 with annual refits (15 folds); pilot on 2007-2009 with a regime-balanced loss; main study on full blocks with frozen settings. Every day, fresh starts, paired seeds, process-parallel. Training scheme fully decided except leave-one-episode-out (Q16 c) | Q16; `Training_Window_and_Weighting_Theory.md` |
+| Training window and weighting | Expanding window. Experts: regime-clock decay; base: calendar decay, long half-life; gate: regime-clock forgetting (weighted Baum-Welch), memory chosen by predictive log-likelihood. Half-lives from a preset grid, chosen once in the pilot | **Decided 2026-10-05**; implemented (brief 09, commits f76f6eb-0e515eb); pilot not yet run. Test 2010-2024 with annual refits (15 folds); pilot on 2007-2009 with a regime-balanced loss; main study on full blocks with frozen settings. Every day, fresh starts, paired seeds, process-parallel. Training scheme fully decided except leave-one-episode-out (Q16 c) | Q16; `Training_Window_and_Weighting_Theory.md` |
 
 ## 1b. Decision register
 
@@ -87,6 +87,7 @@ added. A decision that is later reversed keeps its row, and the reversal gets it
 | 2026-10-08 | Gate is partly stock-specific at the industry level: market regime combined with an industry-level regime, both frozen; how it is implemented is open (Q28) | one market-wide weight vector per date | Q1, Q28 |
 | 2026-10-08 | Framing: comparison-led; no constructive element (the differentiable jump-model gate is not pursued) | adding a design-led contribution | Q2, Q4 |
 | 2026-10-08 | Horizon stays h = 5; add an IC decay curve on 2000-2006 and a horizon profile (h = 1, 3, 5, 10) for the final model as robustness | switching to h = 3 or h = 1 | Q21 follow-up |
+| 2026-10-09 | IC decay curve (2000-2006) confirms h = 5: one-week reversal and abnormal volume peak at 5, slow signals still build, nothing favours 3; horizon question closed; Q26 inputs unchanged despite weak pooled ICs | switching horizon; pruning weak signals on outcomes | Q21 follow-up result |
 
 
 ---
@@ -183,6 +184,20 @@ statistical (Q17).
 ---
 
 ## 2. Log (newest first)
+
+### 2026-10-09 (IC decay result; brief 11)
+- **IC decay curve run** (brief 10 C, by Tom; commit 00b9604): rank IC of 16 signals at h = 1-10 on 2000-2006.
+  One-week reversal peaks at h = 5 (IC -2.46%, t = -4.21), abnormal volume too (+1.07%, t = 4.05); fast signals
+  (idiosyncratic volatility, max return, momentum) fade by day 2-3; slow ones (MA50 gap, spread, earnings dummy,
+  one-month reversal) keep building. **Decided: h = 5 confirmed; Q26 inputs unchanged.** Recorded in Q21.
+- **Code_Change_Brief_11** written: the IC curve split by the gate's regime (2000-2006, descriptive) and the Q28
+  descriptive sector check (sector-relative regimes against the market regime).
+
+### 2026-10-08 (methodology document)
+- **`Methodology_2026-10-08.pdf`** (40 pages after adding a "why we chose this" box, with what was given up, to every decision; sources in `Methodology_tex/`): the whole methodology to date, section
+  by section (data, target and horizon, features, model, gate, training, evaluation, compute, status), every open
+  question grouped with a suggested order, the decision register, a glossary.
+- Section 1 corrected: the training scheme and the gate's memory are implemented (brief 09), not pending.
 
 ### 2026-10-08 (Q2 and Q4 decided; horizon follow-up)
 - **Decided: Q2 and Q4.** The comparison framing stands; no constructive element. The proposal is

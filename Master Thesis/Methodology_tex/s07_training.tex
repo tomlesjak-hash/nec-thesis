@@ -1,0 +1,183 @@
+\section{Training scheme}
+\label{sec:training}
+
+\subsection{Order of fitting within a fold}
+
+For each fold (training block, test year):
+\begin{enumerate}
+\item Fit the gate on the training block; freeze it; run its filter forward over the gap and the test year.
+\item Fit the base with calendar-decay weights; freeze it; cache its predictions.
+\item Train the experts with regime-clock weights and the frozen gate weights.
+\item Predict the test year.
+\end{enumerate}
+
+\begin{whybox}[Why this order]
+Each step only uses what the previous ones froze. The gate comes first because the experts' sample weights
+are computed from its filtered probabilities (the regime clock) and its weights enter their likelihood.
+The base comes before the experts because they learn corrections to it. Nothing fitted later can change
+anything fitted earlier, which is the frozen design in procedural form.
+\end{whybox}
+
+\subsection{Windows and folds}
+
+\dec{2026-10-05, Q16 (b)} \textbf{Expanding window, never rolling.}
+
+\begin{whybox}
+\begin{itemize}
+\item \textbf{A rolling window can contain no crisis at all.} A two-year window in 2014 has no stress episode,
+  so the stress expert has nothing to learn from, and by 2020 the model cannot recognise that conditions
+  resemble 2008 because 2008 has left the window.
+\item \textbf{Adaptation is the gate's job, not the window's.} In a regime-gated model the gate handles
+  changing conditions; the base should have the longest possible sample for a low-variance estimate of the
+  average relation.
+\item \textbf{Old data is down-weighted, not dropped} (Section~\ref{sec:weights}), which keeps the benefits of
+  recency without losing the rare episodes.
+\end{itemize}
+\giveup{the protocol of the closest precedent (a rolling 504-day window).}
+\end{whybox}
+
+\dec{2026-10-05} \textbf{Test period 2010--2024, refitted annually: 15 folds}, each re-fitting gate, base
+and experts on the expanding block from 2000 to the year before.
+
+\begin{whybox}
+\begin{itemize}
+\item \textbf{Why 2010 and not 2008}: every setting must be chosen on data before the first test year. A 2008
+  start leaves only the calm years 2005--07 for tuning a regime model. A 2010 start lets the pilot see the
+  2008 crisis, every training block contains two crises, and the test period still has six stress
+  episodes, including COVID, the sharpest transition test. 2008 itself can still be tested out of sample
+  by leave-one-episode-out.
+\item \textbf{Why annual}: the filter already updates the regime every day, so the model reacts daily;
+  refits only update slow parameters. Quarterly refits would cost four times as much for little gain, and
+  Gu, Kelly \& Xiu also refit annually with an expanding window.
+\end{itemize}
+\end{whybox}
+
+A \textbf{5-day purge} separates training and test blocks (the gap's labels are dropped; the gate's filter
+still sees its returns). \open{Q16 (c)} \textbf{Leave-one-episode-out}, as headline or robustness.
+
+\begin{whybox}[Why the purge]
+A training row from four days before the test year has a target that ends inside the test year. Keeping it
+would let test-period returns leak into training. Removing $h$ days removes every such overlap.
+\end{whybox}
+
+\subsection{Sample weights: one memory per component}
+\label{sec:weights}
+
+\dec{2026-10-05, Q16 (d)(e)}
+
+{\small
+\begin{tabularx}{\textwidth}{@{}l X X X@{}}
+\toprule
+Component & Estimates & Main risk & Memory\\
+\midrule
+Base & the average cross-sectional mapping & bias: structural drift shows here & calendar exponential
+decay, long half-life\\
+Experts & regime-specific mappings & variance for rare regimes & regime-clock decay\\
+Gate & regime dynamics of the market & both & regime-clock forgetting\\
+\bottomrule
+\end{tabularx}}
+
+\begin{whybox}[Why weight at all, and why differently per component]
+This is a bias--variance trade-off. Old data adds \emph{bias} because markets change: anomalies weaken after
+publication (McLean \& Pontiff 2016) and as markets become more liquid (Chordia, Subrahmanyam \& Tong 2014).
+Dropping old data adds \emph{variance} in a setting where the signal is tiny, and the optimal weights after a
+structural break are smaller but not zero (Pesaran \& Timmermann 2007). Exponential down-weighting sits
+between the expanding window (no decay) and a rolling window (a hard cut-off). The three components face
+the trade-off differently, so each gets its own memory.
+\end{whybox}
+
+\paragraph{Calendar decay (base).} A row $a$ trading days old gets weight $w_a=\rho^{a}$ with $\rho=2^{-1/H}$.
+The Kish effective sample size then tends to $(1+\rho)/(1-\rho)$, about 2.9 half-lives, however long the
+history.
+
+\begin{whybox}
+The base estimates the average relation across all regimes, which is where slow structural drift shows
+most, and every day informs it, so ordinary recency weighting fits. The half-life is long because the
+signal is weak and the effective sample shrinks fast as the half-life shortens.
+\end{whybox}
+
+\paragraph{Regime-clock decay (experts; Tom's construction).} A row's age is the amount of \emph{later
+experience of the same regime}, counted with the gate's filtered probabilities:
+\begin{equation}
+w_s(t)=\sum_{k=1}^{K}\xi_{s\mid s}(k)\,\rho^{\,n_k(s,t)},\qquad
+n_k(s,t)=\sum_{u=s+1}^{t}\xi_{u\mid u}(k),\qquad \rho=2^{-1/H}.
+\end{equation}
+A regime occupying a share $p$ of days has a calendar half-life of about $H/p$: with $H=500$ regime-days,
+about 2.8 years for a calm regime (70\% of days), 6.6 years for stress (30\%), decades for a rare crisis
+state. \open{minor} mixture form (default) or a per-expert clock.
+
+\begin{whybox}
+\begin{itemize}
+\item \textbf{Calendar decay would erase the crises}: with a two-year half-life, 2008 data carries about 1.6\%
+  weight by 2020. The crisis regime has the least data and almost all of it is old, so calendar decay
+  starves exactly the expert that needs history most.
+\item \textbf{Regime-clock decay resolves the conflict between ``markets drift'' and ``regimes recur''}: in a
+  long calm spell, calm data turns over quickly (drift is tracked) while the last crisis keeps its weight
+  because no newer crisis experience has replaced it. After a cluster of crises, older crisis data fades.
+\item \textbf{Nothing is hand-labelled}: the gate's own filtered probabilities do the work, with no look-ahead
+  and no choice of ``important periods'' that could be snooped.
+\end{itemize}
+The closest precedent for weighting history by regime rather than calendar time is Mulliner, Harvey, Xia,
+Fang \& Van Hemert (2025). Measuring age in regime time with filtered probabilities is this study's own
+construction.
+\end{whybox}
+
+In the likelihood each row's term is multiplied by its weight (a weighted composite likelihood): scores
+stay unbiased, so the weights change efficiency, not consistency.
+
+\subsection{The pilot: every setting chosen once}
+
+\dec{2026-10-05} A pilot on three folds with \textbf{validation years 2007, 2008 and 2009}, which never touches
+2010 or later, chooses once: the half-lives (from a small grid always including equal weights) and the gate
+memory; learning rate, weight decay and batch size; the training length as a fixed number of steps.
+Settings other than the gate's memory are chosen by a \textbf{regime-balanced validation loss}, each row
+reweighted by
+\begin{equation}
+v(s)=\sum_{k}\frac{\bar w_k(s)}{M_k},
+\end{equation}
+where $\bar w_k(s)$ is the window-average gate weight and $M_k$ its mean over the validation block.
+
+\begin{whybox}
+\begin{itemize}
+\item \textbf{Choose once, before the test period}: tuning in every fold or on test data would let test results
+  shape the model (Q15). One lock file, written before any test year is touched, is the pre-registration.
+\item \textbf{Why 2007--2009}: the validation years include the calm run-up, the crisis and the recovery, so
+  settings are chosen on a full cycle.
+\item \textbf{Why regime-balanced}: about 70\% of days are calm, so an unweighted validation loss would choose
+  settings that serve calm markets and ignore stress, the very thing the gate exists for. Balancing makes
+  every regime count equally.
+\item \textbf{Equal weights always in the grid}, so ``decay does not help'' is a possible, reportable outcome, and
+  the undecayed protocol of Gu, Kelly \& Xiu is always available as a reference.
+\end{itemize}
+\end{whybox}
+
+\subsection{Main study: frozen settings, full blocks}
+
+\dec{2026-10-05}
+\begin{itemize}
+\item \textbf{No held-out validation tail and no per-fold early stopping}; fallback to regime-balanced early
+  stopping if the pilot's best step count drifts across its folds.
+\item \textbf{Train on every day} under a fixed step budget.
+\item \textbf{Fresh initialisation every fold}; no warm starts (fallback: shrink-and-perturb).
+\item \textbf{Paired seeds}: 10 per grid cell, 30 for the primary cell, final count from the pilot.
+\item \textbf{One process per performance core}, large batches, features built once, base cached.
+\end{itemize}
+
+\begin{whybox}
+\begin{itemize}
+\item \textbf{No validation tail}: holding out the last 20\% of each block would withhold the most recent, most
+  heavily weighted data from training. Decay keeps the effective sample roughly stable as the window grows,
+  so a step budget chosen in the pilot should transfer; the pilot checks this.
+\item \textbf{Every day}: under a fixed step budget, thinning to every fifth day saves no compute; overlapping
+  rows still add information because the price features change daily, and overlap only affects standard
+  errors, which are corrected.
+\item \textbf{Fresh starts}: warm-started networks generalise worse (Ash \& Adams 2020); a warm start would also
+  make corrections relative to last year's base, breaking the zero-initialised residual design, and would
+  tie the folds together.
+\item \textbf{Paired seeds}: the quantity of interest is the \emph{difference} between gates. Running every arm on
+  the same seeds makes much of the training noise common to both arms, so it cancels in the difference
+  (common random numbers). The seed count is set by the measured noise, not guessed.
+\item \textbf{Process parallelism}: measured on the laptop, one thread per run with ten runs in parallel gives
+  about seven times the throughput; extra threads inside one run give nothing.
+\end{itemize}
+\end{whybox}

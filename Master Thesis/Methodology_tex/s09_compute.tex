@@ -1,0 +1,81 @@
+\section{Compute budget}
+\label{sec:compute}
+
+\subsection{Machine and measurements}
+
+Planning is done for Tom's laptop (Apple M4 Pro: 10 performance and 4 efficiency cores, 48\,GB) until a
+school compute node is confirmed. \dec{2026-10-05}
+
+\begin{whybox}[Why budget compute first]
+The advisor's instruction was that compute is the binding constraint and that architecture choices are
+settled only once the budget is calculated, not guessed. Planning on the laptop is the conservative case: if
+the design fits there, a school node only adds slack. Everything was measured, not assumed: a synthetic
+benchmark of every configuration, then one timed run on the real pipeline to measure the overhead.
+\end{whybox}
+
+\begin{itemize}
+\item \textbf{Cost of one run.} With a fixed step budget, a run costs about
+  \[\text{steps}\times\text{batch}\times(6P-2\,d\,w_1)\ \text{FLOPs},\]
+  where $P$ is the number of parameters, $d$ the input dimension and $w_1$ the first width (the first
+  layer needs no gradient with respect to its inputs). It does not depend on how many training rows
+  there are.
+\item \textbf{One thread per run}: a single core reaches 30--230 GFLOP/s; for $K=3$, widths 64--32, batch
+  4,096: 238 steps/s. More threads in one run give nothing.
+\item \textbf{Parallel runs}: 10 runs on the performance cores give 6.9$\times$ (7.6$\times$ with the
+  efficiency cores). Plan: 10 parallel processes.
+\item \textbf{GPU (MPS)}: a fixed 1.6--3\,ms per step; useful only for the largest models.
+\item \textbf{Real pipeline} (timed 6 October on the 2009 pilot fold, 1.13M training rows): 5.57\,ms per
+  step against the benchmark's 4.19\,ms, an overhead factor of 1.33. Gate fit 29\,s (Hamilton, $K=3$,
+  24 starts), base fit 0.2\,s, peak memory 3.9\,GB.
+\end{itemize}
+
+\subsection{What the design costs}
+
+One run trains one model for one fold from one seed. The design multiplies:
+
+{\small
+\begin{tabularx}{\textwidth}{@{}X X r@{}}
+\toprule
+Block & Count & Runs\\
+\midrule
+Gate $\times$ depth grid & 6 arms (5 gates + no-regime control) $\times$ 10 seeds $\times$ 15 folds & 900 per depth\\
+Primary cell, extra seeds & 20 seeds $\times$ 15 folds & 300\\
+Construction arms & 5 arms $\times$ 10 seeds $\times$ 15 folds & 750\\
+Base depth sweep & 10 seeds $\times$ 15 folds & 150 per depth\\
+Pilot & about 50 settings $\times$ 3 folds $\times$ 3 seeds & 450\\
+No-decay arm for every gate & $6\times10\times15$ & 900\\
+Leave-one-episode-out & primary cell & about 30\\
+\bottomrule
+\end{tabularx}}
+
+Depths 1--3: 5,580 clean runs; budgeted twice for reruns. Laptop time with 10 parallel runs:
+
+{\small
+\begin{tabular}{@{}lllrrr@{}}
+\toprule
+Depths & $K$ & First width & 3k steps & 10k steps & 30k steps\\
+\midrule
+1--3 & 3 & 64 & 7\,h & 23\,h & 71\,h\\
+1--3 & 3 & 128 & 14\,h & 46\,h & 137\,h\\
+1--3 & 4 & 64 & 9\,h & 30\,h & 91\,h\\
+1--3 & 4 & 256 & 38\,h & 126\,h & 377\,h\\
+1--5 & 4 & 256 & 58\,h & 194\,h & 581\,h\\
+\bottomrule
+\end{tabular}}
+
+\dec{2026-10-05} \textbf{Envelope: depths 1--3, first width at most 128, $K$ at most 4.} Within it the whole
+study, run twice, takes about 1--2 days at 10,000 steps per run and 3--6 days at 30,000, plus up to half
+a day of gate fits. Compute is therefore not the binding limit inside the envelope; the statistical
+limit is (Q17, Q18). Still to confirm: steps per run (from the pilot), the fit times of the jump,
+Wasserstein and TVTP gates, the industry-level gate fits (Q28), and thermal slowdown over multi-day
+runs.
+
+\begin{whybox}[Why this envelope]
+Inside it, the whole design (every gate, depth, seed and fold, run twice) takes days, not months, so
+compute stops being the constraint and the remaining choices can be made on statistical grounds (Q17,
+Q18). Outside it, the only configurations ruled out are deep (4--5 layers) and wide (256) networks with
+long training, which would take about a month and which the literature gives no reason to expect to help:
+Gu, Kelly \& Xiu find shallow networks suffice. Counting every arm twice allows for bugs and reruns, which
+in practice double the clean count.
+\end{whybox}
+

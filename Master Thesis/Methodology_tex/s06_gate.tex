@@ -1,0 +1,232 @@
+\section{The regime gate}
+\label{sec:gate}
+
+\subsection{What the gate does}
+
+The gate answers ``what state is the market (and the stock's industry) in?''. The experts answer
+``which stocks beat which in that state?''. The gate is a regime model fitted separately on a few
+market-level series and then frozen (\dec{2026-09-21, Q19}; motivation in Section~1.3).
+
+\subsection{The base case: Hamilton's Markov switching model}
+
+A hidden state $z_t\in\{1,\dots,K\}$ follows a Markov chain with transition matrix $A$,
+$A_{jk}=\mathbb P(z_t=k\mid z_{t-1}=j)$. Given the state, the market's daily return is Gaussian with a
+regime-specific mean and variance:
+\begin{equation}
+r_t\mid z_t=k\;\sim\;\N(\mu_k,\sigma_k^2).
+\end{equation}
+
+\paragraph{How it infers the regime.} Every day the filter combines yesterday's belief, carried forward by
+$A$, with how likely today's return is under each regime (Bayes' rule):
+\begin{equation}
+\xi_{t\mid t}(k)\;=\;\mathbb P(z_t=k\mid\F_t)\;=\;
+\frac{f_k(r_t)\,[\xi_{t-1\mid t-1}\T A]_k}{\sum_j f_j(r_t)\,[\xi_{t-1\mid t-1}\T A]_j},
+\end{equation}
+where $f_k$ is regime $k$'s normal density. Daily means are tiny next to daily volatility, so the regimes
+are in practice \textbf{volatility states}: a $-3\%$ day is about 4 standard deviations in a calm regime with
+0.7\% daily volatility but 1.5 in a stressed one with 2\%, roughly a thousand times more likely under
+stress. The persistence in $A$ stops the gate flipping on single noisy days.
+
+\paragraph{Estimation.} Maximum likelihood by EM (Baum--Welch), from many starting points (24 in the timing
+run); regimes relabelled into a canonical order by variance before anything is stored; only \emph{filtered}
+probabilities are used, never smoothed ones.
+
+\begin{whybox}
+\begin{itemize}
+\item \textbf{Hamilton as the base case}: it is finance's native regime model (bull/bear, calm/stress), its
+  filter is exact and cheap, and its parameters are interpretable (regime volatilities, expected
+  durations). Every other gate is compared against it. Its known weakness, that a Markov chain implies
+  memoryless (geometric) regime durations, is part of what the other gates test.
+\item \textbf{Mean and variance both switch}, because empirical regimes are separated far more by volatility than
+  by mean return.
+\item \textbf{Filtered, never smoothed}: the smoothed probability of a date uses data after it. Using it would be
+  look-ahead.
+\item \textbf{Canonical ordering}: a fitted HMM's labels are arbitrary (``regime 1'' in one fold could be
+  ``regime 2'' in the next). Ordering by variance makes ``calm'' and ``stress'' mean the same thing in every
+  fold, so experts and decay weights line up.
+\item \textbf{Many starting points}: EM finds local optima; several starts, keeping the best, make the fit
+  reliable and the optimisation reportable.
+\end{itemize}
+\end{whybox}
+
+\subsection{The gate types compared}
+
+\begin{tabularx}{\textwidth}{@{}l X l@{}}
+\toprule
+Gate & What it looks at & Status\\
+\midrule
+Hamilton (Markov switching) & the market return only & implemented\\
+Autoregressive Hamilton & as above, with autoregressive dynamics & implemented\\
+Statistical jump model & a feature vector of the market series (volatility over several windows,
+downside deviation, trend), clustered with a penalty on switching & to come\\
+Wasserstein clustering & the distribution of market returns over a window & to come\\
+TVTP Markov switching & regimes from the market return, switching probabilities driven by covariates
+(e.g.\ VIX, spreads) & to come\\
+\bottomrule
+\end{tabularx}
+
+The compute plan counts five gates plus a \textbf{no-regime control} (uniform weights). Jointly trained priors
+(soft, hard, top-$k$, Gumbel) and a backpropagation-trained HMM are kept as \textbf{baseline arms}. \open{Q13}
+whether a recurrent (GRU) gate is added.
+
+\begin{whybox}[Why these gates]
+Each gate embodies a different idea of what a regime is, which is what makes the comparison informative:
+\begin{itemize}
+\item \textbf{Hamilton}: a latent Markov process of market volatility; the classic econometric view.
+\item \textbf{Jump model}: regimes as persistent clusters, with the switching penalty acting like a turnover
+  cost (a gate that flips daily implies a strategy that trades daily).
+\item \textbf{Wasserstein}: regimes as shapes of the return distribution, with no economic theory behind it;
+  it serves as the ``no economics'' control: if a purely geometric gate does as well, the economic content
+  of the others adds nothing.
+\item \textbf{TVTP}: switching driven by observable conditions (volatility, spreads, sentiment); the gate
+  whose equation is itself an economic hypothesis.
+\item \textbf{No-regime control}: the same model with uniform weights; the difference between it and any gate is
+  the honest measure of what gating contributes.
+\end{itemize}
+\end{whybox}
+
+\subsection{What the gate is fitted on}
+\label{sec:gateinput}
+
+\dec{2026-10-08, Q23} The \textbf{CRSP value-weighted index of the S\&P 500 universe} (1000500), daily total
+return, as a \textbf{log return}. French's Mkt-RF stays registered as a robustness check.
+\impl{brief 10 B}
+
+\begin{whybox}
+\begin{itemize}
+\item \textbf{One market definition.} The universe is the S\&P 500 and the market-model features (beta,
+  idiosyncratic volatility, coskewness) use this index. The regime should describe the market the experts
+  trade in, not the whole US market including small caps.
+\item \textbf{Same source, no lag}: from the same licensed CRSP release; no external file published with a
+  delay.
+\item \textbf{Precedent}: Nystrup, Madsen \& Lindstr\"om (2017), whose method the gate's memory follows, fit
+  their HMMs on S\&P 500 daily log returns.
+\item \textbf{The risk-free rate is immaterial} (about 0.005\% a day against 1\% volatility), so a raw return
+  does as well as an excess return.
+\item \textbf{Log returns} add up over days and are closer to the Gaussian the model assumes.
+\end{itemize}
+\giveup{the literature's most common series (French's Mkt-RF), kept as a robustness check.}
+\end{whybox}
+
+What the gate does \emph{not} see, and why:
+\begin{itemize}
+\item \textbf{Stock characteristics}: after ranking they look the same every day, so they say \emph{which
+  stocks}, not \emph{what state the market is in}. They belong in the experts. Keeping them out of the gate
+  also keeps the regime a property of the market, not of individual stocks.
+\item \textbf{A market-neutral series}: the market minus the market is zero. The market's own moves and
+  volatility are the regime signal; neutralising applies to the target only.
+\end{itemize}
+
+\open{Q29} A gate variant on the vector of daily \textbf{factor returns} (market, size, value, momentum), so
+regimes describe how the cross-section behaves; motivated by momentum crashes in falling-volatility
+rebounds (Daniel \& Moskowitz 2016).
+
+\subsection{The gate weight for a five-day target}
+
+\dec{2026-10-05, Q27} The \textbf{average over the target window of the 1- to 5-step-ahead regime
+probabilities}:
+\begin{equation}
+\pi(t) \;=\; \frac{1}{h}\sum_{j=1}^{h}\xi_{t\mid t}\T A^{j}, \qquad h=5 .
+\end{equation}
+
+\begin{whybox}
+\begin{itemize}
+\item \textbf{The target spans five days, and the regime can move during them.} The weight that matches a
+  5-day return is the expected share of those five days spent in each regime, and that is exactly this
+  average. It makes the model's expected 5-day return exact.
+\item \textbf{The alternatives answer the wrong question.} The filtered probability describes today, which is
+  not in the target window; the one-step prediction describes only the first day of the window.
+\item \textbf{It nests the simple case}: at $h=1$ it equals the one-step prediction.
+\item \textbf{Same weight in training and forecasting}, so experts are trained on the weights they will be used
+  with.
+\end{itemize}
+In practice it differs from the filtered weight by 0.055 on average (maximum 0.10) on 2015--2024.
+\end{whybox}
+
+\subsection{The filter runs through the purge gap}
+
+\dec{2026-10-08, Q22} The gate's parameters are fitted on the training block only, but its filter runs over
+every trading day, including the 5 purged days before each test year. \impl{brief 10 A}
+
+\begin{whybox}
+\begin{itemize}
+\item \textbf{The purge exists for labels, not information.} The gap days are dropped from training because
+  their 5-day targets reach into the test year. Their market returns, however, are public by the first test
+  date, and a live trader's filter would have processed them. Skipping them makes the backtest less
+  realistic, not safer.
+\item \textbf{It removes a mis-specification}: $A$ describes one trading day; skipping the gap made one step of
+  $A$ bridge six days at every fold boundary.
+\item \textbf{The window-average weight and the regime-clock decay start from the filtered probability}, so the
+  state at the start of each test year should be exact.
+\end{itemize}
+The effect is small (largest change 0.008 in a regime probability on the smoke panel); this is a correctness
+point.
+\end{whybox}
+
+\subsection{The gate's memory}
+
+\dec{2026-10-05, Q16 (d)(e)} \textbf{Regime-clock forgetting}: a weighted Baum--Welch in two passes (an
+unweighted fit, then weights from each regime's own clock, then weighted M steps; each regime's emission
+parameters use its own clock, transitions out of regime $j$ use $j$'s). The half-life is chosen in the pilot
+by the one-step predictive log-likelihood of the market series.
+
+\begin{whybox}
+\begin{itemize}
+\item \textbf{Why not the full history with equal weights}: the gate's parameters drift. Nystrup, Madsen \&
+  Lindstr\"om (2017) find a two-state HMM's parameters on daily S\&P 500 returns change well beyond
+  estimation noise, and adaptive estimation forecasts better. A bias--variance trade-off applies to the
+  gate just as to the networks.
+\item \textbf{Why not plain calendar forgetting}: a short calendar memory can forget the stress state entirely
+  during a long calm spell (2012--2019), exactly when it is needed next. Regime-clock forgetting ages each
+  regime's data only by new experience of that regime, so the last crisis keeps its weight until the
+  next one.
+\item \textbf{Why choose the memory by predictive likelihood}: that is the gate's own job (describing the
+  market series). Choosing it by the experts' loss would let the experts shape the gate, a partial return to
+  joint training. It also gives every gate type the same tuning budget.
+\end{itemize}
+\end{whybox}
+
+\subsection{The industry-level gate}
+\label{sec:industrygate}
+
+\begin{decbox}{Decided 2026-10-08 (Q1): the gate is partly stock-specific, at the industry level}
+Each stock's gate weight combines the \textbf{market regime} (shared by all stocks) with a regime of its
+\textbf{industry}. Stocks in the same sector on the same date share a weight; stocks in different sectors
+can differ. Both parts are fitted separately and frozen.
+\end{decbox}
+
+\begin{whybox}
+\begin{itemize}
+\item \textbf{Industries have their own regimes.} Energy in 2014--16, banks in 2008 and 2023, technology in
+  2000--02 and 2022 were in stress while much of the market was calmer. A market-wide gate gives every
+  stock the same state and cannot express this.
+\item \textbf{Why the industry level and not each stock}: a single stock's ``regime'' is mostly its own news
+  (earnings, deals), which the experts already see through volatility and event features; a per-stock gate
+  would duplicate the inputs and turn the gate into a per-stock router, which moves the thesis away from
+  regime processes. An industry aggregates enough stocks to have a genuine state with an economic cause
+  (oil prices, interest rates for banks), and there are few enough sectors (11) to estimate each reliably.
+\item \textbf{The market regime stays at the core}, which is the part best supported by the literature and by
+  the descriptive checks, and keeps the gate comparison intact.
+\item \textbf{Cost is small}: frozen weights are looked up per row, so network training is unchanged; only the
+  gate fits multiply (about 29\,s each).
+\end{itemize}
+\giveup{the simplicity of one weight vector per date, and a larger design space that has to be settled
+(Q28). The advisor should hear this explicitly, since it widens the object of study.}
+\end{whybox}
+
+\begin{openbox}{Open (Q28): how the industry-level gate is implemented}
+Candidate forms:
+\begin{enumerate}[label=(\alph*)]
+\item \textbf{Factorial gate}: two independent hidden chains (market and sector), one expert per pair of
+  states (Ghahramani \& Jordan 1997):
+  \[\pi_{(k,l)}(i,t)=\pi^{\text{mkt}}_k(t)\,\pi^{\,s(i)}_l(t),\]
+  with $s(i)$ the stock's sector; $2\times2$ states gives 4 experts, inside the envelope.
+\item \textbf{Coupled chains}: the sector chain's transitions depend on the market state.
+\item \textbf{Sector gate only}, with the market regime entering another way.
+\item \textbf{Pooled industry chains}: shared regime definitions and transition matrix, each sector with its
+  own chain; one fit per fold.
+\end{enumerate}
+Sub-questions: sector-relative or raw sector returns; 11 sectors or finer groups; states per level (Q18);
+industry versions of each gate type; identification against the industry inputs (Q10); a descriptive
+check of how often a sector is stressed while the market is calm.
+\end{openbox}

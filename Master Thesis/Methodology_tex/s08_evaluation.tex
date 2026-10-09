@@ -1,0 +1,88 @@
+\section{Evaluation}
+\label{sec:evaluation}
+
+\subsection{Metrics}
+
+\begin{itemize}
+\item \textbf{Rank IC} (Spearman correlation across stocks between forecasts and realised market-neutral 5-day
+  returns, per test date), reported as its mean and ICIR; t-statistics with \textbf{Hansen--Hodrick} standard
+  errors at lag 4. \dec{2026-09-26, audit E-2}
+\item \textbf{Negative log-likelihood}, three ways (\texttt{NLL\_single}, \texttt{NLL\_base},
+  \texttt{NLL\_full}), with the volatility-only gain next to the correction gain.
+\item \textbf{A horizon-consistent long-short book}, equal-weighted and dollar-neutral; non-overlapping or
+  staggered. \open{default scheme}
+\item \textbf{Stability across seeds}: dispersion of rank IC and the count of seeds below a stated IC threshold.
+\item \textbf{Regime-conditional results}: by regime and in transition windows.
+\end{itemize}
+
+\begin{whybox}
+\begin{itemize}
+\item \textbf{Rank IC} measures what the thesis is about, the ordering of stocks, and is robust to outliers
+  and to the scale of the forecasts. It is the standard metric for cross-sectional signals and is invariant
+  to the market-neutral demeaning.
+\item \textbf{Hansen--Hodrick}: daily 5-day targets share four days, so consecutive ICs are correlated and naive
+  t-statistics are too large. Hansen--Hodrick corrects exactly for overlap of known length, and in our
+  simulation it had better size than Newey--West.
+\item \textbf{Three NLLs}: a mixture can lower the NLL just by giving stressed regimes a wider distribution,
+  without forecasting returns any better. Separating the variance gain from the correction gain stops that
+  being mistaken for predictive skill.
+\item \textbf{The long-short book} translates IC into an economic quantity. Equal-weighted and dollar-neutral, it
+  matches the target's definition; horizon-consistent, so overlapping signals are not double-counted.
+\item \textbf{Stability}: in the closest precedent, the largest differences between designs were in how many
+  seeds failed, not in average accuracy. Their failure criterion is volatility-specific, so a returns
+  version is defined in advance.
+\item \textbf{Regime-conditional results}: the theory predicts gains where the regime matters (stress and
+  transitions). The precedent's gain was concentrated in sustained high volatility and was weak at
+  transitions; a regime process with persistence and transition dynamics is aimed at exactly that gap.
+\end{itemize}
+\end{whybox}
+
+\open{Q9} Which metric family is primary: forecast accuracy or portfolio performance. In Gu, Kelly \& Xiu
+the two families favour different depths, so the primary family must be fixed in advance.
+
+\subsection{Diagnostics of what the gate contributes}
+
+\open{Q10} The frozen base buys identifiability of the correction term, not of what it contains. Two
+failure modes: the base underfits and the experts relearn general signal; or all experts converge to the
+same correction and the gate is decorative. Planned diagnostics:
+\begin{enumerate}
+\item \textbf{Decomposition} of the correction into a gate-independent part (mean expert output) and a
+  gate-conditional part, with each part's share of explained variation.
+\item \textbf{Gate permutation test}: replace the fitted gate weights by uniform weights or weights from random
+  other dates and build a null distribution.
+\item \textbf{Expert-weight diagnostic} and the \textbf{effective sample per expert}.
+\item A \textbf{variance decomposition} of gate weights across dates and across industries within a date (now
+  meaningful with the industry-level gate).
+\end{enumerate}
+
+\begin{whybox}[Why these diagnostics]
+A good number for the mixture is not evidence that \emph{regimes} helped: the experts might simply be fixing
+what the base missed, identically in every regime. The decomposition and the permutation test answer the
+question the thesis actually asks, ``does it matter \emph{which} regime the gate says we are in?''. The
+permutation test needs no extra data and is the strongest single piece of evidence available.
+\end{whybox}
+
+\subsection{Baselines}
+
+\open{Q12} Candidates: a capacity-matched single network; a network matched to one expert; a penalised
+linear model; gradient-boosted trees (e.g.\ LightGBM); the no-gate mixture; jointly trained priors.
+
+\begin{whybox}[Why these candidates]
+Every claim is relative to a baseline. The capacity-matched network separates ``the gate matters'' from
+``more parameters help''; the linear model shows the nonlinear machinery does anything at all; trees answer
+the predictable referee question (trees are strong on tabular data, and Gu, Kelly \& Xiu cannot separate
+networks from trees statistically); the no-gate mixture is the cleanest measure of gating itself.
+\end{whybox}
+
+\subsection{Multiple testing and pre-registration}
+
+\open{Q15} The test set may be reused across models; what biases results is \emph{using test performance to
+choose}. Seeds are not multiple testing; configurations are (about 18 gate-by-depth cells plus construction
+arms). Open: the formal correction (e.g.\ Benjamini--Hochberg) and the pre-registration document.
+
+\begin{whybox}[Why this matters so much here]
+The differences between gates are likely small. Picking the best of 18 noisy estimates and reporting it as
+if chosen in advance can create a ``winner'' out of noise alone. Locking every setting in the pilot,
+nominating the primary cell in advance and correcting for the number of comparisons is what makes the
+final ranking of gates believable.
+\end{whybox}

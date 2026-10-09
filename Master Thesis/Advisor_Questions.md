@@ -2308,6 +2308,34 @@ years and the test period), to show how fast the signals' predictive power fades
 horizon was discussed: fresher signals and less overlap, but more noise, about 5/3 the turnover, and
 windows that sometimes contain a weekend and sometimes not; no evidence it beats 5.
 
+**Result of the IC decay curve (run by Tom 2026-10-09; commit 00b9604; `results/diagnostics/ic_decay_2000_2006.*`).**
+Daily cross-sectional rank IC against the market-neutral forward return at h = 1, 2, 3, 5, 10, on
+2000-2006 only (the last scored date moves back by h, so no 2007 return was read), Hansen-Hodrick
+t-statistics at lag h - 1. **It supports h = 5; nothing points to 3 beating 5.**
+
+- Yardstick: a signal whose information lasts the whole window has an IC growing like the square root
+  of h with a roughly flat t-statistic; next-day-only information has an IC shrinking like one over the
+  square root of h and a falling t-statistic.
+- **One-week reversal** (`ret_5d`, the strongest signal): IC -1.67% at h = 1, -2.46% at h = 5 (t = -4.21),
+  -2.08% at h = 10. It builds to h = 5 and adds nothing after.
+- **Abnormal volume** (`volume_z`, the most robust): +0.86%, +1.07% (t = 4.05), +0.75%. Peaks at h = 5.
+- **Fast signals** lose IC and t by h = 5 (most of their information sits in the first 2-3 days):
+  idiosyncratic volatility, maximum daily return, momentum (peaks at h = 3, t = 1.43 at h = 5), the
+  52-week high (gone by h = 5).
+- **Slow signals** keep building to h = 10 and a one-day target would mostly miss them: distance from
+  the 50-day average, bid-ask spread, the earnings-in-window dummy (t = 3.25 at h = 5), one-month
+  reversal, return-volume correlation.
+- No signal at any horizon (|t| under 1.3): volatility shock, realised skewness, overnight return,
+  variance ratio.
+- **Caveats.** 80 tests (16 signals x 5 horizons): under Bonferroni (|t| > 3.4) only `ret_5d` and
+  `volume_z` (h <= 5) and `earn_next5` (h = 10) clear the bar. Regimes are pooled: 2000-2006 mixes the
+  2000-02 bear market with the calm of 2003-06, so a signal with opposite signs in calm and stress
+  (momentum around crashes) averages to near zero.
+- **Decision (Tom, 2026-10-09): h = 5 confirmed, the horizon question is closed. The Q26 inputs are left
+  unchanged**: the feature list was fixed by a rule (two per theme) so that it is not chosen on outcomes,
+  and pooled-regime ICs near zero are not evidence against a signal whose sign depends on the regime.
+- **Follow-up:** the same curve split by the gate's regime on 2000-2006 (brief 11).
+
 *Original question, for the record:*
 
 ### Q21. At what frequency should the gate and the cross-section run, and what is the target horizon?

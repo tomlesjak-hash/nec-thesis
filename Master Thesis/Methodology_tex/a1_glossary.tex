@@ -1,0 +1,53 @@
+\section{Glossary}
+
+\begin{description}[style=nextline,leftmargin=1.2cm,itemsep=3pt]
+\item[MLP (multilayer perceptron)] A feed-forward neural network: layers of weighted sums followed by a
+  nonlinearity (here ReLU). Depth is the number of hidden layers, width the number of units per layer.
+\item[Mixture of experts (MoE)] Several sub-models (experts) whose outputs are combined with weights from
+  a gate. Here the experts are corrections to a base network and the gate is a regime model.
+\item[Residual design] The experts learn corrections to a frozen base, starting from zero, instead of
+  full forecasts.
+\item[Gate, regime] A model that assigns probabilities to a small number of market states (regimes),
+  such as calm and stressed.
+\item[Hidden Markov model (HMM), Hamilton model] A model in which an unobserved state follows a Markov
+  chain and the observed series is drawn from a state-specific distribution. Hamilton's (1989) Markov
+  switching model is the econometric version.
+\item[Filtered probability] The probability of today's regime given data up to today, $\xi_{t\mid t}$. The
+  \emph{smoothed} probability also uses future data and is never used.
+\item[Transition matrix $A$] The probabilities of moving from each regime to each other regime in one day.
+\item[EM, Baum--Welch] The expectation--maximisation algorithm; Baum--Welch is EM for HMMs (forward
+  filter, backward smoother, closed-form updates).
+\item[Window-average gate weight] The expected share of the 5-day target window spent in each regime.
+\item[Regime-clock decay] Down-weighting old observations by how much \emph{newer experience of the same
+  regime} has accumulated, instead of by calendar age.
+\item[Half-life] The age at which a weight has fallen to one half.
+\item[Kish effective sample size] $(\sum w)^2/\sum w^2$: how many equally weighted observations a set of
+  weights is worth.
+\item[Rank IC (information coefficient)] The Spearman rank correlation, across stocks on a date, between
+  forecasts and realised returns. ICIR is its mean divided by its standard deviation.
+\item[Hansen--Hodrick standard errors] Standard errors that correct for overlapping observations (here,
+  5-day targets sampled daily share four days).
+\item[Purge] Dropping the last $h$ training days before a test block, because their targets reach into
+  the test period.
+\item[Walk-forward, expanding window] Repeated train-then-test in time order; the training block grows
+  each fold.
+\item[NLL] Negative log-likelihood: how improbable the realised targets are under the model's
+  predictive distribution (lower is better).
+\item[Composite likelihood] A product of marginal (here one-stock) likelihoods used in place of the full
+  joint likelihood; consistent, with sandwich standard errors.
+\item[Point-in-time] Using only the values that were known on the date, as first published, with report
+  delays respected.
+\item[Market-neutral return] A stock's return minus the cross-sectional average return on the same date.
+\item[JKP themes] The 13 clusters of published stock characteristics in Jensen, Kelly \& Pedersen (2023).
+\item[GICS] Global Industry Classification Standard; 11 sectors.
+\item[Factorial HMM] Several independent hidden chains running in parallel, whose states combine.
+\item[TVTP] Time-varying transition probabilities: a Markov switching model whose switching probabilities
+  depend on observed covariates.
+\item[Statistical jump model] Clustering of feature vectors over time with a penalty on switching
+  between clusters, which makes regimes persistent.
+\item[Pilot] The pre-2010 runs that choose every setting once, before the test period is touched.
+\item[Pre-registration] Writing down the design, settings and primary comparisons before seeing test
+  results.
+\item[Paired seeds] Running every arm on the same random seeds and comparing seed by seed, which removes
+  much of the noise from comparisons.
+\end{description}

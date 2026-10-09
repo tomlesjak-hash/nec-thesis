@@ -1,0 +1,85 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=2.4cm]{geometry}
+\usepackage{amsmath,amssymb,mathtools,bm}
+\usepackage{booktabs,tabularx,array,longtable}
+\usepackage{enumitem}
+\usepackage{tikz}
+\usetikzlibrary{positioning,fit,arrows.meta,backgrounds,shapes.geometric}
+\usepackage[most]{tcolorbox}
+\usepackage[hidelinks]{hyperref}
+\usepackage{xcolor}
+\usepackage{url}
+\urlstyle{tt}
+\makeatletter\g@addto@macro{\UrlBreaks}{\do\_\do\.}\makeatother
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{6pt}
+\setlist{itemsep=2pt,topsep=3pt}
+\renewcommand{\arraystretch}{1.18}
+\setlength{\emergencystretch}{3em}
+
+\definecolor{decg}{RGB}{30,120,60}
+\definecolor{openr}{RGB}{185,70,30}
+\definecolor{implb}{RGB}{40,90,160}
+\definecolor{kbg}{RGB}{245,245,240}
+\definecolor{kfr}{RGB}{120,120,100}
+\definecolor{obg}{RGB}{253,243,235}
+\definecolor{ofr}{RGB}{190,100,40}
+\definecolor{dbg}{RGB}{238,246,240}
+\definecolor{dfr}{RGB}{40,120,70}
+
+\newtcolorbox{keybox}[1]{colback=kbg,colframe=kfr,fonttitle=\bfseries,title={#1},breakable}
+\newtcolorbox{openbox}[1]{colback=obg,colframe=ofr,fonttitle=\bfseries,title={#1},breakable}
+\newtcolorbox{decbox}[1]{colback=dbg,colframe=dfr,fonttitle=\bfseries,title={#1},breakable}
+\definecolor{wbg}{RGB}{240,244,251}
+\definecolor{wfr}{RGB}{60,90,150}
+\newtcolorbox{whybox}[1][Why we chose this]{colback=wbg,colframe=wfr,fonttitle=\bfseries,title={#1},breakable,before skip=8pt,after skip=8pt}
+\newcommand{\giveup}[1]{\par\smallskip\textit{What we give up:} #1}
+
+\newcommand{\dec}[1]{\textcolor{decg}{\textbf{[Decided #1]}}}
+\newcommand{\open}[1]{\textcolor{openr}{\textbf{[Open: #1]}}}
+\newcommand{\impl}[1]{\textcolor{implb}{\textbf{[#1]}}}
+
+\newcommand{\N}{\mathcal{N}}
+\newcommand{\F}{\mathcal{F}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\T}{^{\top}}
+\DeclareMathOperator{\softmax}{softmax}
+
+\title{Methodology to Date\\[4pt]
+\large A regime-gated residual mixture of experts for the cross-section of US equity returns}
+\author{Tom Kores Lesjak\\ \small Master Thesis, SAIF / SJTU}
+\date{State of the design on 8 October 2026 (revised with motivations)}
+
+\begin{document}
+\maketitle
+\begin{abstract}
+\noindent This document records the methodology of the thesis as it stands on 8 October 2026: what the model
+is, what data it uses and how the data are prepared, what it predicts and over which horizon, how the
+regime gate works, how everything is trained and evaluated, what the compute budget allows, and what
+is implemented. Every design choice is labelled \dec{date} or \open{question}, with the question numbers of
+\texttt{Advisor\_Questions.md}, where the full reasoning lives. Each decision is followed by a blue
+box explaining \emph{why} it was made and what it costs: the alternative it beat and what was knowingly
+given up. The last sections list every open question
+and the decision register.
+\end{abstract}
+\tableofcontents
+\newpage
+
+\input{s01_overview}
+\input{s02_data}
+\input{s03_target}
+\input{s04_features}
+\input{s05_model}
+\input{s06_gate}
+\input{s07_training}
+\input{s08_evaluation}
+\input{s09_compute}
+\input{s10_status}
+\input{s11_open}
+\input{s12_register}
+\appendix
+\input{a1_glossary}
+\input{a2_refs}
+
+\end{document}

@@ -1,0 +1,107 @@
+\section{Target and horizon}
+\label{sec:target}
+
+\subsection{Timing}
+
+Everything is computed at the \textbf{close of day $t$} from information public by then. The gate updates
+every trading day, every stock in the universe gets a forecast every day, and the target is the return
+from the close of $t$ to the close of $t+5$.
+
+\begin{whybox}
+Daily closing data is what CRSP provides, and using one timestamp for features, gate and target makes
+look-ahead easy to rule out: every input at $t$ is computed from data up to the close of $t$, and the
+target starts after it. The convention assumes trading at the close at which the signal is computed,
+which is slightly optimistic; signals concentrated overnight should be checked with a one-day execution
+lag.
+\end{whybox}
+
+\subsection{Horizon: five trading days}
+
+\dec{2026-10-05, Q21, option B} Daily gate, daily cross-section, \textbf{$h=5$}. Consecutive targets overlap by
+four days. The options compared were (A) $h=1$, (B) $h=5$, (C) a monthly target with a daily gate,
+(D) monthly gate and cross-section.
+
+\begin{whybox}
+\begin{enumerate}
+\item \textbf{Enough independent observations.} A monthly horizon leaves too few independent periods to train
+  regime-specific experts: in 2015--2024 about 118, of which about 59 in high volatility, and a 5\% rank IC
+  at $h=21$ was not significant. Weekly gives about five times as many.
+\item \textbf{The regime effect is clearest at this horizon.} A descriptive check (2015--2024, signal
+  diagnostics, not model results): one-week reversal had a rank IC of 3.26\% in high-volatility periods
+  against 1.29\% in low ones. Short-term reversal is pay for providing liquidity, and it rises when markets
+  are turbulent (Nagel 2012). So at a weekly horizon the cross-section demonstrably depends on the market
+  state, which is precisely what a regime gate is meant to exploit.
+\item \textbf{Less noise than one day.} A one-day return is dominated by noise and bid--ask bounce (the
+  closing price jumping between bid and ask, which creates fake reversal; Roll 1984). One-day
+  machine-learning strategies on the S\&P 500 have largely decayed since 2010 (Krauss, Do \& Huck 2017;
+  Fischer \& Krauss 2018). Five days averages much of this out while keeping short-horizon effects.
+\item \textbf{It respects the regime timescale.} Daily regimes typically last 20--50 days, so a 5-day window
+  rarely contains a switch, and ``one regime per target window'' is a reasonable approximation. A monthly
+  window is as long as a stressed regime and would break it.
+\item \textbf{The gate is best identified on daily data}: thousands of daily observations instead of a few
+  hundred monthly ones, and daily volatility clustering is what separates the regimes.
+\item \textbf{It was already built and audited}: overlap-corrected statistics, purge and a horizon-consistent
+  portfolio.
+\end{enumerate}
+\giveup{direct comparability with the monthly benchmark of Gu, Kelly \& Xiu; independence of
+consecutive targets (statistics are overlap-corrected, and the training likelihood is used for
+estimation, not inference); and lower turnover than a monthly strategy.}
+\end{whybox}
+
+\paragraph{Other horizons (discussed 8 October).} A \textbf{one-day} horizon has real advantages (no overlap,
+an exact one-step gate weight, the freshest signals, closer to industry practice) but most of its edge
+disappears with a realistic one-day execution delay and five times the turnover. A \textbf{three-day}
+horizon is a middle ground, but adds noise and turnover, and its windows sometimes contain a weekend
+and sometimes not; there is no evidence it beats five. \dec{2026-10-08, Q21 follow-up} $h=5$ stays primary,
+with two robustness additions: an \textbf{IC decay curve} (rank IC of the main signals at
+$h=1,2,3,5,10$, on 2000--2006 only) and a \textbf{horizon profile} ($h=1,3,5,10$) for the final model.
+
+\begin{whybox}[Why add these rather than switch]
+Whether a shorter horizon is better depends on how fast the signals' predictive power fades. That is a
+measurable fact, so it should be measured, not argued; and measured on years before the pilot and the test
+period, so that the horizon cannot be chosen on test results. The horizon profile for the final model shows
+whether conclusions depend on the horizon, without multiplying the main study.
+\end{whybox}
+
+\subsection{Target: the market-neutral return}
+
+\dec{2026-10-01, Q25} For stock $i$ in the universe $\mathcal S_t$, with forward log return
+$r_{i,t\to t+5}=\sum_{d=1}^{5}\log(1+r_{i,t+d})$,
+\begin{equation}
+y_{i,t} \;=\; r_{i,t\to t+5} \;-\; \frac{1}{N_t}\sum_{j\in\mathcal S_t} r_{j,t\to t+5},
+\end{equation}
+the average running, with equal weights, over the stocks of date $t$ with a valid target. It sums to
+zero across stocks every day; the risk-free rate cancels. All reporting is on this basis. \dec{2026-10-05}
+The alternatives considered were raw or excess returns, cross-sectionally standardised or ranked returns,
+volatility-scaled returns, and factor-residual (CAPM or Fama--French) returns.
+
+\begin{whybox}
+\begin{enumerate}
+\item \textbf{It is the quantity the question is about.} The thesis asks whether the regime changes
+  \emph{which stocks beat which}. The day's average return is the same number for every stock, carries no
+  cross-sectional information, and predicting it is market timing.
+\item \textbf{It keeps the gate's information and the target's apart.} The gate is fitted on the market
+  series. A raw target's largest component is that same market move, so a regime that merely predicts the
+  market's direction would look as if it ``helped the experts''. With the common move removed, any gain
+  from the gate must come from regime-dependent \emph{cross-sectional} structure. This is the same
+  attribution logic that led to freezing the gate.
+\item \textbf{It makes the model's assumptions defensible.} The likelihood treats stocks as independent given
+  the regime and their characteristics. For raw returns that is badly false: on a $-4\%$ day almost every
+  stock falls together. Removing the common move removes the dominant source of dependence.
+\item \textbf{Training and evaluation measure the same thing.} Rank IC, decile sorts and equal-weighted
+  long-short returns all ignore a number added to every stock on a date, so training on the demeaned
+  target spends no capacity on variation the metrics ignore.
+\item \textbf{It keeps dispersion}, unlike standardising or ranking. Cross-sectional dispersion rises in stress;
+  dividing by it would erase information the experts' noise scales should express.
+\item \textbf{It suits a Gaussian likelihood}, unlike ranks.
+\item \textbf{Equal weights in the mean} make the target match an equal-weighted, dollar-neutral long-short
+  book, and keep it from being driven by a handful of mega-caps. A factor-residual target would bake one
+  particular risk model into the label.
+\end{enumerate}
+\giveup{any claim about market timing (deliberately out of scope) and raw-return reporting.}
+\end{whybox}
+
+Note the two different ``markets'' in the pipeline: the target is demeaned by the
+\emph{equal-weighted} mean of the universe; the gate and the market-model features use the
+\emph{value-weighted} index (Section~\ref{sec:gateinput}). The first defines ``relative'' for an
+equal-weighted book; the second measures the state of the market, which large caps drive.

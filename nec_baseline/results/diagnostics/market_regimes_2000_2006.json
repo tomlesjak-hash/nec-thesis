@@ -1,0 +1,290 @@
+{
+  "what": "brief 11 A: market regimes on 2000-2006 (descriptive)",
+  "caveat": "The gate's parameters are estimated on all of 2000-2006, so the regime probabilities are causal in the data they filter (each date's probability uses market returns up to that date only; filtered, never smoothed) but not in the parameters. A descriptive in-sample diagnostic, not a forecast.",
+  "settings": {
+    "start": "2000-01-01",
+    "end": "2006-12-31",
+    "k_list": [
+      2,
+      3
+    ],
+    "fit_backend": "statsmodels",
+    "gate_horizon": 5,
+    "weight_kind": "window",
+    "vol_window": 20,
+    "stress_threshold": 0.5,
+    "horizons": [
+      1,
+      2,
+      3,
+      5,
+      10
+    ],
+    "signals": [
+      "ret_5d",
+      "ret_20d",
+      "mom_12_1",
+      "prc_highprc_252d",
+      "ivol_capm_21d",
+      "vol_shock",
+      "rskew_21d",
+      "rmax1_21d",
+      "volume_z",
+      "qspread_21d",
+      "overnight_20d",
+      "ma50_gap",
+      "earn_next5",
+      "days_since_earn",
+      "var_ratio_60d",
+      "ret_vol_corr_60d",
+      "ret_20d_ind_rel",
+      "ind_mom_12_1"
+    ],
+    "min_names": 3,
+    "nw_min_lag": 20,
+    "primary_alpha": 0.05,
+    "exploratory_fdr": 0.1,
+    "panel_file": "../Data/derived/pit_panel_crsp_2000-01-01_2024-12-31_q26_market_neutral.pt",
+    "out_dir": "results/diagnostics"
+  },
+  "series": "crsp_market_log_return: log(1 + DlyTotRet) of INDNO 1000500, decimals",
+  "window": {
+    "first": "2000-01-03",
+    "last": "2006-12-29",
+    "dates": 1759
+  },
+  "fits": {
+    "2": {
+      "k": 2,
+      "regimes": [
+        "calm",
+        "stress"
+      ],
+      "dates": 1759,
+      "first_date": "2000-01-03",
+      "last_date": "2006-12-29",
+      "backend": "statsmodels",
+      "llf": 5624.381880313421,
+      "means": [
+        0.0004200466432211013,
+        -0.0004523927274686063
+      ],
+      "variances": [
+        4.8080922905283047e-05,
+        0.00023485672231267539
+      ],
+      "sd_daily": [
+        0.00693404087854139,
+        0.015325035801350527
+      ],
+      "transition": [
+        [
+          0.9956319642043181,
+          0.004368035795681902
+        ],
+        [
+          0.005667181718748704,
+          0.9943328182812513
+        ]
+      ],
+      "expected_durations_days": [
+        228.93585281250844,
+        176.45455000881793
+      ],
+      "share_of_days_most_likely": [
+        0.5656623081296192,
+        0.4343376918703809
+      ],
+      "mean_filtered_probability": [
+        0.5681517643090729,
+        0.4318482356909274
+      ],
+      "share_of_days_stress_above_threshold": 0.4343376918703809,
+      "stress_threshold": 0.5,
+      "multi_start": {
+        "n_starts": 24,
+        "n_converged": 24,
+        "chosen_start": 2,
+        "n_distinct_optima": 1,
+        "start_llfs": [
+          5624.38188031286,
+          5624.3818803129,
+          5624.381880313421,
+          5624.381880288278,
+          5624.381880312976,
+          5624.381880313411,
+          5624.3818803131435,
+          5624.381880313418,
+          5624.38188031342,
+          5624.3818803134045,
+          5624.381880313413,
+          5624.381880313369,
+          5624.381880313284,
+          5624.381880313404,
+          5624.38188031342,
+          5624.381880313419,
+          5624.38188031342,
+          5624.381880313415,
+          5624.381880313419,
+          5624.381880313418,
+          5624.3818803134145,
+          5624.38188031342,
+          5624.3818803134145,
+          5624.38188031342
+        ],
+        "start_status": [
+          "converged",
+          "converged",
+          "converged",
+          "converged",
+          "converged",
+          "converged",
+          "converged",
+          "converged",
+          "converged",
+          "converged",
+          "converged",
+          "converged",
+          "converged",
+          "converged",
+          "converged",
+          "converged",
+          "converged",
+          "converged",
+          "converged",
+          "converged",
+          "converged",
+          "converged",
+          "converged",
+          "converged"
+        ]
+      }
+    },
+    "3": {
+      "k": 3,
+      "regimes": [
+        "calm",
+        "middle",
+        "stress"
+      ],
+      "dates": 1759,
+      "first_date": "2000-01-03",
+      "last_date": "2006-12-29",
+      "backend": "statsmodels",
+      "llf": 5660.842282560327,
+      "means": [
+        0.0006820962327363487,
+        -0.0001013809241860491,
+        -0.0007177012325180245
+      ],
+      "variances": [
+        3.583729407856479e-05,
+        9.531160197066722e-05,
+        0.0003061655215396811
+      ],
+      "sd_daily": [
+        0.005986425818346436,
+        0.00976276610242544,
+        0.01749758616323066
+      ],
+      "transition": [
+        [
+          0.9909018194062329,
+          0.009098180593756057,
+          1.099120794378905e-14
+        ],
+        [
+          0.011157988679498064,
+          0.9780172625263673,
+          0.010824748794134642
+        ],
+        [
+          4.8951398167728476e-70,
+          0.012655623097276771,
+          0.9873443769027233
+        ]
+      ],
+      "expected_durations_days": [
+        109.91208513546881,
+        45.49023983930375,
+        79.01625959571926
+      ],
+      "share_of_days_most_likely": [
+        0.39511085844229676,
+        0.3320068220579875,
+        0.27288231949971575
+      ],
+      "mean_filtered_probability": [
+        0.3905638670449682,
+        0.3411891643996891,
+        0.26824696855534225
+      ],
+      "share_of_days_stress_above_threshold": 0.27060830017055143,
+      "stress_threshold": 0.5,
+      "multi_start": {
+        "n_starts": 24,
+        "n_converged": 24,
+        "chosen_start": 8,
+        "n_distinct_optima": 2,
+        "start_llfs": [
+          5660.842282476735,
+          5660.842282484404,
+          5659.598134825703,
+          5660.842282549781,
+          5659.598135119086,
+          5660.842282547936,
+          5660.842097806283,
+          5660.8422824501795,
+          5660.842282560327,
+          5660.842281860174,
+          5659.552893495653,
+          5660.842282557711,
+          5660.842282558037,
+          5660.842282544608,
+          5659.59813524216,
+          5659.59813524538,
+          5659.598135252276,
+          5660.842282263452,
+          5660.842282554095,
+          5660.842282546206,
+          5659.598132481807,
+          5659.598134996702,
+          5659.598128142297,
+          5659.598135122247
+        ],
+        "start_status": [
+          "converged",
+          "converged",
+          "converged",
+          "converged",
+          "converged",
+          "converged",
+          "converged",
+          "converged",
+          "converged",
+          "converged",
+          "converged",
+          "converged",
+          "converged",
+          "converged",
+          "converged",
+          "converged",
+          "converged",
+          "converged",
+          "converged",
+          "converged",
+          "converged",
+          "converged",
+          "converged",
+          "converged"
+        ]
+      }
+    }
+  },
+  "stress_vol": {
+    "rule": "trailing 20-day sd of the log return above its median",
+    "median_sd": 0.009084179097550146,
+    "share_of_days_stressed": 0.5,
+    "dates_without_value": 19
+  }
+}

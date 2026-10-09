@@ -1,0 +1,1691 @@
+{
+  "what": "brief 11 C: sector regimes on 2000-2006, descriptive input to Q28",
+  "caveat": "The gate's parameters are estimated on all of 2000-2006, so the regime probabilities are causal in the data they filter (each date's probability uses market returns up to that date only; filtered, never smoothed) but not in the parameters. A descriptive in-sample diagnostic, not a forecast.",
+  "does_not_decide": "the industry gate's form (Q28), K (Q18)",
+  "expectation_written_before_the_run": "raw sector regimes largely copy the market's; sector-relative regimes should not",
+  "settings": {
+    "start": "2000-01-01",
+    "end": "2006-12-31",
+    "n_states": 2,
+    "min_sector_names": 5,
+    "weightings": [
+      "value",
+      "equal"
+    ],
+    "stress_threshold": 0.5,
+    "min_episode_days": 5,
+    "fit_backend": "statsmodels",
+    "panel_file": "../Data/derived/pit_panel_crsp_2000-01-01_2024-12-31_q26_market_neutral.pt",
+    "out_dir": "results/diagnostics"
+  },
+  "market_gate": {
+    "k": 2,
+    "regimes": [
+      "calm",
+      "stress"
+    ],
+    "dates": 1759,
+    "first_date": "2000-01-03",
+    "last_date": "2006-12-29",
+    "backend": "statsmodels",
+    "llf": 5624.381880313421,
+    "means": [
+      0.0004200466432211013,
+      -0.0004523927274686063
+    ],
+    "variances": [
+      4.8080922905283047e-05,
+      0.00023485672231267539
+    ],
+    "sd_daily": [
+      0.00693404087854139,
+      0.015325035801350527
+    ],
+    "transition": [
+      [
+        0.9956319642043181,
+        0.004368035795681902
+      ],
+      [
+        0.005667181718748704,
+        0.9943328182812513
+      ]
+    ],
+    "expected_durations_days": [
+      228.93585281250844,
+      176.45455000881793
+    ],
+    "share_of_days_most_likely": [
+      0.5656623081296192,
+      0.4343376918703809
+    ],
+    "mean_filtered_probability": [
+      0.5681517643090729,
+      0.4318482356909274
+    ],
+    "share_of_days_stress_above_threshold": 0.4343376918703809,
+    "stress_threshold": 0.5,
+    "multi_start": {
+      "n_starts": 24,
+      "n_converged": 24,
+      "chosen_start": 2,
+      "n_distinct_optima": 1,
+      "start_llfs": [
+        5624.38188031286,
+        5624.3818803129,
+        5624.381880313421,
+        5624.381880288278,
+        5624.381880312976,
+        5624.381880313411,
+        5624.3818803131435,
+        5624.381880313418,
+        5624.38188031342,
+        5624.3818803134045,
+        5624.381880313413,
+        5624.381880313369,
+        5624.381880313284,
+        5624.381880313404,
+        5624.38188031342,
+        5624.381880313419,
+        5624.38188031342,
+        5624.381880313415,
+        5624.381880313419,
+        5624.381880313418,
+        5624.3818803134145,
+        5624.38188031342,
+        5624.3818803134145,
+        5624.38188031342
+      ],
+      "start_status": [
+        "converged",
+        "converged",
+        "converged",
+        "converged",
+        "converged",
+        "converged",
+        "converged",
+        "converged",
+        "converged",
+        "converged",
+        "converged",
+        "converged",
+        "converged",
+        "converged",
+        "converged",
+        "converged",
+        "converged",
+        "converged",
+        "converged",
+        "converged",
+        "converged",
+        "converged",
+        "converged",
+        "converged"
+      ]
+    }
+  },
+  "sector_dates": {
+    "first": "2000-01-04",
+    "last": "2006-12-29",
+    "dates": 1758,
+    "note": "starts on the window's second date: the previous day's market equity is never read from before `start`"
+  },
+  "thin_sectors": {
+    "10": {
+      "name": "Energy",
+      "thin_dates": 0,
+      "median_names": 26.0,
+      "min_names": 23,
+      "fitted": true
+    },
+    "15": {
+      "name": "Materials",
+      "thin_dates": 0,
+      "median_names": 34.0,
+      "min_names": 29,
+      "fitted": true
+    },
+    "20": {
+      "name": "Industrials",
+      "thin_dates": 0,
+      "median_names": 59.0,
+      "min_names": 51,
+      "fitted": true
+    },
+    "25": {
+      "name": "Consumer Discretionary",
+      "thin_dates": 0,
+      "median_names": 87.0,
+      "min_names": 83,
+      "fitted": true
+    },
+    "30": {
+      "name": "Consumer Staples",
+      "thin_dates": 0,
+      "median_names": 37.0,
+      "min_names": 33,
+      "fitted": true
+    },
+    "35": {
+      "name": "Health Care",
+      "thin_dates": 0,
+      "median_names": 47.0,
+      "min_names": 37,
+      "fitted": true
+    },
+    "40": {
+      "name": "Financials",
+      "thin_dates": 0,
+      "median_names": 81.0,
+      "min_names": 69,
+      "fitted": true
+    },
+    "45": {
+      "name": "Information Technology",
+      "thin_dates": 0,
+      "median_names": 78.0,
+      "min_names": 62,
+      "fitted": true
+    },
+    "50": {
+      "name": "Communication Services",
+      "thin_dates": 0,
+      "median_names": 12.0,
+      "min_names": 8,
+      "fitted": true
+    },
+    "55": {
+      "name": "Utilities",
+      "thin_dates": 0,
+      "median_names": 37.0,
+      "min_names": 31,
+      "fitted": true
+    },
+    "60": {
+      "name": "Real Estate",
+      "thin_dates": 1758,
+      "median_names": 0.0,
+      "min_names": 0,
+      "fitted": false
+    }
+  },
+  "measures": [
+    {
+      "weighting": "value",
+      "series": "relative",
+      "sector": 10,
+      "name": "Energy",
+      "dates": 1758,
+      "share_stressed": 0.2804323094425484,
+      "share_stressed_while_market_calm": 0.07736063708759955,
+      "p_stress_given_market_calm": 0.13682092555331993,
+      "corr_with_market_stress": 0.41682920296437753,
+      "expected_durations_days": [
+        199.81213618592363,
+        82.7735798982615
+      ],
+      "sd_daily": [
+        0.010334141010464813,
+        0.02023659866070081
+      ],
+      "stress_episodes": 12,
+      "llf": 5179.427453134165,
+      "n_converged": 24,
+      "n_starts": 24
+    },
+    {
+      "weighting": "value",
+      "series": "relative",
+      "sector": 15,
+      "name": "Materials",
+      "dates": 1758,
+      "share_stressed": 0.3043230944254835,
+      "share_stressed_while_market_calm": 0.0608646188850967,
+      "p_stress_given_market_calm": 0.10764587525150905,
+      "corr_with_market_stress": 0.5629643352719212,
+      "expected_durations_days": [
+        211.87609076442058,
+        103.08836205720675
+      ],
+      "sd_daily": [
+        0.00660025764610378,
+        0.016421545255332733
+      ],
+      "stress_episodes": 17,
+      "llf": 5792.952940816732,
+      "n_converged": 24,
+      "n_starts": 24
+    },
+    {
+      "weighting": "value",
+      "series": "relative",
+      "sector": 20,
+      "name": "Industrials",
+      "dates": 1758,
+      "share_stressed": 0.40159271899886234,
+      "share_stressed_while_market_calm": 0.09271899886234357,
+      "p_stress_given_market_calm": 0.16398390342052313,
+      "corr_with_market_stress": 0.6085705439639016,
+      "expected_durations_days": [
+        203.20020229986346,
+        142.86860318304525
+      ],
+      "sd_daily": [
+        0.003350215150521722,
+        0.008556262925566027
+      ],
+      "stress_episodes": 16,
+      "llf": 6821.574260180212,
+      "n_converged": 24,
+      "n_starts": 24
+    },
+    {
+      "weighting": "value",
+      "series": "relative",
+      "sector": 25,
+      "name": "Consumer Discretionary",
+      "dates": 1758,
+      "share_stressed": 0.36973833902161546,
+      "share_stressed_while_market_calm": 0.05802047781569966,
+      "p_stress_given_market_calm": 0.10261569416498995,
+      "corr_with_market_stress": 0.6989315763974641,
+      "expected_durations_days": [
+        214.9091349735889,
+        130.10324030502002
+      ],
+      "sd_daily": [
+        0.003950764206776796,
+        0.010610697796068817
+      ],
+      "stress_episodes": 13,
+      "llf": 6563.125185920413,
+      "n_converged": 24,
+      "n_starts": 24
+    },
+    {
+      "weighting": "value",
+      "series": "relative",
+      "sector": 30,
+      "name": "Consumer Staples",
+      "dates": 1758,
+      "share_stressed": 0.4448236632536974,
+      "share_stressed_while_market_calm": 0.06996587030716724,
+      "p_stress_given_market_calm": 0.12374245472837023,
+      "corr_with_market_stress": 0.7977249391061288,
+      "expected_durations_days": [
+        379.27042383572785,
+        312.3412422715941
+      ],
+      "sd_daily": [
+        0.004340392314578124,
+        0.015009323666294212
+      ],
+      "stress_episodes": 11,
+      "llf": 6081.404280379607,
+      "n_converged": 24,
+      "n_starts": 24
+    },
+    {
+      "weighting": "value",
+      "series": "relative",
+      "sector": 35,
+      "name": "Health Care",
+      "dates": 1758,
+      "share_stressed": 0.366325369738339,
+      "share_stressed_while_market_calm": 0.08361774744027303,
+      "p_stress_given_market_calm": 0.14788732394366197,
+      "corr_with_market_stress": 0.5990921348511783,
+      "expected_durations_days": [
+        45.305447481652884,
+        27.305391135283035
+      ],
+      "sd_daily": [
+        0.004755432871503614,
+        0.01549753407206814
+      ],
+      "stress_episodes": 33,
+      "llf": 6009.836681182796,
+      "n_converged": 24,
+      "n_starts": 24
+    },
+    {
+      "weighting": "value",
+      "series": "relative",
+      "sector": 40,
+      "name": "Financials",
+      "dates": 1758,
+      "share_stressed": 0.2992036405005688,
+      "share_stressed_while_market_calm": 0.05915813424345848,
+      "p_stress_given_market_calm": 0.10462776659959759,
+      "corr_with_market_stress": 0.5463577708425676,
+      "expected_durations_days": [
+        94.01988238283812,
+        41.7223527954676
+      ],
+      "sd_daily": [
+        0.0035682644003013713,
+        0.012138168065050763
+      ],
+      "stress_episodes": 22,
+      "llf": 6684.163760246995,
+      "n_converged": 24,
+      "n_starts": 24
+    },
+    {
+      "weighting": "value",
+      "series": "relative",
+      "sector": 45,
+      "name": "Information Technology",
+      "dates": 1758,
+      "share_stressed": 0.43686006825938567,
+      "share_stressed_while_market_calm": 0.07337883959044368,
+      "p_stress_given_market_calm": 0.12977867203219315,
+      "corr_with_market_stress": 0.7664952654274911,
+      "expected_durations_days": [
+        580.7964289729928,
+        468.84327945593344
+      ],
+      "sd_daily": [
+        0.0063869523596627896,
+        0.019828112372896906
+      ],
+      "stress_episodes": 7,
+      "llf": 5513.57035842426,
+      "n_converged": 24,
+      "n_starts": 24
+    },
+    {
+      "weighting": "value",
+      "series": "relative",
+      "sector": 50,
+      "name": "Communication Services",
+      "dates": 1758,
+      "share_stressed": 0.3521046643913538,
+      "share_stressed_while_market_calm": 0.06484641638225255,
+      "p_stress_given_market_calm": 0.11468812877263582,
+      "corr_with_market_stress": 0.6628227313563101,
+      "expected_durations_days": [
+        38.437797187972556,
+        22.85427909151761
+      ],
+      "sd_daily": [
+        0.006580027118506992,
+        0.01726692611916492
+      ],
+      "stress_episodes": 34,
+      "llf": 5599.978446024223,
+      "n_converged": 24,
+      "n_starts": 24
+    },
+    {
+      "weighting": "value",
+      "series": "relative",
+      "sector": 55,
+      "name": "Utilities",
+      "dates": 1758,
+      "share_stressed": 0.4101251422070535,
+      "share_stressed_while_market_calm": 0.06370875995449374,
+      "p_stress_given_market_calm": 0.11267605633802817,
+      "corr_with_market_stress": 0.7671166452744151,
+      "expected_durations_days": [
+        310.8551399074545,
+        238.87977284595752
+      ],
+      "sd_daily": [
+        0.006707593423062457,
+        0.017626880900065384
+      ],
+      "stress_episodes": 9,
+      "llf": 5556.914545880078,
+      "n_converged": 24,
+      "n_starts": 24
+    },
+    {
+      "weighting": "value",
+      "series": "raw",
+      "sector": 10,
+      "name": "Energy",
+      "dates": 1758,
+      "share_stressed": 0.31456200227531284,
+      "share_stressed_while_market_calm": 0.09556313993174062,
+      "p_stress_given_market_calm": 0.16901408450704225,
+      "corr_with_market_stress": 0.392733864703436,
+      "expected_durations_days": [
+        65.89549154887033,
+        34.43218215598178
+      ],
+      "sd_daily": [
+        0.011205919814356586,
+        0.019862232872684217
+      ],
+      "stress_episodes": 24,
+      "llf": 5005.2418024234,
+      "n_converged": 24,
+      "n_starts": 24
+    },
+    {
+      "weighting": "value",
+      "series": "raw",
+      "sector": 15,
+      "name": "Materials",
+      "dates": 1758,
+      "share_stressed": 0.40386803185437997,
+      "share_stressed_while_market_calm": 0.09783845278725825,
+      "p_stress_given_market_calm": 0.17303822937625754,
+      "corr_with_market_stress": 0.6302458338042595,
+      "expected_durations_days": [
+        102.04198342522763,
+        71.52433926642045
+      ],
+      "sd_daily": [
+        0.009752802420870076,
+        0.019180166697999608
+      ],
+      "stress_episodes": 21,
+      "llf": 5113.190613857771,
+      "n_converged": 24,
+      "n_starts": 24
+    },
+    {
+      "weighting": "value",
+      "series": "raw",
+      "sector": 20,
+      "name": "Industrials",
+      "dates": 1758,
+      "share_stressed": 0.4283276450511945,
+      "share_stressed_while_market_calm": 0.03128555176336746,
+      "p_stress_given_market_calm": 0.05533199195171026,
+      "corr_with_market_stress": 0.9227557035557761,
+      "expected_durations_days": [
+        367.3172338363272,
+        281.1973530598438
+      ],
+      "sd_daily": [
+        0.008008983514157368,
+        0.017703284023741644
+      ],
+      "stress_episodes": 7,
+      "llf": 5383.607603959261,
+      "n_converged": 24,
+      "n_starts": 24
+    },
+    {
+      "weighting": "value",
+      "series": "raw",
+      "sector": 25,
+      "name": "Consumer Discretionary",
+      "dates": 1758,
+      "share_stressed": 0.4118316268486917,
+      "share_stressed_while_market_calm": 0.032423208191126277,
+      "p_stress_given_market_calm": 0.05734406438631791,
+      "corr_with_market_stress": 0.8895741716417263,
+      "expected_durations_days": [
+        344.4239074350425,
+        261.0687258156912
+      ],
+      "sd_daily": [
+        0.008430201149932615,
+        0.018587479734584047
+      ],
+      "stress_episodes": 8,
+      "llf": 5297.45636165955,
+      "n_converged": 24,
+      "n_starts": 24
+    },
+    {
+      "weighting": "value",
+      "series": "raw",
+      "sector": 30,
+      "name": "Consumer Staples",
+      "dates": 1758,
+      "share_stressed": 0.3282138794084187,
+      "share_stressed_while_market_calm": 0.03640500568828214,
+      "p_stress_given_market_calm": 0.06438631790744467,
+      "corr_with_market_stress": 0.7126770489798887,
+      "expected_durations_days": [
+        382.18765437886503,
+        207.1513804064638
+      ],
+      "sd_daily": [
+        0.006163037239025492,
+        0.014370420413128452
+      ],
+      "stress_episodes": 9,
+      "llf": 5939.678537925892,
+      "n_converged": 23,
+      "n_starts": 24
+    },
+    {
+      "weighting": "value",
+      "series": "raw",
+      "sector": 35,
+      "name": "Health Care",
+      "dates": 1758,
+      "share_stressed": 0.3594994311717861,
+      "share_stressed_while_market_calm": 0.052901023890784986,
+      "p_stress_given_market_calm": 0.09356136820925554,
+      "corr_with_market_stress": 0.7215470944248752,
+      "expected_durations_days": [
+        88.58372133654422,
+        52.19518082935908
+      ],
+      "sd_daily": [
+        0.007348148767367474,
+        0.01728962321311997
+      ],
+      "stress_episodes": 26,
+      "llf": 5531.685607305301,
+      "n_converged": 24,
+      "n_starts": 24
+    },
+    {
+      "weighting": "value",
+      "series": "raw",
+      "sector": 40,
+      "name": "Financials",
+      "dates": 1758,
+      "share_stressed": 0.3873720136518771,
+      "share_stressed_while_market_calm": 0.030716723549488054,
+      "p_stress_given_market_calm": 0.05432595573440644,
+      "corr_with_market_stress": 0.863088866693342,
+      "expected_durations_days": [
+        211.90905842395298,
+        133.05149291805182
+      ],
+      "sd_daily": [
+        0.008095741248023054,
+        0.0200291224950945
+      ],
+      "stress_episodes": 12,
+      "llf": 5341.383343998441,
+      "n_converged": 24,
+      "n_starts": 24
+    },
+    {
+      "weighting": "value",
+      "series": "raw",
+      "sector": 45,
+      "name": "Information Technology",
+      "dates": 1758,
+      "share_stressed": 0.4778156996587031,
+      "share_stressed_while_market_calm": 0.07281001137656427,
+      "p_stress_given_market_calm": 0.12877263581488935,
+      "corr_with_market_stress": 0.8586052750248061,
+      "expected_durations_days": [
+        657.0061478490862,
+        579.9844142437371
+      ],
+      "sd_daily": [
+        0.010883867533157014,
+        0.030090819149080083
+      ],
+      "stress_episodes": 5,
+      "llf": 4619.653533125143,
+      "n_converged": 23,
+      "n_starts": 24
+    },
+    {
+      "weighting": "value",
+      "series": "raw",
+      "sector": 50,
+      "name": "Communication Services",
+      "dates": 1758,
+      "share_stressed": 0.3873720136518771,
+      "share_stressed_while_market_calm": 0.04664391353811149,
+      "p_stress_given_market_calm": 0.08249496981891348,
+      "corr_with_market_stress": 0.8038196552822527,
+      "expected_durations_days": [
+        130.7458148330209,
+        88.93663252760993
+      ],
+      "sd_daily": [
+        0.00890195649182239,
+        0.02276716574055559
+      ],
+      "stress_episodes": 17,
+      "llf": 5099.511688889939,
+      "n_converged": 24,
+      "n_starts": 24
+    },
+    {
+      "weighting": "value",
+      "series": "raw",
+      "sector": 55,
+      "name": "Utilities",
+      "dates": 1758,
+      "share_stressed": 0.34072810011376564,
+      "share_stressed_while_market_calm": 0.053469852104664393,
+      "p_stress_given_market_calm": 0.09456740442655935,
+      "corr_with_market_stress": 0.674781057068998,
+      "expected_durations_days": [
+        59.6764329833809,
+        33.16493138143158
+      ],
+      "sd_daily": [
+        0.007711187111836055,
+        0.019262402599632127
+      ],
+      "stress_episodes": 31,
+      "llf": 5403.726843198243,
+      "n_converged": 24,
+      "n_starts": 24
+    },
+    {
+      "weighting": "equal",
+      "series": "relative",
+      "sector": 10,
+      "name": "Energy",
+      "dates": 1758,
+      "share_stressed": 0.31285551763367464,
+      "share_stressed_while_market_calm": 0.10409556313993173,
+      "p_stress_given_market_calm": 0.1841046277665996,
+      "corr_with_market_stress": 0.369464317682867,
+      "expected_durations_days": [
+        126.11841771861317,
+        61.48698341441584
+      ],
+      "sd_daily": [
+        0.012440427822925447,
+        0.021905108640390306
+      ],
+      "stress_episodes": 16,
+      "llf": 4860.604204911193,
+      "n_converged": 24,
+      "n_starts": 24
+    },
+    {
+      "weighting": "equal",
+      "series": "relative",
+      "sector": 15,
+      "name": "Materials",
+      "dates": 1758,
+      "share_stressed": 0.3435722411831627,
+      "share_stressed_while_market_calm": 0.08361774744027303,
+      "p_stress_given_market_calm": 0.14788732394366197,
+      "corr_with_market_stress": 0.5431642361864308,
+      "expected_durations_days": [
+        181.04929562166203,
+        101.37677573863012
+      ],
+      "sd_daily": [
+        0.006339134219323496,
+        0.014479951605675436
+      ],
+      "stress_episodes": 15,
+      "llf": 5855.800257645686,
+      "n_converged": 24,
+      "n_starts": 24
+    },
+    {
+      "weighting": "equal",
+      "series": "relative",
+      "sector": 20,
+      "name": "Industrials",
+      "dates": 1758,
+      "share_stressed": 0.34812286689419797,
+      "share_stressed_while_market_calm": 0.06882821387940842,
+      "p_stress_given_market_calm": 0.12173038229376258,
+      "corr_with_market_stress": 0.6248306851277883,
+      "expected_durations_days": [
+        155.95063996592958,
+        89.09998278289761
+      ],
+      "sd_daily": [
+        0.0038384345502203354,
+        0.008622559472565891
+      ],
+      "stress_episodes": 15,
+      "llf": 6737.925926938589,
+      "n_converged": 24,
+      "n_starts": 24
+    },
+    {
+      "weighting": "equal",
+      "series": "relative",
+      "sector": 25,
+      "name": "Consumer Discretionary",
+      "dates": 1758,
+      "share_stressed": 0.350967007963595,
+      "share_stressed_while_market_calm": 0.07736063708759955,
+      "p_stress_given_market_calm": 0.13682092555331993,
+      "corr_with_market_stress": 0.5827536249186791,
+      "expected_durations_days": [
+        138.4686569541192,
+        77.33106534191046
+      ],
+      "sd_daily": [
+        0.00406828417773827,
+        0.009939893636807366
+      ],
+      "stress_episodes": 14,
+      "llf": 6584.013760718557,
+      "n_converged": 24,
+      "n_starts": 24
+    },
+    {
+      "weighting": "equal",
+      "series": "relative",
+      "sector": 30,
+      "name": "Consumer Staples",
+      "dates": 1758,
+      "share_stressed": 0.44197952218430037,
+      "share_stressed_while_market_calm": 0.0745164960182025,
+      "p_stress_given_market_calm": 0.1317907444668008,
+      "corr_with_market_stress": 0.7765497042003375,
+      "expected_durations_days": [
+        247.26172099554694,
+        193.76018862905616
+      ],
+      "sd_daily": [
+        0.004207708621277112,
+        0.01391800980051197
+      ],
+      "stress_episodes": 9,
+      "llf": 6181.915237756257,
+      "n_converged": 24,
+      "n_starts": 24
+    },
+    {
+      "weighting": "equal",
+      "series": "relative",
+      "sector": 35,
+      "name": "Health Care",
+      "dates": 1758,
+      "share_stressed": 0.4812286689419795,
+      "share_stressed_while_market_calm": 0.09897610921501707,
+      "p_stress_given_market_calm": 0.1750503018108652,
+      "corr_with_market_stress": 0.757858977427601,
+      "expected_durations_days": [
+        104.018127543136,
+        95.32632362121284
+      ],
+      "sd_daily": [
+        0.004107837328993153,
+        0.011561960337939312
+      ],
+      "stress_episodes": 16,
+      "llf": 6238.56778426501,
+      "n_converged": 24,
+      "n_starts": 24
+    },
+    {
+      "weighting": "equal",
+      "series": "relative",
+      "sector": 40,
+      "name": "Financials",
+      "dates": 1758,
+      "share_stressed": 0.2627986348122867,
+      "share_stressed_while_market_calm": 0.04379977246871445,
+      "p_stress_given_market_calm": 0.07746478873239436,
+      "corr_with_market_stress": 0.5430043012356233,
+      "expected_durations_days": [
+        137.82794335922515,
+        52.89336635132951
+      ],
+      "sd_daily": [
+        0.003721880045714213,
+        0.012938858565615864
+      ],
+      "stress_episodes": 18,
+      "llf": 6691.822419640111,
+      "n_converged": 24,
+      "n_starts": 24
+    },
+    {
+      "weighting": "equal",
+      "series": "relative",
+      "sector": 45,
+      "name": "Information Technology",
+      "dates": 1758,
+      "share_stressed": 0.45449374288964733,
+      "share_stressed_while_market_calm": 0.09271899886234357,
+      "p_stress_given_market_calm": 0.16398390342052313,
+      "corr_with_market_stress": 0.7231422637007824,
+      "expected_durations_days": [
+        378.5214212732459,
+        317.2340589475236
+      ],
+      "sd_daily": [
+        0.008033628490793072,
+        0.022379184210458217
+      ],
+      "stress_episodes": 7,
+      "llf": 5158.253070296774,
+      "n_converged": 24,
+      "n_starts": 24
+    },
+    {
+      "weighting": "equal",
+      "series": "relative",
+      "sector": 50,
+      "name": "Communication Services",
+      "dates": 1758,
+      "share_stressed": 0.3435722411831627,
+      "share_stressed_while_market_calm": 0.06598407281001138,
+      "p_stress_given_market_calm": 0.11670020120724346,
+      "corr_with_market_stress": 0.6534921286881994,
+      "expected_durations_days": [
+        44.828540655896305,
+        26.0653920111557
+      ],
+      "sd_daily": [
+        0.006420893452817883,
+        0.019999219587109922
+      ],
+      "stress_episodes": 29,
+      "llf": 5532.765583184631,
+      "n_converged": 24,
+      "n_starts": 24
+    },
+    {
+      "weighting": "equal",
+      "series": "relative",
+      "sector": 55,
+      "name": "Utilities",
+      "dates": 1758,
+      "share_stressed": 0.4840728100113766,
+      "share_stressed_while_market_calm": 0.0676905574516496,
+      "p_stress_given_market_calm": 0.11971830985915492,
+      "corr_with_market_stress": 0.8789646026743082,
+      "expected_durations_days": [
+        1319.9585410024263,
+        1280.041044377512
+      ],
+      "sd_daily": [
+        0.006206605767979753,
+        0.017107804761122312
+      ],
+      "stress_episodes": 4,
+      "llf": 5565.247827578257,
+      "n_converged": 24,
+      "n_starts": 24
+    },
+    {
+      "weighting": "equal",
+      "series": "raw",
+      "sector": 10,
+      "name": "Energy",
+      "dates": 1758,
+      "share_stressed": 0.5255972696245734,
+      "share_stressed_while_market_calm": 0.21729237770193402,
+      "p_stress_given_market_calm": 0.3843058350100604,
+      "corr_with_market_stress": 0.3930449378376504,
+      "expected_durations_days": [
+        118.19241651016534,
+        135.33977269774266
+      ],
+      "sd_daily": [
+        0.012687377287669055,
+        0.01968627400724037
+      ],
+      "stress_episodes": 20,
+      "llf": 4745.201043086338,
+      "n_converged": 24,
+      "n_starts": 24
+    },
+    {
+      "weighting": "equal",
+      "series": "raw",
+      "sector": 15,
+      "name": "Materials",
+      "dates": 1758,
+      "share_stressed": 0.3464163822525597,
+      "share_stressed_while_market_calm": 0.08418657565415244,
+      "p_stress_given_market_calm": 0.1488933601609658,
+      "corr_with_market_stress": 0.5772862332108194,
+      "expected_durations_days": [
+        93.6833296304936,
+        53.101320503964146
+      ],
+      "sd_daily": [
+        0.009915277481666018,
+        0.018389395843583664
+      ],
+      "stress_episodes": 20,
+      "llf": 5180.136295593382,
+      "n_converged": 24,
+      "n_starts": 24
+    },
+    {
+      "weighting": "equal",
+      "series": "raw",
+      "sector": 20,
+      "name": "Industrials",
+      "dates": 1758,
+      "share_stressed": 0.31569965870307165,
+      "share_stressed_while_market_calm": 0.022753128555176336,
+      "p_stress_given_market_calm": 0.04024144869215292,
+      "corr_with_market_stress": 0.7961644444257414,
+      "expected_durations_days": [
+        103.9029569172716,
+        54.76716012166968
+      ],
+      "sd_daily": [
+        0.008574492755984755,
+        0.017578254962725248
+      ],
+      "stress_episodes": 21,
+      "llf": 5394.573888529881,
+      "n_converged": 24,
+      "n_starts": 24
+    },
+    {
+      "weighting": "equal",
+      "series": "raw",
+      "sector": 25,
+      "name": "Consumer Discretionary",
+      "dates": 1758,
+      "share_stressed": 0.28896473265073946,
+      "share_stressed_while_market_calm": 0.005119453924914676,
+      "p_stress_given_market_calm": 0.009054325955734407,
+      "corr_with_market_stress": 0.7811348515583522,
+      "expected_durations_days": [
+        226.24557622171457,
+        98.68639391877346
+      ],
+      "sd_daily": [
+        0.008903584955264986,
+        0.01905773486466921
+      ],
+      "stress_episodes": 8,
+      "llf": 5385.847789196224,
+      "n_converged": 24,
+      "n_starts": 24
+    },
+    {
+      "weighting": "equal",
+      "series": "raw",
+      "sector": 30,
+      "name": "Consumer Staples",
+      "dates": 1758,
+      "share_stressed": 0.2627986348122867,
+      "share_stressed_while_market_calm": 0.015358361774744027,
+      "p_stress_given_market_calm": 0.02716297786720322,
+      "corr_with_market_stress": 0.700294942883856,
+      "expected_durations_days": [
+        256.15037786715124,
+        102.8126939794333
+      ],
+      "sd_daily": [
+        0.006150070409961396,
+        0.014017792035593831
+      ],
+      "stress_episodes": 15,
+      "llf": 6036.483271821369,
+      "n_converged": 24,
+      "n_starts": 24
+    },
+    {
+      "weighting": "equal",
+      "series": "raw",
+      "sector": 35,
+      "name": "Health Care",
+      "dates": 1758,
+      "share_stressed": 0.27417519908987487,
+      "share_stressed_while_market_calm": 0.027303754266211604,
+      "p_stress_given_market_calm": 0.0482897384305835,
+      "corr_with_market_stress": 0.70433587056036,
+      "expected_durations_days": [
+        109.2906196344808,
+        47.01760325572888
+      ],
+      "sd_daily": [
+        0.007747943240667407,
+        0.016793960288556162
+      ],
+      "stress_episodes": 21,
+      "llf": 5600.565231285933,
+      "n_converged": 24,
+      "n_starts": 24
+    },
+    {
+      "weighting": "equal",
+      "series": "raw",
+      "sector": 40,
+      "name": "Financials",
+      "dates": 1758,
+      "share_stressed": 0.36177474402730375,
+      "share_stressed_while_market_calm": 0.03185437997724687,
+      "p_stress_given_market_calm": 0.056338028169014086,
+      "corr_with_market_stress": 0.8017284925695494,
+      "expected_durations_days": [
+        242.4976799612455,
+        142.19249984791725
+      ],
+      "sd_daily": [
+        0.007965416463941418,
+        0.01947288762551476
+      ],
+      "stress_episodes": 10,
+      "llf": 5407.801958233479,
+      "n_converged": 24,
+      "n_starts": 24
+    },
+    {
+      "weighting": "equal",
+      "series": "raw",
+      "sector": 45,
+      "name": "Information Technology",
+      "dates": 1758,
+      "share_stressed": 0.4778156996587031,
+      "share_stressed_while_market_calm": 0.0676905574516496,
+      "p_stress_given_market_calm": 0.11971830985915492,
+      "corr_with_market_stress": 0.8772854244820932,
+      "expected_durations_days": [
+        636.2610494052027,
+        563.6189928592864
+      ],
+      "sd_daily": [
+        0.012855627636201902,
+        0.03259444290482144
+      ],
+      "stress_episodes": 5,
+      "llf": 4394.436878505736,
+      "n_converged": 24,
+      "n_starts": 24
+    },
+    {
+      "weighting": "equal",
+      "series": "raw",
+      "sector": 50,
+      "name": "Communication Services",
+      "dates": 1758,
+      "share_stressed": 0.5301478953356087,
+      "share_stressed_while_market_calm": 0.09726962457337884,
+      "p_stress_given_market_calm": 0.1720321931589537,
+      "corr_with_market_stress": 0.8625241731247342,
+      "expected_durations_days": [
+        1356.7308323632801,
+        1403.9965258844084
+      ],
+      "sd_daily": [
+        0.008252101106705496,
+        0.023808873064663838
+      ],
+      "stress_episodes": 4,
+      "llf": 4972.131650820902,
+      "n_converged": 24,
+      "n_starts": 24
+    },
+    {
+      "weighting": "equal",
+      "series": "raw",
+      "sector": 55,
+      "name": "Utilities",
+      "dates": 1758,
+      "share_stressed": 0.2724687144482366,
+      "share_stressed_while_market_calm": 0.03640500568828214,
+      "p_stress_given_market_calm": 0.06438631790744467,
+      "corr_with_market_stress": 0.6422683535450396,
+      "expected_durations_days": [
+        42.44648601946206,
+        18.088647811482208
+      ],
+      "sd_daily": [
+        0.008053290443366317,
+        0.02180431938156057
+      ],
+      "stress_episodes": 33,
+      "llf": 5352.444186133276,
+      "n_converged": 24,
+      "n_starts": 24
+    }
+  ],
+  "co_stress": {
+    "value": {
+      "relative": {
+        "sectors": [
+          10,
+          15,
+          20,
+          25,
+          30,
+          35,
+          40,
+          45,
+          50,
+          55
+        ],
+        "share_both_stressed": [
+          [
+            0.280432,
+            0.20876,
+            0.236064,
+            0.23777,
+            0.240614,
+            0.221843,
+            0.207622,
+            0.241752,
+            0.178612,
+            0.238908
+          ],
+          [
+            0.20876,
+            0.304323,
+            0.290671,
+            0.263936,
+            0.296359,
+            0.261092,
+            0.245165,
+            0.292378,
+            0.213311,
+            0.280432
+          ],
+          [
+            0.236064,
+            0.290671,
+            0.401593,
+            0.308874,
+            0.368032,
+            0.298066,
+            0.263936,
+            0.369738,
+            0.264505,
+            0.348692
+          ],
+          [
+            0.23777,
+            0.263936,
+            0.308874,
+            0.369738,
+            0.352105,
+            0.293515,
+            0.255404,
+            0.348123,
+            0.265643,
+            0.335609
+          ],
+          [
+            0.240614,
+            0.296359,
+            0.368032,
+            0.352105,
+            0.444824,
+            0.328214,
+            0.282708,
+            0.414676,
+            0.303185,
+            0.389647
+          ],
+          [
+            0.221843,
+            0.261092,
+            0.298066,
+            0.293515,
+            0.328214,
+            0.366325,
+            0.253129,
+            0.324801,
+            0.238339,
+            0.31058
+          ],
+          [
+            0.207622,
+            0.245165,
+            0.263936,
+            0.255404,
+            0.282708,
+            0.253129,
+            0.299204,
+            0.276451,
+            0.204778,
+            0.263367
+          ],
+          [
+            0.241752,
+            0.292378,
+            0.369738,
+            0.348123,
+            0.414676,
+            0.324801,
+            0.276451,
+            0.43686,
+            0.297497,
+            0.39818
+          ],
+          [
+            0.178612,
+            0.213311,
+            0.264505,
+            0.265643,
+            0.303185,
+            0.238339,
+            0.204778,
+            0.297497,
+            0.352105,
+            0.276451
+          ],
+          [
+            0.238908,
+            0.280432,
+            0.348692,
+            0.335609,
+            0.389647,
+            0.31058,
+            0.263367,
+            0.39818,
+            0.276451,
+            0.410125
+          ]
+        ]
+      },
+      "raw": {
+        "sectors": [
+          10,
+          15,
+          20,
+          25,
+          30,
+          35,
+          40,
+          45,
+          50,
+          55
+        ],
+        "share_both_stressed": [
+          [
+            0.314562,
+            0.242321,
+            0.225256,
+            0.226962,
+            0.199659,
+            0.201365,
+            0.220705,
+            0.23322,
+            0.186576,
+            0.215017
+          ],
+          [
+            0.242321,
+            0.403868,
+            0.3157,
+            0.304323,
+            0.281001,
+            0.25711,
+            0.306598,
+            0.343003,
+            0.278157,
+            0.246303
+          ],
+          [
+            0.225256,
+            0.3157,
+            0.428328,
+            0.37884,
+            0.300341,
+            0.296359,
+            0.349261,
+            0.423777,
+            0.345279,
+            0.288965
+          ],
+          [
+            0.226962,
+            0.304323,
+            0.37884,
+            0.411832,
+            0.313424,
+            0.32025,
+            0.352673,
+            0.390785,
+            0.322526,
+            0.283845
+          ],
+          [
+            0.199659,
+            0.281001,
+            0.300341,
+            0.313424,
+            0.328214,
+            0.276451,
+            0.306598,
+            0.32025,
+            0.283845,
+            0.227531
+          ],
+          [
+            0.201365,
+            0.25711,
+            0.296359,
+            0.32025,
+            0.276451,
+            0.359499,
+            0.300341,
+            0.319681,
+            0.271331,
+            0.241752
+          ],
+          [
+            0.220705,
+            0.306598,
+            0.349261,
+            0.352673,
+            0.306598,
+            0.300341,
+            0.387372,
+            0.37372,
+            0.313424,
+            0.264505
+          ],
+          [
+            0.23322,
+            0.343003,
+            0.423777,
+            0.390785,
+            0.32025,
+            0.319681,
+            0.37372,
+            0.477816,
+            0.361206,
+            0.31058
+          ],
+          [
+            0.186576,
+            0.278157,
+            0.345279,
+            0.322526,
+            0.283845,
+            0.271331,
+            0.313424,
+            0.361206,
+            0.387372,
+            0.25256
+          ],
+          [
+            0.215017,
+            0.246303,
+            0.288965,
+            0.283845,
+            0.227531,
+            0.241752,
+            0.264505,
+            0.31058,
+            0.25256,
+            0.340728
+          ]
+        ]
+      }
+    },
+    "equal": {
+      "relative": {
+        "sectors": [
+          10,
+          15,
+          20,
+          25,
+          30,
+          35,
+          40,
+          45,
+          50,
+          55
+        ],
+        "share_both_stressed": [
+          [
+            0.312856,
+            0.192833,
+            0.212173,
+            0.236064,
+            0.236633,
+            0.25256,
+            0.189989,
+            0.242321,
+            0.159272,
+            0.245165
+          ],
+          [
+            0.192833,
+            0.343572,
+            0.284414,
+            0.269625,
+            0.311718,
+            0.3157,
+            0.234357,
+            0.308874,
+            0.237201,
+            0.310011
+          ],
+          [
+            0.212173,
+            0.284414,
+            0.348123,
+            0.28157,
+            0.317406,
+            0.320819,
+            0.231513,
+            0.307167,
+            0.251991,
+            0.317975
+          ],
+          [
+            0.236064,
+            0.269625,
+            0.28157,
+            0.350967,
+            0.314562,
+            0.319681,
+            0.23322,
+            0.304892,
+            0.224687,
+            0.3157
+          ],
+          [
+            0.236633,
+            0.311718,
+            0.317406,
+            0.314562,
+            0.44198,
+            0.411263,
+            0.258817,
+            0.406143,
+            0.297497,
+            0.416382
+          ],
+          [
+            0.25256,
+            0.3157,
+            0.320819,
+            0.319681,
+            0.411263,
+            0.481229,
+            0.256542,
+            0.411263,
+            0.307736,
+            0.430034
+          ],
+          [
+            0.189989,
+            0.234357,
+            0.231513,
+            0.23322,
+            0.258817,
+            0.256542,
+            0.262799,
+            0.249716,
+            0.181456,
+            0.248009
+          ],
+          [
+            0.242321,
+            0.308874,
+            0.307167,
+            0.304892,
+            0.406143,
+            0.411263,
+            0.249716,
+            0.454494,
+            0.296928,
+            0.41752
+          ],
+          [
+            0.159272,
+            0.237201,
+            0.251991,
+            0.224687,
+            0.297497,
+            0.307736,
+            0.181456,
+            0.296928,
+            0.343572,
+            0.312856
+          ],
+          [
+            0.245165,
+            0.310011,
+            0.317975,
+            0.3157,
+            0.416382,
+            0.430034,
+            0.248009,
+            0.41752,
+            0.312856,
+            0.484073
+          ]
+        ]
+      },
+      "raw": {
+        "sectors": [
+          10,
+          15,
+          20,
+          25,
+          30,
+          35,
+          40,
+          45,
+          50,
+          55
+        ],
+        "share_both_stressed": [
+          [
+            0.525597,
+            0.287258,
+            0.232651,
+            0.230944,
+            0.213879,
+            0.206485,
+            0.28157,
+            0.361775,
+            0.368601,
+            0.212173
+          ],
+          [
+            0.287258,
+            0.346416,
+            0.234357,
+            0.224118,
+            0.217861,
+            0.196246,
+            0.263936,
+            0.280432,
+            0.283276,
+            0.17463
+          ],
+          [
+            0.232651,
+            0.234357,
+            0.3157,
+            0.256542,
+            0.213311,
+            0.206485,
+            0.266212,
+            0.282139,
+            0.292378,
+            0.189989
+          ],
+          [
+            0.230944,
+            0.224118,
+            0.256542,
+            0.288965,
+            0.217861,
+            0.189989,
+            0.26678,
+            0.281001,
+            0.287258,
+            0.176906
+          ],
+          [
+            0.213879,
+            0.217861,
+            0.213311,
+            0.217861,
+            0.262799,
+            0.195108,
+            0.254835,
+            0.259954,
+            0.262799,
+            0.161547
+          ],
+          [
+            0.206485,
+            0.196246,
+            0.206485,
+            0.189989,
+            0.195108,
+            0.274175,
+            0.23777,
+            0.251991,
+            0.266212,
+            0.172355
+          ],
+          [
+            0.28157,
+            0.263936,
+            0.266212,
+            0.26678,
+            0.254835,
+            0.23777,
+            0.361775,
+            0.346416,
+            0.361775,
+            0.205347
+          ],
+          [
+            0.361775,
+            0.280432,
+            0.282139,
+            0.281001,
+            0.259954,
+            0.251991,
+            0.346416,
+            0.477816,
+            0.476678,
+            0.249716
+          ],
+          [
+            0.368601,
+            0.283276,
+            0.292378,
+            0.287258,
+            0.262799,
+            0.266212,
+            0.361775,
+            0.476678,
+            0.530148,
+            0.253129
+          ],
+          [
+            0.212173,
+            0.17463,
+            0.189989,
+            0.176906,
+            0.161547,
+            0.172355,
+            0.205347,
+            0.249716,
+            0.253129,
+            0.272469
+          ]
+        ]
+      }
+    }
+  },
+  "provenance": {
+    "panel_file": "../Data/derived/pit_panel_crsp_2000-01-01_2024-12-31_q26_market_neutral.pt",
+    "extract": "crsp_extract_ciz202512_2000-01-01_2024-12-31_StkDlySecurityData_lb1887d",
+    "crsp_release": "ciz202512",
+    "dates": 1759,
+    "names": 685
+  }
+}

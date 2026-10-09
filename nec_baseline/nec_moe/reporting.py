@@ -38,6 +38,14 @@ and, for gated arms, the regime-weighted means of brief 11
 window-average weights, rebuilt from each fold's saved gate
 (:func:`window_weights_from_gate_state`).
 
+**Part D, the execution lag.** With ``L > 0`` the forecast made at the close
+of t is scored against the market-neutral return over ``(t + L, t + L + h]``
+(:func:`lagged_labels`): the sum of the stock's daily log returns over those
+days (the target's series, the post-delisting fill included), minus the
+equal-weighted mean over date t's scored names with a value. ``L = 0`` is
+the panel's own target, untouched. An evaluation-only label, built after the
+run: it never reaches training.
+
 **Standard errors.** Hansen-Hodrick, through
 :func:`~nec_moe.evaluation.hac_variance`: lag ``h - 1`` on every per-date
 series of ``h``-day returns (ICs, half-sample ICs, sort-group returns), lag 0
@@ -72,6 +80,7 @@ __all__ = [
     "EPISODES",
     "in_window",
     "window_weights_from_gate_state",
+    "lagged_labels",
 ]
 
 
@@ -325,3 +334,46 @@ def window_weights_from_gate_state(state: dict, codes: list[int], horizon: int) 
                          f"{missing[:5]}")
     xi = np.stack([np.asarray(filtered[int(c)], dtype=float) for c in codes])
     return gate_weight_probs(xi, np.asarray(fit.transition, dtype=float), "window", horizon)
+
+
+# --------------------------------------------------------------------------- #
+# Part D: the execution lag
+# --------------------------------------------------------------------------- #
+
+
+def lagged_labels(daily: pd.DataFrame, row_dates: pd.DatetimeIndex, row_entities: list[str],
+                  row_codes: np.ndarray, lag: int, horizon: int
+                  ) -> tuple[np.ndarray, np.ndarray]:
+    """``(label (N,), daily pieces (N, h))`` of the rows (formation date,
+    entity) at execution lag ``lag``.
+
+    ``daily`` is dates x entities of daily log returns (the target's series:
+    the post-delisting fill included), on the trading calendar. Each row's
+    pieces are the returns of the ``h`` days after ``t + lag``; the label is
+    their sum minus the equal-weighted mean of the sums over the row's
+    formation date (``row_codes``) among rows with a value, and each piece is
+    demeaned the same way, day by day over the same rows, so the pieces sum
+    to the label. A row missing any of its days (its window reaches past the
+    end of ``daily``, or a return is missing) has no label (NaN)."""
+    if lag < 0 or horizon < 1:
+        raise ValueError(f"lag must be >= 0 and horizon >= 1, got {lag}, {horizon}")
+    cal = pd.DatetimeIndex(daily.index)
+    r = daily.to_numpy(dtype=float)
+    pos = cal.get_indexer(pd.DatetimeIndex(row_dates))
+    col = daily.columns.get_indexer(pd.Index(row_entities))
+    n = len(pos)
+    idx = pos[:, None] + lag + 1 + np.arange(horizon)[None, :]
+    ok = (pos >= 0)[:, None] & (col >= 0)[:, None] & (idx < len(cal))
+    pieces = np.full((n, horizon), np.nan)
+    cols = np.broadcast_to(col[:, None], idx.shape)
+    pieces[ok] = r[idx[ok], cols[ok]]
+    raw = pieces.sum(axis=1)  # NaN if any day is missing
+    valid = np.isfinite(raw)
+    frame = pd.DataFrame(pieces[valid], columns=range(horizon))
+    frame["raw"] = raw[valid]
+    means = frame.groupby(np.asarray(row_codes)[valid]).transform("mean")
+    label = np.full(n, np.nan)
+    label[valid] = raw[valid] - means["raw"].to_numpy()
+    out = np.full((n, horizon), np.nan)
+    out[valid] = pieces[valid] - means[list(range(horizon))].to_numpy()
+    return label, out

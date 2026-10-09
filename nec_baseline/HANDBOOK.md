@@ -1933,6 +1933,47 @@ with torch.no_grad():
     pred = model(test.x_seq, test.x_snap).y_hat        # memoryless
 ```
 
+### Reporting additions after a run (brief 12; Q9 update)
+
+`scripts/report_run.py <run_id>` (`nec_moe.reporting`) adds four tables to a finished evaluate run
+or campaign. They are **reporting only** and run *after* the run, from what it saved: every arm's
+per-fold predictions (and the frozen base's), the panel (refused unless the data fingerprint and the
+test rows match), each gated arm's saved gate and, for L > 0, the CRSP extract. Nothing is added to
+`Experiment`, the harness or training, so no settings hash, resume state or pilot lock changes. The
+run's own headline IC and long-short book are recomputed by the same functions and come out
+identical (tested). Every row carries `group` (arm and seed), `predictor` (`model`, or `base` for the
+frozen base), `execution_lag`, `slice_kind`/`slice` and the metric's mean, standard error, t, std,
+count and the HAC lag used.
+
+- **Legs (A).** On the book's own legs (`_quantile_legs`, the run's `n_quantiles`): `long` = mean
+  target of the top quantile, `short` = minus the bottom's, and `long + short = spread`, the
+  existing gross. The target is demeaned over the universe, so each leg is measured against the
+  average stock: a signal that only finds losers shows up in `short` and `ic_lower`, with `long`
+  and `ic_upper` near zero. `ic_lower`/`ic_upper` are rank ICs within each half of the forecasts.
+- **Monotonicity (B).** `group_01`..`group_10`: the mean h-day target of each forecast decile.
+  `monotonic` is Patton & Timmermann's (2010) test: the statistic is the smallest step between
+  adjacent deciles, and a small `p` means the returns rise steadily from decile 1 to 10. The
+  p-value comes from a stationary bootstrap of whole dates (blocks of `max(10, 2h)` days, 1,000
+  reps, seed 0). A result carried by one extreme decile does not reject. Synthetic size and power
+  (1,000 runs per null case, 300 per power point; T = 750, h = 5): 3.0% with flat means, 4.4%
+  with one extreme decile; power 7.7%, 20%, 54%, 92% and 99.7% at steps of 0.2, 0.43, 0.87, 1.7
+  and 2.6 standard errors per decile.
+- **Years, episodes, regimes (C).** The IC (with ICIR), spread and legs by calendar year, by the eight
+  episodes fixed in Q9 (by formation date; flagged below 20 dates: read for sign and size, not
+  significance), and for gated arms the regime-weighted means of brief 11 with the arm's own
+  window-average weights (`n` is Kish's effective dates).
+  `reporting_across_seeds.csv` gives each row's mean and sd across seeds per arm.
+- **Execution lag (D).** Each row at L = 0 (the panel's target) and L = 1: the forecast made at the
+  close of t scored against the market-neutral return over (t + 1, t + 1 + h], built here from the
+  extract's daily returns (the target's series, post-delisting fill) and demeaned over date t's
+  scored names. The last L formation dates of the sample have no lagged label and drop out of the L > 0
+  rows only. A large gap between L = 0 and L = 1 means the edge needs trading at the signal's own
+  close.
+
+**Standard errors.** Hansen-Hodrick lag h - 1 on per-date series of h-day returns (ICs, half-sample
+ICs, decile returns); lag 0 on the book's own periods, which do not overlap (Tom's decision
+2026-10-09). The headline `ic` row uses the run's own lags and kernel.
+
 ## II.8 Regime alignment (the interpretability analysis)
 
 Quick version (demo-grade — in-sample dates included):

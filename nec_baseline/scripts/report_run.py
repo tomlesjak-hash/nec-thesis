@@ -34,6 +34,16 @@ with the arm's own window-average gate weights (``regime``; ``n`` is Kish's
 effective number of dates). ``<out_name>_across_seeds.csv`` summarises every
 row across seeds (mean, sd, count) for each arm (and depth, in a campaign).
 
+Brief 12 D: every row is reported at each ``execution_lags`` value (default
+0 and 1, the ``execution_lag`` column). With L > 0 the label is the
+market-neutral return over (t + L, t + L + h], built here from the CRSP
+extract's daily returns (the target's series, post-delisting fill included),
+cut at the panel's last date plus h trading days, so the last L formation
+dates have no lagged label and drop out of the L > 0 rows only. L = 0 is the
+panel's own target. The label exists only in this report: training never sees
+it. A run on synthetic data has no extract; its L > 0 rows are skipped (noted
+in the settings file).
+
 Usage (from nec_baseline/), after a run has completed::
 
     python3.14 scripts/report_run.py <run_id>
@@ -63,6 +73,7 @@ from nec_moe.reporting import (  # noqa: E402
     EPISODES,
     half_sample_ics,
     in_window,
+    lagged_labels,
     leg_returns,
     monotonic_relation_test,
     series_summary,
@@ -91,6 +102,9 @@ class ReportSettings:
     # brief 12 C: the named episodes, fixed in Q9 before scoring (do not change)
     episodes: tuple[tuple[str, str, str], ...] = EPISODES
     min_episode_dates: int = 20  # fewer formation dates: the episode is flagged
+    # brief 12 D: every row at each of these execution lags (trading days);
+    # 0 is the panel's own target
+    execution_lags: tuple[int, ...] = (0, 1)
     out_name: str = "reporting"
 
 
@@ -106,6 +120,7 @@ class Block:
     preds: dict[str, torch.Tensor]  # predictor -> predictions
     date_labels: tuple[str, ...] | None
     gate_file: Path | None = None
+    entity_labels: tuple[str, ...] | None = None
 
 
 @dataclass
@@ -115,6 +130,8 @@ class RunInputs:
     kind: str  # "evaluate" or "campaign"
     groups: dict[str, list[Block]] = field(default_factory=dict)
     horizon: int = 1
+    metadata: dict[str, Any] = field(default_factory=dict)  # the panel's build metadata
+    last_date: str | None = None  # the panel's last formation date
 
 
 # --------------------------------------------------------------------------- #
@@ -167,7 +184,7 @@ def load_block(path: Path, panel: Panel, fold: int, gate_file: Path | None) -> B
     if saved.get("base_pred") is not None:
         preds["base"] = saved["base_pred"]
     return Block(fold, saved["date"], saved["entity"], saved["y"], test.y_daily, preds,
-                 saved.get("date_labels"), gate_file)
+                 saved.get("date_labels"), gate_file, saved.get("entity_labels"))
 
 
 def load_inputs(run_id: str, root: str | Path | None = None,
@@ -176,7 +193,10 @@ def load_inputs(run_id: str, root: str | Path | None = None,
     panel = load_panel(experiment, run) if panel is None else panel
     base = run.per_security_dir  # Data/derived/runs/<run_id>/
     gates = run.checkpoints_dir / ("jobs" if kind == "campaign" else "")
-    inputs = RunInputs(run, experiment, kind, horizon=panel.horizon)
+    labels = panel.date_labels
+    inputs = RunInputs(run, experiment, kind, horizon=panel.horizon,
+                       metadata=dict(panel.metadata or {}),
+                       last_date=None if not labels else labels[int(panel.date.max())])
     for group_dir in sorted(p for p in base.iterdir() if p.is_dir()):
         files = sorted(group_dir.glob("fold_*_predictions.pt"),
                        key=lambda p: int(p.name.split("_")[1]))
@@ -356,8 +376,71 @@ def summary_rows(series: dict[str, pd.DataFrame], *, horizon: int, ic_lags: int,
     return rows
 
 
-def report(inputs: RunInputs, s: ReportSettings) -> pd.DataFrame:
-    """Every row of the report (brief 12 A so far: slice "all", L = 0)."""
+def load_daily_returns(inputs: RunInputs, max_lag: int) -> pd.DataFrame | None:
+    """The target's daily log returns (post-delisting fill over ``max_lag + h``
+    days), dates x PERMNOs, from the CRSP extract the panel was built from,
+    cut at the panel's last date plus h trading days. ``None`` for a panel
+    without a CRSP extract (synthetic data)."""
+    meta = inputs.metadata
+    if not meta.get("crsp_release") or inputs.last_date is None:
+        return None
+    from nec_moe.crsp import CRSPSpec, crsp_daily_frames, load_extract
+    from nec_moe.features import StageBSpec, _target_returns
+
+    spec = CRSPSpec(release=meta["crsp_release"], stock_file=meta["crsp_stock_file"],
+                    post_delisting_return=meta["post_delisting_return"])
+    entities = sorted({e for blocks in inputs.groups.values() for b in blocks
+                       for e in _entity_names(b)})
+    frames, _, _ = crsp_daily_frames(load_extract(spec), spec,
+                                     StageBSpec(horizon=max_lag + inputs.horizon),
+                                     permnos=[int(e) for e in entities])
+    daily = pd.DataFrame({p: _target_returns(f) for p, f in frames.items()}).sort_index()
+    return daily.loc[:_reach(daily.index, inputs.last_date, inputs.horizon)]
+
+
+def _reach(calendar: pd.Index, last_date: str, horizon: int) -> pd.Timestamp:
+    """The target's last return day: ``horizon`` trading days after the
+    panel's last formation date."""
+    cal = pd.DatetimeIndex(calendar)
+    pos = int(cal.get_indexer([pd.Timestamp(last_date)])[0])
+    if pos < 0:
+        raise ValueError(f"the panel's last date {last_date} is not on the returns' calendar")
+    return cal[min(pos + horizon, len(cal) - 1)]
+
+
+def _entity_names(b: Block) -> list[str]:
+    """Each row's entity name: its label (a PERMNO on a CRSP panel), or its
+    code on a panel without labels (synthetic)."""
+    if b.entity_labels is None:
+        return [str(int(e)) for e in b.entity.tolist()]
+    return [b.entity_labels[int(e)] for e in b.entity.tolist()]
+
+
+def lagged_blocks(blocks: list[Block], daily: pd.DataFrame, lag: int,
+                  horizon: int) -> list[Block]:
+    """The blocks scored at execution lag ``lag``: the lagged label and its
+    daily pieces replace the target; rows without a lagged label are dropped."""
+    out = []
+    for b in blocks:
+        if b.date_labels is None:
+            raise ValueError("an execution lag needs calendar dates")
+        days = pd.DatetimeIndex([b.date_labels[int(c)] for c in b.date.tolist()])
+        label, pieces = lagged_labels(daily, days, _entity_names(b), b.date.numpy(), lag,
+                                      horizon)
+        keep = torch.from_numpy(np.isfinite(label))
+        out.append(Block(
+            b.fold, b.date[keep], b.entity[keep], torch.from_numpy(label).float()[keep],
+            torch.from_numpy(pieces).float()[keep],
+            {k: v[keep] for k, v in b.preds.items()}, b.date_labels, b.gate_file,
+            b.entity_labels))
+    return out
+
+
+def report(inputs: RunInputs, s: ReportSettings,
+           daily: pd.DataFrame | None = None) -> pd.DataFrame:
+    """Every row of the report, at every execution lag. ``daily`` (the
+    target's daily returns) is loaded from the extract when ``None`` and a
+    lag above 0 is asked for; with no extract those lags are skipped."""
     exp = inputs.experiment
     h = inputs.horizon
     n_q = s.n_quantiles if s.n_quantiles is not None else exp.get("backtest_quantiles")
@@ -366,18 +449,34 @@ def report(inputs: RunInputs, s: ReportSettings) -> pd.DataFrame:
     lags = s.ic_hac_lags if s.ic_hac_lags is not None else exp.get("ic_hac_lags")
     ic_lags = h - 1 if lags is None else int(lags)
     kernel = s.ic_hac_kernel or exp.get("ic_hac_kernel", "uniform")
+    if any(lag > 0 for lag in s.execution_lags) and daily is None:
+        daily = load_daily_returns(inputs, max(s.execution_lags))
     rows = []
-    for group, blocks in inputs.groups.items():
-        for predictor in blocks[0].preds:
-            series = predictor_series(blocks, predictor, n_q, scheme, h, s.n_sort_groups)
-            key = {"group": group, "predictor": predictor, "execution_lag": 0}
-            for r in summary_rows(series, horizon=h, ic_lags=ic_lags, ic_kernel=kernel,
-                                  cost_rate=cost, scheme=scheme, s=s):
-                rows.append(key | {"slice_kind": "all", "slice": "all"} | r)
-            for r in (calendar_rows(series, ic_lags) + episode_rows(series, ic_lags, s)
-                      + regime_rows(series)):
-                rows.append(key | r)
+    for lag in s.execution_lags:
+        if lag > 0 and daily is None:
+            continue  # no daily returns to build the lagged label from
+        for group, blocks in inputs.groups.items():
+            scored = blocks if lag == 0 else lagged_blocks(blocks, daily, lag, h)
+            rows += group_rows(group, scored, lag, n_q=n_q, scheme=scheme, h=h,
+                               ic_lags=ic_lags, kernel=kernel, cost=cost, s=s)
     return pd.DataFrame(rows)
+
+
+def group_rows(group: str, blocks: list[Block], lag: int, *, n_q: int | None, scheme: str,
+               h: int, ic_lags: int, kernel: str, cost: float,
+               s: ReportSettings) -> list[dict[str, Any]]:
+    """Every row of one group at one execution lag."""
+    rows: list[dict[str, Any]] = []
+    for predictor in blocks[0].preds:
+        series = predictor_series(blocks, predictor, n_q, scheme, h, s.n_sort_groups)
+        key = {"group": group, "predictor": predictor, "execution_lag": lag}
+        for r in summary_rows(series, horizon=h, ic_lags=ic_lags, ic_kernel=kernel,
+                              cost_rate=cost, scheme=scheme, s=s):
+            rows.append(key | {"slice_kind": "all", "slice": "all"} | r)
+        for r in (calendar_rows(series, ic_lags) + episode_rows(series, ic_lags, s)
+                  + regime_rows(series)):
+            rows.append(key | r)
+    return rows
 
 
 def across_seeds(frame: pd.DataFrame) -> pd.DataFrame:
@@ -416,6 +515,11 @@ def write_report(inputs: RunInputs, frame: pd.DataFrame, s: ReportSettings) -> N
                                  "average gate weights; n is Kish's effective dates",
         },
         "episodes": [list(e) for e in s.episodes],
+        "execution_lags_reported": sorted({int(x) for x in frame["execution_lag"]}),
+        "execution_lag": "L > 0: the market-neutral return over (t + L, t + L + h], built "
+                         "after the run from the extract's daily returns (post-delisting "
+                         "fill), demeaned over date t's scored names with a value; the last "
+                         "L formation dates have none. Lags not reported had no extract.",
     })
 
 

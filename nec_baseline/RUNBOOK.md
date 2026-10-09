@@ -347,6 +347,33 @@ regression, the two HAC choices and how far to trust their t-statistics.
 
 ---
 
+## 8f. Reporting additions for a finished run (brief 12)
+
+After an evaluate run or a campaign has **completed**, from `nec_baseline/`:
+
+```bash
+caffeinate -i python3.14 scripts/report_run.py <run_id>
+```
+
+It reads the run's saved predictions and gates and the panel, and for the L = 1 rows also the CRSP
+extract (several GB of memory). It writes three new files into the run's `metrics/`. It changes
+nothing the run wrote, and refuses a run that has not finished or whose data changed.
+
+| file | what |
+|---|---|
+| `reporting.csv` | one row per (group, predictor, execution lag, slice, metric): mean, s.e., t, std, n, lag |
+| `reporting_across_seeds.csv` | every row's mean, sd and count across seeds, per arm (and depth) |
+| `reporting_settings.json` | the settings, what each metric means, the episode windows |
+
+How to read it: start with `slice = all` at `execution_lag` 0. The `ic` and `book_*` rows are the
+run's own numbers. `long` against `short` shows which leg carries the spread. `monotonic` with
+`p` < 0.05 means the decile returns rise steadily. Then compare `execution_lag` 0 with 1, the years,
+the episodes and (for gated arms) the regimes. HANDBOOK II.7 explains each metric. Settings live in
+`ReportSettings` at the top of the script; the episode windows are fixed in Q9 and must not be
+changed.
+
+---
+
 ## 9. Quick reference
 
 | I want to... | command |
@@ -372,5 +399,6 @@ regression, the two HAC choices and how far to trust their t-statistics.
 | market regimes 2000-2006 (brief 11 A) | `python3.14 scripts/ic_regime_split.py regimes` |
 | IC split by regime (brief 11 B) | `caffeinate -i python3.14 scripts/ic_regime_split.py ic` |
 | sector regimes 2000-2006 (brief 11 C) | `caffeinate -i python3.14 scripts/sector_regimes.py` |
+| reporting additions for a finished run (brief 12) | `caffeinate -i python3.14 scripts/report_run.py <run_id>` |
 
 No command here deletes anything. Old runs stay until you remove their folders yourself.

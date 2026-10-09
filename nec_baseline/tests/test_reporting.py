@@ -392,3 +392,176 @@ def test_across_seeds_summarises_each_arm(rr):
     assert out.loc[("a_d2", "ic"), "mean"] == pytest.approx(0.03)
     assert out.loc[("a_d2", "ic"), "n_seeds"] == 2
     assert out.loc[("b", "ic"), "n_seeds"] == 1
+
+
+# --------------------------------------------------------------------------- #
+# Part D: the execution lag
+# --------------------------------------------------------------------------- #
+
+
+def _daily(t_len=40, n=6, seed=6):
+    rng = np.random.default_rng(seed)
+    days = pd.bdate_range("2012-01-02", periods=t_len)
+    return pd.DataFrame(rng.normal(0, 0.01, (t_len, n)), index=days,
+                        columns=[str(100 + j) for j in range(n)])
+
+
+def _rows(daily, dates):
+    """Every entity on each formation date."""
+    ents = list(daily.columns)
+    row_dates = pd.DatetimeIndex([d for d in dates for _ in ents])
+    codes = np.repeat(np.arange(len(dates)), len(ents))
+    return row_dates, ents * len(dates), codes
+
+
+def test_the_lagged_label_is_the_window_after_t_plus_l_demeaned_over_date_t():
+    daily = _daily()
+    dates = daily.index[:30]
+    row_dates, ents, codes = _rows(daily, dates)
+    h, lag = 5, 2
+    label, pieces = rp.lagged_labels(daily, row_dates, ents, codes, lag, h)
+    r = daily.to_numpy()
+    raw = np.array([r[t + lag + 1: t + lag + 1 + h, j].sum()
+                    for t in range(30) for j in range(6)])
+    want = raw - np.repeat(raw.reshape(30, 6).mean(axis=1), 6)
+    np.testing.assert_allclose(label, want, atol=1e-15)
+    np.testing.assert_allclose(pieces.sum(axis=1), label, atol=1e-15)
+    # only returns after t + L: changing every return up to t + L changes nothing
+    t0 = 10
+    moved = daily.copy()
+    moved.iloc[: t0 + lag + 1] = 99.0
+    again, _ = rp.lagged_labels(moved, row_dates, ents, codes, lag, h)
+    sel = codes == t0
+    np.testing.assert_allclose(again[sel], label[sel], atol=1e-12)
+
+
+def test_the_last_l_formation_dates_have_no_lagged_label():
+    daily = _daily(t_len=40)
+    h = 5
+    # the target's reach: the last formation date plus h days
+    last = 40 - h - 1
+    cut = daily.iloc[: last + h + 1]
+    row_dates, ents, codes = _rows(cut, cut.index[: last + 1])
+    for lag in (0, 1, 2):
+        label, _ = rp.lagged_labels(cut, row_dates, ents, codes, lag, h)
+        missing = sorted(set(codes[np.isnan(label)]))
+        assert missing == list(range(last + 1 - lag, last + 1))
+
+
+def test_a_next_day_signal_scores_at_l0_and_not_at_l1():
+    rng = np.random.default_rng(7)
+    t_len, n, h = 600, 60, 5
+    days = pd.bdate_range("2013-01-02", periods=t_len)
+    s = rng.normal(size=(t_len, n))
+    r = np.full((t_len, n), np.nan)
+    r[1:] = 0.01 * s[:-1] + rng.normal(0, 0.01, (t_len - 1, n))  # predicts t + 1 only
+    daily = pd.DataFrame(r, index=days, columns=[str(j) for j in range(n)])
+    row_dates, ents, codes = _rows(daily, days[: t_len - h - 2])
+    pred = torch.from_numpy(s[: t_len - h - 2].ravel()).float()
+    date = torch.from_numpy(codes)
+    ics = {}
+    for lag in (0, 1):
+        label, _ = rp.lagged_labels(daily, row_dates, ents, codes, lag, h)
+        keep = np.isfinite(label)
+        _, ic = rank_ic_by_date(pred[keep], torch.from_numpy(label[keep]).float(), date[keep])
+        ics[lag] = float(ic.mean())
+    assert ics[0] > 0.15 and abs(ics[1]) < 0.02
+
+
+def _synthetic_daily(synthetic_run):
+    """Daily returns for the synthetic run: day t + 1's return is the panel's
+    one-day target of t (enough to drive the lagged plumbing)."""
+    import run_experiment as rx
+
+    panel = rx._build_panel(synthetic_run["exp"])[0]
+    labels = pd.DatetimeIndex(panel.date_labels)
+    assert panel.entity_labels is None  # synthetic: entities are named by their codes
+    frame = pd.DataFrame({"code": panel.date.numpy() + 1,
+                          "e": [str(int(e)) for e in panel.entity.tolist()],
+                          "r": panel.y.double().numpy()})
+    # the calendar reaches one day past the last formation date, as the
+    # one-day target does (the report cuts real data at the last date + h)
+    days = labels.append(pd.DatetimeIndex([labels[-1] + pd.offsets.BDay()]))
+    frame["day"] = days[frame["code"].to_numpy()]
+    return frame.pivot(index="day", columns="e", values="r")
+
+
+def test_lag_zero_is_unchanged_and_every_row_records_its_lag(rr, synthetic_run):
+    inputs = rr.load_inputs(synthetic_run["run_id"], synthetic_run["root"])
+    daily = _synthetic_daily(synthetic_run)
+    only0 = rr.report(inputs, rr.ReportSettings(mr_bootstrap_reps=20, execution_lags=(0,)))
+    both = rr.report(inputs, rr.ReportSettings(mr_bootstrap_reps=20), daily=daily)
+    assert set(both["execution_lag"]) == {0, 1}
+    pd.testing.assert_frame_equal(
+        both[both["execution_lag"] == 0].reset_index(drop=True), only0.reset_index(drop=True))
+    # L = 1 drops the last formation date of the sample (no lagged label)
+    a = both[(both["group"] == "ridge_seed0") & (both["slice"] == "all")
+             & (both["metric"] == "ic")].set_index("execution_lag")["n"]
+    assert a[1] == a[0] - 1
+    # without an extract (synthetic data) the L > 0 rows are skipped, not guessed
+    skipped = rr.report(inputs, rr.ReportSettings(mr_bootstrap_reps=20))
+    assert set(skipped["execution_lag"]) == {0}
+
+
+def test_the_execution_lag_never_reaches_training(rr, synthetic_run):
+    """Structural: the knob lives only in the reporting code; no training,
+    model, harness or run setting carries it; and reporting at L = 0 and 1
+    leaves every file of the run as it was."""
+    import dataclasses
+
+    from conftest import small_config
+
+    import run_experiment as rx
+
+    root = Path(__file__).resolve().parents[1]
+    users = sorted(str(p.relative_to(root)) for p in [*root.glob("nec_moe/*.py"),
+                                                      *root.glob("scripts/*.py"),
+                                                      root / "run_experiment.py"]
+                   if "execution_lag" in p.read_text())
+    assert "scripts/report_run.py" in users
+    assert set(users) <= {"nec_moe/reporting.py", "scripts/report_run.py"}
+    assert "execution_lag" not in {f.name for f in dataclasses.fields(rx.Experiment)}
+    assert "execution_lag" not in json.dumps(small_config(prior_kind="markov").to_dict())
+    run_root = synthetic_run["root"]
+    before = _digest(run_root)
+    inputs = rr.load_inputs(synthetic_run["run_id"], run_root)
+    rr.report(inputs, rr.ReportSettings(mr_bootstrap_reps=20),
+              daily=_synthetic_daily(synthetic_run))
+    assert _digest(run_root) == before
+
+
+def test_the_lagged_returns_come_from_the_extract_with_the_fill(rr, tmp_path, monkeypatch):
+    """L > 0 reads the target's own series from the CRSP extract (fixture,
+    invented numbers): log(1 + DlyRet), the delisting return, then the cash
+    fill for max lag + h days; cut at the panel's last date + h."""
+    pytest.importorskip("pyarrow")
+    import crsp_fixture as fx
+
+    import nec_moe.crsp as crsp
+
+    fixture = fx.write_fixture(tmp_path / "Data")
+    spec = crsp.CRSPSpec(crsp_dir=str(fixture.root), release=fx.RELEASE, start=fx.START,
+                         end=fx.END, chunk_bytes=20_000, member_count_min=5,
+                         member_count_max=8)
+    crsp.extract_crsp(spec, verbose=False)
+    extract = crsp.load_extract(spec)
+    monkeypatch.setattr(crsp, "load_extract", lambda _spec: extract)
+    block = rr.Block(0, torch.tensor([0, 0]), torch.tensor([0, 1]), torch.zeros(2), None,
+                     {"model": torch.zeros(2)}, ("2020-06-01",), None, ("10001", "10005"))
+    inputs = rr.RunInputs(None, {}, "evaluate", {"g": [block]}, horizon=5,  # type: ignore
+                          metadata={"crsp_release": fx.RELEASE,
+                                    "crsp_stock_file": spec.stock_file,
+                                    "post_delisting_return": "cash"},
+                          last_date=fx.END)
+    daily = rr.load_daily_returns(inputs, max_lag=1)
+    cal = pd.DatetimeIndex(extract.market.index)
+    pos = cal.get_loc(pd.Timestamp(fx.END))
+    assert daily.index[-1] == cal[pos + 5]  # the target's reach, no further
+    r = fixture.returns[10001].dropna()
+    day = r.index[r.index <= daily.index[-1]][-1]
+    # the fixture's files carry DlyRet to 8 decimals
+    assert daily.loc[day, "10001"] == pytest.approx(np.log1p(round(r.loc[day], 8)), abs=1e-12)
+    delisting_day = cal[cal.get_loc(fx.DELIST_LAST) + 1]
+    assert daily.loc[delisting_day, "10005"] == pytest.approx(np.log1p(fx.DELIST_RET))
+    after = daily["10005"].loc[delisting_day:].iloc[1:]
+    assert (after.iloc[: 1 + 5] == 0.0).all()  # the cash fill, max lag + h days

@@ -25,7 +25,14 @@ summary with the run's cost rate, as the run reports it). Brief 12 B:
 ``group_01`` .. ``group_10`` (the mean target of each forecast decile, lag
 h - 1), ``monotonic`` (Patton & Timmermann's statistic, the smallest
 adjacent difference, with its stationary-bootstrap ``p``) and
-``group_spearman`` (group number against mean return).
+``group_spearman`` (group number against mean return). Brief 12 C: the
+same IC (with ICIR), spread and legs by calendar year (``slice_kind`` =
+``year``) and by the eight named episodes of Q9 (``episode``, by formation
+date; ``flag`` marks an episode with fewer than ``min_episode_dates``
+formation dates), and for gated arms the regime-weighted means of brief 11
+with the arm's own window-average gate weights (``regime``; ``n`` is Kish's
+effective number of dates). ``<out_name>_across_seeds.csv`` summarises every
+row across seeds (mean, sd, count) for each arm (and depth, in a campaign).
 
 Usage (from nec_baseline/), after a run has completed::
 
@@ -35,11 +42,13 @@ Usage (from nec_baseline/), after a run has completed::
 from __future__ import annotations
 
 import dataclasses
+import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import torch
 
@@ -49,13 +58,17 @@ sys.path.insert(0, str(ROOT))
 import run_experiment as rx  # noqa: E402
 from nec_moe.data import Panel  # noqa: E402
 from nec_moe.evaluation import portfolio_summary, rank_ic_by_date  # noqa: E402
+from nec_moe.regime_split import regime_names, weighted_regime_ic  # noqa: E402
 from nec_moe.reporting import (  # noqa: E402
+    EPISODES,
     half_sample_ics,
+    in_window,
     leg_returns,
     monotonic_relation_test,
     series_summary,
     shape_spearman,
     sort_group_returns,
+    window_weights_from_gate_state,
 )
 from nec_moe.runstore import Run, RunStore, data_fingerprint  # noqa: E402
 
@@ -75,6 +88,9 @@ class ReportSettings:
     mr_bootstrap_reps: int = 1000
     mr_mean_block: float | None = None  # None: max(10, 2h) trading days
     mr_seed: int = 0
+    # brief 12 C: the named episodes, fixed in Q9 before scoring (do not change)
+    episodes: tuple[tuple[str, str, str], ...] = EPISODES
+    min_episode_dates: int = 20  # fewer formation dates: the episode is flagged
     out_name: str = "reporting"
 
 
@@ -201,8 +217,10 @@ def predictor_series(blocks: list[Block], predictor: str, n_quantiles: int | Non
                                           "groups": []}
     for b in blocks:
         p = b.preds[predictor]
+        state = torch.load(b.gate_file, weights_only=False) if b.gate_file else None
         d, ics = rank_ic_by_date(p, b.y, b.date)
-        out["ic"].append(_labelled(d, ics, b.date_labels, "value"))
+        out["ic"].append(_with_weights(_labelled(d, ics, b.date_labels, "value"), state,
+                                       horizon))
         (dl, il), (du, iu) = half_sample_ics(p, b.y, b.date)
         out["ic_lower"].append(_labelled(dl, il, b.date_labels, "value"))
         out["ic_upper"].append(_labelled(du, iu, b.date_labels, "value"))
@@ -216,7 +234,7 @@ def predictor_series(blocks: list[Block], predictor: str, n_quantiles: int | Non
             frame["short"] = short.double().numpy()
             frame["gross_f32"] = list(gross)  # the book's own values, for book_* rows
             frame["turnover_f32"] = list(tno)
-            out["book"].append(frame)
+            out["book"].append(_with_weights(frame, state, horizon))
         gd, groups = sort_group_returns(p, b.y, b.date, n_groups)
         frame = _labelled(gd, torch.zeros(len(gd)), b.date_labels, "unused").drop(
             columns="unused")
@@ -224,6 +242,77 @@ def predictor_series(blocks: list[Block], predictor: str, n_quantiles: int | Non
             frame[f"group_{j + 1:02d}"] = groups[:, j]
         out["groups"].append(frame)
     return {k: pd.concat(v, ignore_index=True) for k, v in out.items() if v}
+
+
+def _with_weights(frame: pd.DataFrame, state: dict | None, horizon: int) -> pd.DataFrame:
+    """Add the gate's window-average weights (``w_<regime>``) on the frame's
+    dates, when the arm has a saved gate."""
+    if state is None:
+        return frame
+    w = window_weights_from_gate_state(state, frame["code"].tolist(), horizon)
+    for j, name in enumerate(regime_names(w.shape[1])):
+        frame[f"w_{name}"] = w[:, j]
+    return frame
+
+
+def slice_rows(series: dict[str, pd.DataFrame], mask_ic: np.ndarray,
+               mask_book: np.ndarray | None, ic_lags: int) -> list[dict[str, Any]]:
+    """IC (with ICIR), spread and legs on one slice of the formation dates."""
+    ic = series_summary(series["ic"]["value"].to_numpy()[mask_ic], ic_lags)
+    rows: list[dict[str, Any]] = [
+        {"metric": "ic", **ic.as_dict(), "icir": ic.mean / ic.std if ic.std else np.nan}]
+    if "book" in series and mask_book is not None:
+        book = series["book"][mask_book]
+        for name in ("spread", "long", "short"):
+            rows.append({"metric": name, **series_summary(book[name].to_numpy(), 0).as_dict()})
+    return rows
+
+
+def calendar_rows(series: dict[str, pd.DataFrame], ic_lags: int) -> list[dict[str, Any]]:
+    years = series["ic"]["date"].dt.year
+    book_years = series["book"]["date"].dt.year if "book" in series else None
+    rows = []
+    for y in sorted(years.dropna().unique()):
+        mask_book = None if book_years is None else (book_years == y).to_numpy()
+        for r in slice_rows(series, (years == y).to_numpy(), mask_book, ic_lags):
+            rows.append({"slice_kind": "year", "slice": str(int(y))} | r)
+    return rows
+
+
+def episode_rows(series: dict[str, pd.DataFrame], ic_lags: int,
+                 s: ReportSettings) -> list[dict[str, Any]]:
+    rows = []
+    for name, start, end in s.episodes:
+        mask = in_window(series["ic"]["date"], start, end)
+        mask_book = (in_window(series["book"]["date"], start, end) if "book" in series
+                     else None)
+        n = int(mask.sum())
+        flag = (f"fewer than {s.min_episode_dates} formation dates"
+                if n < s.min_episode_dates else "")
+        for r in slice_rows(series, mask, mask_book, ic_lags):
+            rows.append({"slice_kind": "episode", "slice": name, "flag": flag,
+                         "formation_dates": n} | r)
+    return rows
+
+
+def regime_rows(series: dict[str, pd.DataFrame]) -> list[dict[str, Any]]:
+    """Brief 11's regime-weighted means of IC, spread and legs, with Kish's
+    effective number of dates, on the arm's own window-average weights."""
+    ic = series["ic"]
+    wcols = [c for c in ic.columns if c.startswith("w_")]
+    if not wcols:
+        return []
+    rows = []
+    pieces = [("ic", ic, "value")]
+    if "book" in series:
+        pieces += [(m, series["book"], m) for m in ("spread", "long", "short")]
+    for metric, frame, col in pieces:
+        means, eff = weighted_regime_ic(frame[col].to_numpy(), frame[wcols].to_numpy())
+        for j, w in enumerate(wcols):
+            rows.append({"slice_kind": "regime", "slice": w[2:], "metric": metric,
+                         "mean": float(means[j]), "n": float(eff[j]), "kernel": "kish ess",
+                         "K": len(wcols)})
+    return rows
 
 
 def summary_rows(series: dict[str, pd.DataFrame], *, horizon: int, ic_lags: int,
@@ -281,16 +370,29 @@ def report(inputs: RunInputs, s: ReportSettings) -> pd.DataFrame:
     for group, blocks in inputs.groups.items():
         for predictor in blocks[0].preds:
             series = predictor_series(blocks, predictor, n_q, scheme, h, s.n_sort_groups)
+            key = {"group": group, "predictor": predictor, "execution_lag": 0}
             for r in summary_rows(series, horizon=h, ic_lags=ic_lags, ic_kernel=kernel,
                                   cost_rate=cost, scheme=scheme, s=s):
-                rows.append({"group": group, "predictor": predictor, "execution_lag": 0,
-                             "slice_kind": "all", "slice": "all"} | r)
+                rows.append(key | {"slice_kind": "all", "slice": "all"} | r)
+            for r in (calendar_rows(series, ic_lags) + episode_rows(series, ic_lags, s)
+                      + regime_rows(series)):
+                rows.append(key | r)
     return pd.DataFrame(rows)
+
+
+def across_seeds(frame: pd.DataFrame) -> pd.DataFrame:
+    """Every row summarised across seeds for each arm (and depth): mean, sd
+    and count of the row's ``mean`` (folds are already pooled per seed)."""
+    f = frame.assign(arm=frame["group"].map(lambda g: re.sub(r"_seed\d+$", "", g)))
+    keys = ["arm", "predictor", "execution_lag", "slice_kind", "slice", "metric"]
+    out = f.groupby(keys, sort=False, dropna=False)["mean"].agg(["mean", "std", "count"])
+    return out.rename(columns={"count": "n_seeds"}).reset_index()
 
 
 def write_report(inputs: RunInputs, frame: pd.DataFrame, s: ReportSettings) -> None:
     """Aggregate tables into the run's metrics/ (new files only)."""
     inputs.run.write_metrics(s.out_name, frame)
+    inputs.run.write_metrics(f"{s.out_name}_across_seeds", across_seeds(frame))
     inputs.run.write_metrics(f"{s.out_name}_settings", {
         "what": "brief 12 reporting additions (Q9 update 2026-10-09): reporting only",
         "settings": dataclasses.asdict(s),
@@ -308,7 +410,12 @@ def write_report(inputs: RunInputs, frame: pd.DataFrame, s: ReportSettings) -> N
             "monotonic": "Patton-Timmermann (2010): the smallest adjacent difference of the "
                          "group means; p from the stationary bootstrap (H0: not increasing)",
             "group_spearman": "Spearman correlation of group number and mean return",
+            "slice_kind year / episode": "the same statistics on the formation dates of a "
+                                         "calendar year or a named episode (Q9)",
+            "slice_kind regime": "brief 11's regime-weighted means with the arm's window-"
+                                 "average gate weights; n is Kish's effective dates",
         },
+        "episodes": [list(e) for e in s.episodes],
     })
 
 

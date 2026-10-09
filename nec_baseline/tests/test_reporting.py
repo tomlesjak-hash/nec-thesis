@@ -14,6 +14,7 @@ import warnings
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import pytest
 import torch
 
@@ -167,8 +168,8 @@ def test_the_report_reproduces_the_runs_own_metrics_and_changes_no_file(rr, synt
     # nothing the run wrote has changed; only the report's own files are new
     assert {k: v for k, v in after.items() if k in before} == before
     new = sorted(set(after) - set(before))
-    assert [Path(k).name for k in new if "metrics" in k] == ["reporting.csv",
-                                                             "reporting_settings.json"]
+    assert [Path(k).name for k in new if "metrics" in k] == [
+        "reporting.csv", "reporting_across_seeds.csv", "reporting_settings.json"]
     assert all("/metrics/" in k for k in new)
 
     run_dir = synthetic_run["run_dir"]
@@ -269,7 +270,7 @@ def test_the_report_has_the_decile_tables(rr, synthetic_run):
     s = rr.ReportSettings(mr_bootstrap_reps=50)
     frame = rr.report(inputs, s)
     rows = frame[(frame["group"] == "markov_seed0") & (frame["predictor"] == "model")
-                 ].set_index("metric")
+                 & (frame["slice"] == "all")].set_index("metric")
     assert [f"group_{j:02d}" for j in range(1, 11)] == [
         m for m in rows.index if m.startswith("group_") and m != "group_spearman"]
     assert rows.loc["group_01", "lags"] == inputs.horizon - 1
@@ -277,5 +278,117 @@ def test_the_report_has_the_decile_tables(rr, synthetic_run):
     assert "mean block 10" in rows.loc["monotonic", "kernel"]  # max(10, 2h), h = 1
     assert -1.0 <= rows.loc["group_spearman", "mean"] <= 1.0
     # the same seed, the same p
-    again = rr.report(inputs, s).set_index(["group", "predictor", "metric"])
-    assert again.loc[("markov_seed0", "model", "monotonic"), "p"] == rows.loc["monotonic", "p"]
+    again = rr.report(inputs, s).set_index(["group", "predictor", "slice", "metric"])
+    assert again.loc[("markov_seed0", "model", "all", "monotonic"), "p"] == rows.loc[
+        "monotonic", "p"]
+
+
+# --------------------------------------------------------------------------- #
+# Part C: by year, named episode and regime
+# --------------------------------------------------------------------------- #
+
+
+def test_the_episodes_are_the_ones_fixed_in_q9():
+    assert rp.EPISODES == (
+        ("euro_debt_flash_crash_2010", "2010-04-26", "2010-07-02"),
+        ("us_downgrade_2011", "2011-07-25", "2011-10-31"),
+        ("china_oil_2015_16", "2015-08-17", "2016-02-29"),
+        ("q4_selloff_2018", "2018-10-01", "2018-12-31"),
+        ("covid_crash_2020", "2020-02-20", "2020-04-30"),
+        ("covid_rebound_2020", "2020-05-01", "2020-12-31"),
+        ("bear_market_2022", "2022-01-03", "2022-10-31"),
+        ("regional_banks_2023", "2023-03-08", "2023-05-05"),
+    )
+
+
+def test_episode_membership_is_by_formation_date():
+    days = pd.DatetimeIndex(["2020-02-19", "2020-02-20", "2020-04-30", "2020-05-01"])
+    np.testing.assert_array_equal(rp.in_window(days, "2020-02-20", "2020-04-30"),
+                                  [False, True, True, False])
+
+
+def _blocks(rr, t_len=500, n=30, start="2019-06-03", window=("2020-02-20", "2020-04-30"),
+            seed=5, gate=None):
+    """One fold whose forecasts predict the target only inside ``window``."""
+    rng = np.random.default_rng(seed)
+    days = pd.bdate_range(start, periods=t_len)
+    inside = rp.in_window(days, *window)
+    pred = rng.normal(size=(t_len, n))
+    y = np.where(inside[:, None], 0.02 * pred, 0.0) + rng.normal(0, 0.01, (t_len, n))
+    y = y - y.mean(axis=1, keepdims=True)
+    date = torch.arange(t_len).repeat_interleave(n)
+    block = rr.Block(0, date, torch.arange(n).repeat(t_len),
+                     torch.from_numpy(y.ravel()).float(), None,
+                     {"model": torch.from_numpy(pred.ravel()).float()},
+                     tuple(str(d.date()) for d in days), gate)
+    return [block], inside
+
+
+def test_a_signal_working_inside_one_episode_is_found_there_only(rr):
+    blocks, inside = _blocks(rr)
+    series = rr.predictor_series(blocks, "model", 5, "nonoverlapping", 1, 10)
+    rows = pd.DataFrame(rr.episode_rows(series, 0, rr.ReportSettings()))
+    ic = rows[rows["metric"] == "ic"].set_index("slice")
+    assert ic.loc["covid_crash_2020", "mean"] > 0.5
+    assert ic.loc["covid_crash_2020", "formation_dates"] == inside.sum()
+    assert abs(ic.loc["covid_rebound_2020", "mean"]) < 0.05
+    assert ic.loc["covid_rebound_2020", "flag"] == ""
+    # episodes outside the sample: no dates, flagged
+    assert ic.loc["us_downgrade_2011", "formation_dates"] == 0
+    assert "fewer than 20" in ic.loc["us_downgrade_2011", "flag"]
+    spread = rows[rows["metric"] == "spread"].set_index("slice")
+    assert spread.loc["covid_crash_2020", "mean"] > 5 * abs(spread.loc["q4_selloff_2018", "mean"]
+                                                            if spread.loc["q4_selloff_2018", "n"]
+                                                            else 0.001)
+
+
+def test_the_year_tables_add_up_to_the_totals(rr):
+    blocks, _ = _blocks(rr, t_len=700, start="2018-03-01")
+    series = rr.predictor_series(blocks, "model", 5, "nonoverlapping", 1, 10)
+    years = pd.DataFrame(rr.calendar_rows(series, 0))
+    for metric, frame, col in (("ic", series["ic"], "value"),
+                               ("spread", series["book"], "spread")):
+        y = years[years["metric"] == metric]
+        assert y["n"].sum() == len(frame)
+        assert (y["mean"] * y["n"]).sum() / y["n"].sum() == pytest.approx(frame[col].mean())
+    want = {str(y) for y in pd.bdate_range("2018-03-01", periods=700).year}
+    assert set(years["slice"]) == want == {"2018", "2019", "2020"}
+
+
+def test_the_regime_rows_use_the_gates_window_weights(rr, synthetic_run):
+    from nec_moe.markov_gate import gate_weight_probs
+
+    inputs = rr.load_inputs(synthetic_run["run_id"], synthetic_run["root"])
+    blocks = inputs.groups["markov_seed0"]
+    assert all(b.gate_file is not None for b in blocks)
+    assert all(b.gate_file is None for b in inputs.groups["ridge_seed0"])
+    # the weights are the gate's own filtered probabilities moved by its A
+    state = torch.load(blocks[0].gate_file, weights_only=False)
+    codes = sorted({int(c) for c in blocks[0].date.tolist()})
+    fit = state["extra"]["fit_result"]
+    xi = np.stack([state["extra"]["filtered"][c] for c in codes])
+    np.testing.assert_allclose(rp.window_weights_from_gate_state(state, codes, 1),
+                               gate_weight_probs(xi, fit.transition, "window", 1))
+    frame = rr.report(inputs, rr.ReportSettings(mr_bootstrap_reps=20))
+    reg = frame[(frame["slice_kind"] == "regime") & (frame["predictor"] == "model")]
+    assert set(reg["group"]) == {"markov_seed0"}  # gated arms only
+    assert set(reg["slice"]) == {"calm", "stress"} and set(reg["metric"]) == {
+        "ic", "spread", "long", "short"}
+    # the regime means recombine to the pooled mean (the weights sum to 1)
+    series = rr.predictor_series(blocks, "model", 5, "nonoverlapping", 1, 10)
+    w = series["ic"][["w_calm", "w_stress"]].to_numpy()
+    ic = reg[reg["metric"] == "ic"].set_index("slice")["mean"]
+    total = (w.sum(axis=0) * ic[["calm", "stress"]].to_numpy()).sum() / w.sum()
+    assert total == pytest.approx(series["ic"]["value"].mean())
+
+
+def test_across_seeds_summarises_each_arm(rr):
+    frame = pd.DataFrame({
+        "group": ["a_d2_seed0", "a_d2_seed1", "a_d2_seed0", "b_seed3"],
+        "predictor": "model", "execution_lag": 0, "slice_kind": "all", "slice": "all",
+        "metric": ["ic", "ic", "spread", "ic"], "mean": [0.02, 0.04, 0.01, 0.05],
+    })
+    out = rr.across_seeds(frame).set_index(["arm", "metric"])
+    assert out.loc[("a_d2", "ic"), "mean"] == pytest.approx(0.03)
+    assert out.loc[("a_d2", "ic"), "n_seeds"] == 2
+    assert out.loc[("b", "ic"), "n_seeds"] == 1

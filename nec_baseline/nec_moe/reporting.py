@@ -30,6 +30,14 @@ sample differences (the least favourable null). Blocks average
 ``mean_block`` dates, ``max(10, 2h)`` by default, so they span the target's
 overlap.
 
+**Part C, by year, named episode and regime.** The same statistics by
+calendar year and by the eight episodes fixed in Q9 (:data:`EPISODES`; a
+date belongs to an episode when its **formation date** lies in the window),
+and, for gated arms, the regime-weighted means of brief 11
+(:func:`nec_moe.regime_split.weighted_regime_ic`) with the arm's own Q27
+window-average weights, rebuilt from each fold's saved gate
+(:func:`window_weights_from_gate_state`).
+
 **Standard errors.** Hansen-Hodrick, through
 :func:`~nec_moe.evaluation.hac_variance`: lag ``h - 1`` on every per-date
 series of ``h``-day returns (ICs, half-sample ICs, sort-group returns), lag 0
@@ -44,10 +52,12 @@ import math
 from dataclasses import asdict, dataclass
 
 import numpy as np
+import pandas as pd
 import torch
 from torch import Tensor
 
 from .evaluation import _quantile_legs, hac_variance, long_short_book, rank_ic_by_date
+from .markov_gate import gate_weight_probs
 
 __all__ = [
     "SeriesSummary",
@@ -59,6 +69,9 @@ __all__ = [
     "monotonic_relation_test",
     "shape_spearman",
     "mr_simulation",
+    "EPISODES",
+    "in_window",
+    "window_weights_from_gate_state",
 ]
 
 
@@ -268,3 +281,47 @@ def mr_simulation(true_means: np.ndarray, *, n_sims: int = 300, t_len: int = 750
         rejects += int(out["p"] < alpha)  # type: ignore[operator]
     return {"rejection_rate": rejects / n_sims, "n_sims": float(n_sims), "t_len": float(t_len),
             "h": float(h), "reps": float(reps), "alpha": alpha}
+
+
+# --------------------------------------------------------------------------- #
+# Part C: by year, named episode and regime
+# --------------------------------------------------------------------------- #
+
+#: The named episodes, fixed in Q9 (update 2026-10-09) before any test-period
+#: number was computed: (name, first date, last date), both inclusive.
+EPISODES: tuple[tuple[str, str, str], ...] = (
+    ("euro_debt_flash_crash_2010", "2010-04-26", "2010-07-02"),
+    ("us_downgrade_2011", "2011-07-25", "2011-10-31"),
+    ("china_oil_2015_16", "2015-08-17", "2016-02-29"),
+    ("q4_selloff_2018", "2018-10-01", "2018-12-31"),
+    ("covid_crash_2020", "2020-02-20", "2020-04-30"),
+    ("covid_rebound_2020", "2020-05-01", "2020-12-31"),
+    ("bear_market_2022", "2022-01-03", "2022-10-31"),
+    ("regional_banks_2023", "2023-03-08", "2023-05-05"),
+)
+
+
+def in_window(formation: pd.Series | pd.DatetimeIndex, start: str, end: str) -> np.ndarray:
+    """Which formation dates lie in ``[start, end]`` (both inclusive). A
+    period belongs to an episode by its formation date, even when its return
+    window reaches past the episode's end."""
+    d = pd.DatetimeIndex(formation)
+    return np.asarray((d >= pd.Timestamp(start)) & (d <= pd.Timestamp(end)))
+
+
+def window_weights_from_gate_state(state: dict, codes: list[int], horizon: int) -> np.ndarray:
+    """``(len(codes), K)`` Q27 window-average weights of a saved Hamilton
+    gate on these date codes: its filtered probabilities moved by its
+    transition matrix and averaged over ``horizon`` steps
+    (:func:`~nec_moe.markov_gate.gate_weight_probs`), canonical order (calm
+    first). Raises for a date the gate never filtered."""
+    extra = state.get("extra", {})
+    fit, filtered = extra.get("fit_result"), extra.get("filtered", {})
+    if fit is None:
+        raise ValueError("the gate state carries no fitted transition matrix")
+    missing = [c for c in codes if int(c) not in filtered]
+    if missing:
+        raise ValueError(f"{len(missing)} date(s) without a filtered probability, first "
+                         f"{missing[:5]}")
+    xi = np.stack([np.asarray(filtered[int(c)], dtype=float) for c in codes])
+    return gate_weight_probs(xi, np.asarray(fit.transition, dtype=float), "window", horizon)

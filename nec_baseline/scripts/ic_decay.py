@@ -172,6 +172,21 @@ def spearman_ic_by_date(
     return (num[ok] / den[ok]).astype(float)
 
 
+def daily_ics(
+    signals: Mapping[str, pd.DataFrame],
+    daily: pd.DataFrame,
+    universe: pd.DataFrame,
+    h: int,
+    min_names: int = 3,
+) -> dict[str, pd.Series]:
+    """Each signal's daily IC series at horizon ``h``: the Spearman correlation
+    with the market-neutral forward return over ``(t, t + h]`` (also the
+    input of brief 11's regime split)."""
+    target = market_neutral(forward_log_returns(daily, h), universe)
+    return {name: spearman_ic_by_date(sig.where(_mask(universe, sig)), target, min_names)
+            for name, sig in signals.items()}
+
+
 def ic_decay(
     signals: Mapping[str, pd.DataFrame],
     daily: pd.DataFrame,
@@ -183,9 +198,7 @@ def ic_decay(
     ``h - 1`` lags, number of dates, the lags and the kernel used."""
     rows: list[dict[str, Any]] = []
     for h in horizons:
-        target = market_neutral(forward_log_returns(daily, h), universe)
-        for name, sig in signals.items():
-            ic = spearman_ic_by_date(sig.where(_mask(universe, sig)), target, min_names)
+        for name, ic in daily_ics(signals, daily, universe, h, min_names).items():
             summary = ic_summary(torch.tensor(ic.to_numpy(), dtype=torch.float64),
                                  hac_lags=h - 1, hac_kernel="uniform")
             rows.append({

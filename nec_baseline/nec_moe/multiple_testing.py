@@ -1,4 +1,4 @@
-"""Selection-aware inference (Module 5): deflated Sharpe, Bonferroni, BH-FDR.
+"""Selection-aware inference (Module 5): deflated Sharpe, Bonferroni, Holm, BH-FDR.
 
 The moment a result is selected from N candidates, its naive significance is
 inflated; this module holds the three corrections the syllabus assigns:
@@ -11,6 +11,9 @@ inflated; this module holds the three corrections the syllabus assigns:
   ``n_trials`` input is exactly :meth:`nec_moe.registry.TrialRegistry.n_trials`.
 - **Bonferroni** — family-wise error control for a *tested family*: reject at
   ``alpha / N``; conservative under correlated tests.
+- **Holm** (1979) — the step-down version of Bonferroni: the same family-wise
+  guarantee, uniformly more powerful. Used for brief 11's five pre-specified
+  primary hypotheses.
 - **Benjamini–Hochberg** — false-discovery-rate control, the more appropriate
   criterion when screening many signals/configs (syllabus: the factor-zoo
   discipline). Step-up procedure with monotone adjusted p-values.
@@ -38,6 +41,7 @@ __all__ = [
     "effective_sample_size",
     "ic_pvalue",
     "bonferroni",
+    "holm",
     "benjamini_hochberg",
 ]
 
@@ -230,6 +234,24 @@ def bonferroni(pvals: list[float], alpha: float = 0.05) -> tuple[list[bool], lis
     _check_pvals(pvals, alpha)
     n = len(pvals)
     adjusted = [min(1.0, p * n) for p in pvals]
+    return [a <= alpha for a in adjusted], adjusted
+
+
+def holm(pvals: list[float], alpha: float = 0.05) -> tuple[list[bool], list[float]]:
+    """FWER control by Holm's step-down procedure: ``(reject_mask, adjusted)``.
+
+    Sorted ascending, the i-th smallest p-value (i = 1..N) is multiplied by
+    ``N - i + 1``; the adjusted values are made monotone (a running maximum)
+    and capped at 1. Reject where the adjusted p-value is at most ``alpha``.
+    """
+    _check_pvals(pvals, alpha)
+    n = len(pvals)
+    order = sorted(range(n), key=lambda i: pvals[i])
+    adjusted = [0.0] * n
+    running = 0.0
+    for rank, idx in enumerate(order):
+        running = max(running, (n - rank) * pvals[idx])
+        adjusted[idx] = min(1.0, running)
     return [a <= alpha for a in adjusted], adjusted
 
 

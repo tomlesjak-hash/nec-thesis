@@ -17,6 +17,23 @@ window average, :func:`~nec_moe.markov_gate.gate_weight_probs` with
 
 The parameters are estimated on all of 2000-2006 (:data:`IN_SAMPLE_CAVEAT`):
 the probabilities are causal in the data they filter, not in the parameters.
+
+**Part B, the IC split by regime.** For a daily IC series and regime weights
+``w_k(t)`` (summing to 1 on each date):
+
+- the regime-weighted mean IC, ``sum_t w_k IC_t / sum_t w_k``, with Kish's
+  effective number of dates (:func:`weighted_regime_ic`);
+- the pure-regime IC with inference, the regression without intercept
+  ``IC_t = sum_k c_k w_k(t) + e_t`` (:func:`regime_regression`). Its
+  sandwich standard errors use :func:`nec_moe.evaluation.hac_variance` on the
+  scalar series ``z_t = a' (X'X)^-1 x_t e_t`` of each linear combination
+  ``a'c``: ``Var(a'c) = T * LRV(z)``, which is exactly the quadratic form
+  ``a' (X'X)^-1 S (X'X)^-1 a`` with ``S`` the same kernel's long-run
+  variance of ``x_t e_t`` (the long-run variance is linear in the
+  autocovariances). ``z`` has mean zero by the normal equations, so the
+  estimator's demeaning changes nothing; its ``T - 1`` divisor inflates the
+  variance by ``T / (T - 1)``. One HAC implementation, as brief 11 asks;
+- the hypothesis families (:data:`PRIMARY_HYPOTHESES`), fixed before any run.
 """
 
 from __future__ import annotations
@@ -24,14 +41,18 @@ from __future__ import annotations
 import dataclasses
 from collections.abc import Sequence
 from dataclasses import dataclass
+from statistics import NormalDist
 from typing import Any
 
 import numpy as np
 import pandas as pd
 import torch
 
+from . import baum_welch as bw
 from .config import MarkovGateConfig
 from .data import FeatureSchema, Panel
+from .decay import kish_ess
+from .evaluation import hac_variance
 from .markov_gate import MarkovSwitchingRegimePrior, gate_weight_probs
 
 __all__ = [
@@ -44,6 +65,16 @@ __all__ = [
     "regime_names",
     "regime_summary",
     "trailing_vol_state",
+    "HAC_CHOICES",
+    "hac_choice",
+    "RegimeRegression",
+    "regime_regression",
+    "weighted_regime_ic",
+    "hard_split",
+    "PRIMARY_HYPOTHESES",
+    "PRIMARY_SPEC",
+    "p_value",
+    "contrast_size_simulation",
 ]
 
 #: Written into every output of brief 11 (A.4), and into the figure captions.
@@ -212,3 +243,202 @@ def trailing_vol_state(log_ret: pd.Series, window: int) -> tuple[pd.Series, floa
     threshold = float(vol.median())
     state = (vol > threshold).astype(float).where(vol.notna())
     return state, threshold
+
+
+# --------------------------------------------------------------------------- #
+# Part B: the IC split by regime
+# --------------------------------------------------------------------------- #
+
+#: The two HAC choices of B.2: Hansen-Hodrick (uniform kernel, lag h - 1,
+#: the target's overlap) and Newey-West (Bartlett, lag max(h - 1, nw_min_lag),
+#: because a persistent regressor makes the residuals' autocorrelation outlast
+#: the overlap).
+HAC_CHOICES: tuple[str, ...] = ("hansen_hodrick", "newey_west")
+
+
+def hac_choice(choice: str, h: int, nw_min_lag: int) -> tuple[int, str]:
+    """``(lags, kernel)`` of a HAC choice at horizon ``h``."""
+    if choice == "hansen_hodrick":
+        return h - 1, "uniform"
+    if choice == "newey_west":
+        return max(h - 1, nw_min_lag), "bartlett"
+    raise ValueError(f"unknown HAC choice {choice!r}; use one of {HAC_CHOICES}")
+
+
+@dataclass(frozen=True)
+class RegimeRegression:
+    """``IC_t = sum_k c_k w_k(t) + e_t`` without intercept, one HAC choice."""
+
+    coef: np.ndarray  # (K,) c_k: the IC on a date fully in regime k
+    se: np.ndarray  # (K,)
+    t: np.ndarray  # (K,)
+    contrast: float  # c_last - c_first: stress minus calm
+    contrast_se: float
+    contrast_t: float
+    kernels: tuple[str, ...]  # kernel actually used per c_k, then the contrast
+    lags: int
+    n: int
+
+    @staticmethod
+    def undefined(k: int, lags: int, n: int) -> RegimeRegression:
+        nan = np.full(k, np.nan)
+        return RegimeRegression(nan, nan, nan, float("nan"), float("nan"), float("nan"),
+                                ("none",) * (k + 1), lags, n)
+
+
+def _combination_se(x: np.ndarray, resid: np.ndarray, xtx_inv: np.ndarray, a: np.ndarray,
+                    lags: int, kernel: str) -> tuple[float, str]:
+    """SE of ``a'c`` from the scalar series ``z_t = a'(X'X)^-1 x_t e_t``
+    (module docstring): ``sqrt(T * hac_variance(z))``."""
+    z = (x @ (xtx_inv @ a)) * resid
+    lrv, used = hac_variance(torch.from_numpy(z), lags, kernel)
+    return float(np.sqrt(max(len(z) * lrv, 0.0))), used
+
+
+def regime_regression(ic: np.ndarray, w: np.ndarray, lags: int, kernel: str) -> RegimeRegression:
+    """The pure-regime IC regression (B.2) with sandwich standard errors.
+
+    ``ic`` is ``(T,)``, ``w`` the ``(T, K)`` regime weights in canonical order
+    (calm first, stress last). Undefined (NaN) when ``X'X`` is singular, e.g.
+    a hard split without a single stress date."""
+    y = np.asarray(ic, dtype=float)
+    x = np.asarray(w, dtype=float)
+    if x.ndim != 2 or x.shape[0] != y.shape[0]:
+        raise ValueError(f"ic {y.shape} and weights {x.shape} do not align")
+    keep = np.isfinite(y) & np.isfinite(x).all(axis=1)
+    y, x = y[keep], x[keep]
+    t_len, k = x.shape
+    xtx = x.T @ x
+    if t_len <= k or np.linalg.matrix_rank(xtx) < k:
+        return RegimeRegression.undefined(k, lags, t_len)
+    xtx_inv = np.linalg.inv(xtx)
+    coef = xtx_inv @ (x.T @ y)
+    resid = y - x @ coef
+    se, kernels = np.empty(k), []
+    for j in range(k):
+        se[j], used = _combination_se(x, resid, xtx_inv, np.eye(k)[j], lags, kernel)
+        kernels.append(used)
+    a = np.zeros(k)
+    a[-1], a[0] = 1.0, -1.0
+    c_se, used = _combination_se(x, resid, xtx_inv, a, lags, kernel)
+    kernels.append(used)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        t_stats = coef / se
+        c_t = float((coef[-1] - coef[0]) / c_se) if c_se > 0 else float("nan")
+    return RegimeRegression(coef, se, t_stats, float(coef[-1] - coef[0]), c_se, c_t,
+                            tuple(kernels), lags, t_len)
+
+
+def weighted_regime_ic(ic: np.ndarray, w: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """``(IC_k, effective dates_k)``: the regime-weighted mean IC
+    ``sum_t w_k IC_t / sum_t w_k`` and Kish's ``(sum w)^2 / sum w^2`` (B.1)."""
+    y = np.asarray(ic, dtype=float)
+    x = np.asarray(w, dtype=float)
+    keep = np.isfinite(y) & np.isfinite(x).all(axis=1)
+    y, x = y[keep], x[keep]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        means = (x * y[:, None]).sum(axis=0) / x.sum(axis=0)
+    eff = np.array([kish_ess(x[:, j]) for j in range(x.shape[1])])
+    return means, eff
+
+
+def hard_split(stress: np.ndarray, threshold: float) -> np.ndarray:
+    """``(T, 2)`` hard weights (B.3): ``[1 - D, D]`` with
+    ``D = 1[stress > threshold]``; stress against the rest (for K = 3 the calm
+    and middle regimes are pooled). Missing stays missing."""
+    p = np.asarray(stress, dtype=float)
+    d = (p > threshold).astype(float)
+    d[~np.isfinite(p)] = np.nan
+    return np.column_stack([1.0 - d, d])
+
+
+#: B.4, declared before the run. Every primary test is one-sided: the
+#: contrast c_stress - c_calm is negative (reversal's negative IC more
+#: negative in stress; momentum's positive IC smaller in stress).
+PRIMARY_HYPOTHESES: tuple[dict[str, Any], ...] = (
+    {"id": "H1", "claim": "short-term reversal is stronger (more negative IC) in stress",
+     "signals": ("ret_5d", "ret_20d", "ret_20d_ind_rel"), "alternative": "contrast < 0",
+     "sources": "Nagel (2012); Hameed & Mian (2015)"},
+    {"id": "H2", "claim": "momentum is weaker in stress",
+     "signals": ("mom_12_1", "ind_mom_12_1"), "alternative": "contrast < 0",
+     "sources": "Cooper, Gutierrez & Hameed (2004); Wang & Xu (2015); Daniel & Moskowitz (2016)"},
+)
+
+#: The specification every primary test uses (B.4): K = 2, h = 5,
+#: Hansen-Hodrick, the soft (pure-regime) regression on the window weights.
+PRIMARY_SPEC: dict[str, Any] = {
+    "k": 2, "h": 5, "hac": "hansen_hodrick", "split": "soft", "weight_kind": "window",
+    "correction": "Holm over the five one-sided tests",
+}
+
+
+def p_value(t: float, alternative: str) -> float:
+    """Normal p-value of a t-statistic: ``"less"`` (one-sided, H_a: below 0)
+    or ``"two-sided"``."""
+    if not np.isfinite(t):
+        return float("nan")
+    cdf = NormalDist().cdf(t)
+    if alternative == "less":
+        return cdf
+    if alternative == "two-sided":
+        return 2.0 * min(cdf, 1.0 - cdf)
+    raise ValueError(f"unknown alternative {alternative!r}")
+
+
+def contrast_size_simulation(
+    n_sims: int = 500,
+    t_len: int = 1750,
+    h: int = 5,
+    alpha: float = 0.05,
+    nw_min_lag: int = 20,
+    stay: tuple[float, float] = (0.99, 0.97),
+    sd: tuple[float, float] = (0.006, 0.018),
+    ic_sd: float = 0.15,
+    drift_sd: float = 0.0,
+    drift_rho: float = 0.98,
+    seed: int = 0,
+) -> dict[str, float]:
+    """Size of the two-sided contrast test when the IC does not depend on the
+    regime (B, tests): the rejection rate at ``alpha`` under both HAC choices.
+
+    Each simulation draws a two-state market series (``stay``, ``sd``), takes
+    its filtered stress probability with the true parameters and Q27's window
+    weight at ``h`` as the regressor (persistent, like the real one), and a
+    daily IC with no regime effect: a constant plus an ``h - 1``-order moving
+    average, the overlap of an ``h``-day target (sd ``ic_sd``). With
+    ``drift_sd > 0`` the IC also carries a slow AR(1) drift (stationary sd
+    ``drift_sd``, autocorrelation ``drift_rho``), still independent of the
+    regime: the case Newey-West's long lag is there for. Returns the rejection
+    rate per HAC choice and the mean and sd of the contrast."""
+    rng = np.random.default_rng(seed)
+    a = np.array([[stay[0], 1 - stay[0]], [1 - stay[1], stay[1]]])
+    pi0 = np.array([1 - stay[1], 1 - stay[0]]) / (2 - stay[0] - stay[1])
+    params = bw.HMMParams(np.zeros(2), np.asarray(sd) ** 2, a, pi0)
+    rejects = {c: 0 for c in HAC_CHOICES}
+    contrasts: list[float] = []
+    for _ in range(n_sims):
+        s = np.zeros(t_len, dtype=int)
+        s[0] = rng.uniform() < pi0[1]
+        for t in range(1, t_len):
+            s[t] = s[t - 1] if rng.uniform() < a[s[t - 1], s[t - 1]] else 1 - s[t - 1]
+        market = rng.normal(0.0, np.asarray(sd)[s])
+        filtered, _ = bw.filter_series(market, params)
+        w = gate_weight_probs(filtered, a, "window", h)
+        u = rng.normal(0.0, ic_sd, t_len + h - 1)
+        ic = 0.02 + np.convolve(u, np.ones(h) / np.sqrt(h), mode="valid")
+        if drift_sd > 0:
+            drift = np.empty(t_len)
+            drift[0] = rng.normal(0.0, drift_sd)
+            shocks = rng.normal(0.0, drift_sd * np.sqrt(1 - drift_rho**2), t_len)
+            for t in range(1, t_len):
+                drift[t] = drift_rho * drift[t - 1] + shocks[t]
+            ic = ic + drift
+        for choice in HAC_CHOICES:
+            lags, kernel = hac_choice(choice, h, nw_min_lag)
+            res = regime_regression(ic, w, lags, kernel)
+            if p_value(res.contrast_t, "two-sided") < alpha:
+                rejects[choice] += 1
+        contrasts.append(res.contrast)
+    return {c: rejects[c] / n_sims for c in HAC_CHOICES} | {
+        "mean_contrast": float(np.mean(contrasts)), "sd_contrast": float(np.std(contrasts)),
+        "n_sims": float(n_sims), "t_len": float(t_len), "h": float(h), "alpha": alpha}

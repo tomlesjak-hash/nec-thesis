@@ -214,3 +214,210 @@ def test_part_a_writes_aggregate_outputs_with_the_caveat(irs, tmp_path):
         return []
     assert max(lengths(saved)) < 100
     assert (out / "market_regimes_2000_2006.png").stat().st_size > 0
+
+
+# --------------------------------------------------------------------------- #
+# Part B: the IC split by regime
+# --------------------------------------------------------------------------- #
+
+
+def _calibrated_weights(t_len: int, seed: int, stay=(0.98, 0.98), sd=(0.006, 0.02)):
+    """True states, and filtered stress probabilities under the true
+    parameters (calibrated: E[state | weight] = weight)."""
+    log_ret, states = _two_regime(t_len=t_len, seed=seed, sd=sd, stay=stay)
+    a = np.array([[stay[0], 1 - stay[0]], [1 - stay[1], stay[1]]])
+    pi0 = np.array([0.5, 0.5])
+    filtered, _ = bw.filter_series(log_ret.to_numpy(),
+                                   bw.HMMParams(np.zeros(2), np.asarray(sd) ** 2, a, pi0))
+    return states, filtered
+
+
+def test_a_planted_regime_flip_is_recovered_while_the_pooled_ic_is_near_zero():
+    states, w = _calibrated_weights(4000, seed=5)
+    rng = np.random.default_rng(5)
+    a = 0.05
+    ic = a * (1 - 2 * states) + rng.normal(0, 0.1, len(states))
+    assert abs(states.mean() - 0.5) < 0.1
+    res = rs.regime_regression(ic, w, 0, "uniform")
+    np.testing.assert_allclose(res.coef, [a, -a], atol=0.01)
+    assert res.contrast == pytest.approx(-2 * a, abs=0.015) and res.contrast_t < -10
+    assert abs(ic.mean()) < 0.01  # pooled: near zero
+    wmean, eff = rs.weighted_regime_ic(ic, w)
+    assert wmean[0] > 0.02 and wmean[1] < -0.02  # same signs, shrunk by the soft weights
+    assert (eff > 0).all() and (eff <= len(ic) + 1e-9).all()  # each at most T
+
+
+def test_regime_independent_ic_holds_its_size():
+    out = rs.contrast_size_simulation(n_sims=400, seed=11)
+    print(f"\n[size] rejection at 5%: {out}")
+    for choice in rs.HAC_CHOICES:
+        assert 0.02 <= out[choice] <= 0.10, (choice, out[choice])
+    assert abs(out["mean_contrast"]) < 0.25 * out["sd_contrast"]
+
+
+def test_a_slow_ic_drift_oversizes_both_hac_choices():
+    """A caveat for reading the t-statistics: with a persistent regime weight,
+    a slow IC drift (independent of the regime, autocorrelation 0.98) makes
+    x_t e_t autocorrelated far beyond h - 1 lags. Newey-West's 20 Bartlett
+    lags cover only part of it: both choices over-reject, Newey-West less."""
+    out = rs.contrast_size_simulation(n_sims=300, drift_sd=0.1, seed=12)
+    print(f"\n[size, drifting IC] rejection at 5%: {out}")
+    assert out["hansen_hodrick"] > 0.15 and out["newey_west"] > 0.12
+    assert out["newey_west"] < out["hansen_hodrick"]
+
+
+def test_the_weighted_mean_is_the_plain_mean_under_equal_weights():
+    rng = np.random.default_rng(6)
+    ic = rng.normal(0.01, 0.1, 300)
+    w = np.full((300, 2), 0.5)
+    wmean, eff = rs.weighted_regime_ic(ic, w)
+    np.testing.assert_allclose(wmean, [ic.mean(), ic.mean()], atol=1e-15)
+    np.testing.assert_allclose(eff, [300.0, 300.0])
+
+
+def test_the_decomposition_is_exact_on_noise_free_data():
+    _, w = _calibrated_weights(500, seed=7)
+    w3 = np.random.default_rng(7).dirichlet([1.0, 1.0, 1.0], size=500)  # K = 3 rows
+    for x, c in ((w, np.array([0.03, -0.02])), (w3, np.array([0.02, 0.0, -0.04]))):
+        res = rs.regime_regression(x @ c, x, 4, "uniform")
+        np.testing.assert_allclose(res.coef, c, atol=1e-12)
+        np.testing.assert_allclose(res.se, 0.0, atol=1e-12)
+        assert res.contrast == pytest.approx(c[-1] - c[0], abs=1e-12)
+
+
+@pytest.mark.parametrize("lags,kernel", [(0, "uniform"), (4, "uniform"), (20, "bartlett")])
+def test_the_sandwich_through_hac_variance_equals_the_matrix_sandwich(lags, kernel):
+    """Oracle: (X'X)^-1 Omega (X'X)^-1 with Omega the kernel-weighted sum of
+    the autocovariances of x_t e_t; ours carries hac_variance's T/(T-1)."""
+    _, w = _calibrated_weights(900, seed=8)
+    rng = np.random.default_rng(8)
+    ic = 0.01 + np.convolve(rng.normal(0, 0.1, 904), np.ones(5) / 5, mode="valid")
+    res = rs.regime_regression(ic, w, lags, kernel)
+    xtx_inv = np.linalg.inv(w.T @ w)
+    e = ic - w @ res.coef
+    g = w * e[:, None]
+    omega = g.T @ g
+    for lag in range(1, lags + 1):
+        wl = 1.0 if kernel == "uniform" else 1.0 - lag / (lags + 1.0)
+        cross = g[lag:].T @ g[:-lag]
+        omega += wl * (cross + cross.T)
+    v = xtx_inv @ omega @ xtx_inv * len(ic) / (len(ic) - 1)
+    np.testing.assert_allclose(res.se, np.sqrt(np.diag(v)), rtol=1e-9)
+    a = np.array([-1.0, 1.0])
+    assert res.contrast_se == pytest.approx(float(np.sqrt(a @ v @ a)), rel=1e-9)
+    assert set(res.kernels) == {kernel}
+
+
+def test_the_hac_choices_and_their_lags():
+    assert rs.hac_choice("hansen_hodrick", 5, 20) == (4, "uniform")
+    assert rs.hac_choice("hansen_hodrick", 1, 20) == (0, "uniform")
+    assert rs.hac_choice("newey_west", 5, 20) == (20, "bartlett")
+    assert rs.hac_choice("newey_west", 30, 20) == (29, "bartlett")
+    with pytest.raises(ValueError):
+        rs.hac_choice("white", 5, 20)
+
+
+def test_holm_and_bh_match_a_hand_worked_example():
+    from nec_moe import benjamini_hochberg, holm
+
+    p = [0.01, 0.04, 0.03, 0.005, 0.2]
+    # sorted 0.005, 0.01, 0.03, 0.04, 0.2 times 5, 4, 3, 2, 1 -> 0.025, 0.04,
+    # 0.09, 0.08 (running max 0.09), 0.2
+    reject, adjusted = holm(p, 0.05)
+    np.testing.assert_allclose(adjusted, [0.04, 0.09, 0.09, 0.025, 0.2])
+    assert reject == [True, False, False, True, False]
+    # BH: p * 5 / rank -> 0.025, 0.025, 0.05, 0.05, 0.2 (already monotone)
+    _, q = benjamini_hochberg(p, 0.10)
+    np.testing.assert_allclose(q, [0.025, 0.05, 0.05, 0.025, 0.2])
+
+
+def test_p_values_and_the_hard_split():
+    assert rs.p_value(-1.6448536, "less") == pytest.approx(0.05, abs=1e-6)
+    assert rs.p_value(1.959964, "two-sided") == pytest.approx(0.05, abs=1e-6)
+    assert rs.p_value(-1.959964, "two-sided") == pytest.approx(0.05, abs=1e-6)
+    assert np.isnan(rs.p_value(float("nan"), "less"))
+    hard = rs.hard_split(np.array([0.2, 0.7, np.nan, 0.5]), 0.5)
+    np.testing.assert_array_equal(hard[[0, 1, 3]], [[1, 0], [0, 1], [1, 0]])
+    assert np.isnan(hard[2]).all()
+    # no stress date at all: the regression is undefined, not a number
+    res = rs.regime_regression(np.ones(50), rs.hard_split(np.zeros(50), 0.5), 0, "uniform")
+    assert np.isnan(res.contrast) and np.isnan(res.coef).all()
+
+
+def _synthetic_inputs(irs, t_len=600, n=50, seed=9, b=0.3, extra_2007=5):
+    """A market whose regimes flip ret_5d's IC (+ in calm, - in stress); the
+    other 17 signals are noise. Dates end 2006-12-29, plus some 2007 rows the
+    guard must drop."""
+    log_ret, states = _two_regime(t_len=t_len, seed=seed, stay=(0.98, 0.98),
+                                  start="2004-09-13")
+    assert log_ret.index[-1] == pd.Timestamp("2006-12-29")
+    days = log_ret.index.append(pd.bdate_range("2007-01-01", periods=extra_2007))
+    rng = np.random.default_rng(seed)
+    names = [str(10000 + i) for i in range(n)]
+    sig = {s: pd.DataFrame(rng.normal(size=(len(days), n)), index=days, columns=names)
+           for s in irs.SIGNALS}
+    beta = np.where(np.r_[states, np.zeros(extra_2007, dtype=int)] == 0, b, -b)
+    r = np.full((len(days), n), np.nan)
+    r[1:] = beta[:-1, None] * sig["ret_5d"].to_numpy()[:-1] + rng.normal(size=(len(days) - 1, n))
+    daily = pd.DataFrame(r * 0.01, index=days, columns=names)
+    universe = pd.DataFrame(True, index=days, columns=names)
+    late = pd.Series(0.0, index=days[t_len:])
+    return (sig, daily, universe, {"synthetic": True}), pd.concat([log_ret, late])
+
+
+def test_part_b_end_to_end_on_synthetic_data(irs, tmp_path):
+    inputs, log_ret = _synthetic_inputs(irs)
+    s = irs.Settings(k_list=(2,))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        table = irs.run_ic(s, root=tmp_path, inputs=inputs, log_ret=log_ret)
+    out = tmp_path / "results" / "diagnostics"
+    for name in ("ic_regime_2000_2006.csv", "ic_regime_2000_2006.json",
+                 "ic_regime_2000_2006.png", "ic_regime_contrast_2000_2006.png"):
+        assert (out / name).stat().st_size > 0
+    # strict JSON (no NaN tokens), with the caveat and the declared families
+    report = json.loads((out / "ic_regime_2000_2006.json").read_text(),
+                        parse_constant=lambda c: pytest.fail(f"non-JSON constant {c}"))
+    assert report["caveat"] == rs.IN_SAMPLE_CAVEAT
+    fam = report["families"]
+    assert fam["primary"]["tests"] == 5
+    assert fam["exploratory"]["tests"] == len(irs.SIGNALS) * len(s.horizons) * 1 - 5
+    assert len(report["primary_results"]) == 5
+    # the five primary tests: K = 2, h = 5, one-sided (less), Holm
+    prim = table[table["family"] == "primary"]
+    assert set(prim["signal"]) == {"ret_5d", "ret_20d", "ret_20d_ind_rel", "mom_12_1",
+                                   "ind_mom_12_1"}
+    assert (prim["K"] == 2).all() and (prim["h"] == 5).all()
+    assert (prim["alternative"] == "less").all() and (prim["adjustment"] == "holm").all()
+    np.testing.assert_allclose(prim["p"], [rs.p_value(x, "less") for x in prim["t_hh"]])
+    expl = table[table["family"] == "exploratory"]
+    assert (expl["alternative"] == "two-sided").all()
+    assert (expl["adjustment"] == "benjamini_hochberg").all()
+    # the planted flip: ret_5d's IC is positive in calm, negative in stress
+    flip = table[(table["signal"] == "ret_5d") & (table["h"] == 1) & (table["K"] == 2)
+                 & (table["split"] == "soft") & (table["weight_kind"] == "window")]
+    c = flip.set_index("term")["estimate"]
+    assert c["calm"] > 0.05 and c["stress"] < -0.05
+    assert flip.set_index("term").loc["contrast", "t_hh"] < -5
+    # the guard: 2007 rows dropped; each h loses its last h dates
+    soft = table[(table["split"] == "soft") & (table["term"] == "contrast")]
+    for h in s.horizons:
+        assert (soft[soft["h"] == h]["n_dates"] == 600 - h).all()
+    # every split is there: both weight kinds, the hard split, stress_vol
+    assert set(table["split"]) == {"soft", "hard", "stress_vol"}
+    assert set(table[table["split"] == "soft"]["weight_kind"]) == {"window", "filtered"}
+    assert len({st for st in irs.PRIMARY_STYLES}) == 5  # distinct line styles
+
+
+def test_the_primary_hypotheses_are_fixed(irs):
+    assert [h["id"] for h in rs.PRIMARY_HYPOTHESES] == ["H1", "H2"]
+    assert rs.PRIMARY_HYPOTHESES[0]["signals"] == ("ret_5d", "ret_20d", "ret_20d_ind_rel")
+    assert rs.PRIMARY_HYPOTHESES[1]["signals"] == ("mom_12_1", "ind_mom_12_1")
+    assert all(h["alternative"] == "contrast < 0" for h in rs.PRIMARY_HYPOTHESES)
+    assert (rs.PRIMARY_SPEC["k"], rs.PRIMARY_SPEC["h"], rs.PRIMARY_SPEC["hac"]) == (
+        2, 5, "hansen_hodrick")
+    with pytest.raises(ValueError, match="primary hypotheses are fixed"):
+        irs.Settings(signals=tuple(x for x in irs.SIGNALS if x != "mom_12_1")).validate()
+    with pytest.raises(ValueError, match="primary hypotheses are fixed"):
+        irs.Settings(horizons=(1, 2, 3)).validate()
+    assert len(irs.SIGNALS) == 18 and irs.SIGNALS[-2:] == ("ret_20d_ind_rel", "ind_mom_12_1")

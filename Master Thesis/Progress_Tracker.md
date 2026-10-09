@@ -88,6 +88,8 @@ added. A decision that is later reversed keeps its row, and the reversal gets it
 | 2026-10-08 | Framing: comparison-led; no constructive element (the differentiable jump-model gate is not pursued) | adding a design-led contribution | Q2, Q4 |
 | 2026-10-08 | Horizon stays h = 5; add an IC decay curve on 2000-2006 and a horizon profile (h = 1, 3, 5, 10) for the final model as robustness | switching to h = 3 or h = 1 | Q21 follow-up |
 | 2026-10-09 | IC decay curve (2000-2006) confirms h = 5: one-week reversal and abnormal volume peak at 5, slow signals still build, nothing favours 3; horizon question closed; Q26 inputs unchanged despite weak pooled ICs | switching horizon; pruning weak signals on outcomes | Q21 follow-up result |
+| 2026-10-09 | Reporting additions for every arm: long-leg vs short-leg returns and half-sample ICs; decile monotonicity (Patton-Timmermann test); IC by year and by 8 pre-named episodes; `execution_lag` knob, headline tables at L = 0 and 1 | headline IC and long-short only | Q9 update; brief 12 |
+| 2026-10-09 | Residual short-term reversal (`resid_mom20`) kept as an extension, not added to the inputs (pilot already run) | changing Q26 after the pilot | Improvements E3 |
 
 
 ---
@@ -184,6 +186,29 @@ statistical (Q17).
 ---
 
 ## 2. Log (newest first)
+
+### 2026-10-09 (brief 11 results: regime-split IC and sector regimes, 2000-2006)
+- **Market regimes (K = 2):** one long stress block, January 2000 to August 2003, calm after; daily volatility 0.69%
+  calm against 1.53% stress; expected durations 229 and 177 days; all 24 starts at one optimum. K = 3: 0.60%, 0.98%,
+  1.75%, durations 110, 46, 79 days.
+- **Regime-split IC, reading "neutral" by the rule written before the run:** four of the five primary contrasts have
+  the expected sign (reversal stronger in stress, momentum weaker), none survives Holm (smallest adjusted p 0.076,
+  one-month reversal). The K = 2 contrast is largely 2000-03 against 2003-06, so slow drift is inside it; the
+  trailing-volatility split keeps the one-month reversal contrast (t = -2.16) but not the one-week one. Exploratory:
+  11 of 175 contrasts at q < 0.10, none at q < 0.05 (mostly abnormal volume stronger in stress, and one-month
+  reversal at K = 3): hypotheses for 2007-2024, not findings.
+- **Sector regimes (input to Q28):** between the two pre-written outcomes. Sector-relative regimes still follow the
+  market's (median correlation 0.64, against 0.76 for raw sector returns); a sector is stressed while the market is
+  calm on 6-9% of days (P = 10-16%); clearest own episode Energy 2005-06. Real Estate empty (inside Financials until
+  2016), Communication Services thin (median 12 names). Caveat: "sector minus index" partly cancels big sectors.
+- All recorded in the methodology PDF (new section on pre-pilot diagnostics). No design choice changed.
+
+### 2026-10-09 (evaluation additions from the LightGBM pipeline; brief 12)
+- Reviewed `OP model/lgbm` (LightGBM on China A-shares). Adopted for evaluation (Q9 update): long vs short leg,
+  decile monotonicity, IC by year and named episode, and an `execution_lag` knob (L = 0 and 1 reported).
+  Residual short-term reversal recorded as extension E3. Training-target outlier clipping: held for later (Q20).
+  Turnover and cost reporting: explained; stays with Q9 (c).
+- **Code_Change_Brief_12** written for these evaluation additions.
 
 ### 2026-10-09 (IC decay result; brief 11)
 - **IC decay curve run** (brief 10 C, by Tom; commit 00b9604): rank IC of 16 signals at h = 1-10 on 2000-2006.
@@ -462,7 +487,7 @@ statistical (Q17).
 
 ## 4. Parked ideas
 
-- **Future study, beyond the thesis:** `Improvements_and_Extensions.md` (created 2026-10-05). E1: how to improve the model for one-day forecasting. E2 (2026-10-08): the regime-gated MoE as a stacking meta-model over machine-learning alphas.
+- **Future study, beyond the thesis:** `Improvements_and_Extensions.md` (created 2026-10-05). E1: how to improve the model for one-day forecasting. E2 (2026-10-08): the regime-gated MoE as a stacking meta-model over machine-learning alphas. E3 (2026-10-09): residual short-term reversal as an input. E4 (2026-10-09): recurrent or transformer experts on raw price sequences.
 - Switching the gate's input from French Mkt-RF to a CRSP index series (Q23).
 
 - Testing which historical periods matter (Q16 e, extension; diagnostic only).

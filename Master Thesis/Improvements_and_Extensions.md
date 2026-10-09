@@ -109,3 +109,82 @@ already adapt.
   out-of-sample level-0 predictions are needed.
 - Isichenko (2021), *Quantitative Portfolio Management*, chapters 1-2. How alphas, combination, risk and
   the optimiser fit together in practice.
+
+---
+
+## E3. Residual short-term reversal as an input (added 2026-10-09)
+
+**The idea.** Replace or complement the raw 20-day return (`ret_20d`, the second Short-Term Reversal
+representative) with a **residual** 20-day reversal: the sum of the stock's daily returns over 20 days
+after removing the part explained by the market (beta times the index return). Found in the LightGBM
+pipeline (`OP model/lgbm`, feature `resid_mom20`: 20-day sum of index-residual returns).
+
+**Why it could help.** Raw reversal mixes two things: the stock's own overreaction (which reverses) and
+its exposure to market and industry moves (which need not). Residual reversal isolates the first and is
+reported to be stronger and less risky than raw reversal (Blitz, Huij, Lansdorp & Verbeek 2013). It also
+fits the market-neutral target.
+
+**Why it is an extension and not a change now.** The Q26 feature list was fixed by a rule before the
+pilot, and Tom has run the pilot (2026-10-09); changing inputs after that would be an outcome-dependent
+choice. It stays within the two-per-theme rule if it replaces `ret_20d`, so it is a clean extension arm.
+
+**Reading.** Blitz, Huij, Lansdorp & Verbeek (2013), "Short-term residual reversal", *Journal of Financial
+Markets* 16(3). Da, Liu & Schaumburg (2014), *Management Science* 60(3), on separating liquidity-driven from
+news-driven reversal.
+
+---
+
+## E4. Sequence experts: recurrent or transformer models on raw price sequences (added 2026-10-09)
+
+**The idea.** In the thesis each expert is a small MLP (multilayer perceptron) on one snapshot per
+stock-day: 57 ranked characteristics with no time axis. The other school of financial deep learning feeds
+each stock's **recent history as a sequence**, a T x D matrix of daily returns, volumes, ranges and spreads
+over the last T days, into an expert that reads time directly:
+
+- **recurrent experts** (LSTM or GRU: networks that carry a hidden state from one day to the next);
+- **transformer experts** (attention over the days in the window, and in newer designs also across the
+  stocks on the same date).
+
+Such experts can learn their own features from the raw path (the shape of a sell-off, volume building
+before a move) instead of using hand-built characteristics.
+
+**Why it is future work and not part of the thesis.**
+
+1. **It would compete with the gate.** An expert with its own memory of recent market history can learn the
+   market state by itself and absorb the differences between gates that the thesis measures. The thesis is
+   a controlled comparison of gates, so the experts deliberately have no time axis.
+2. **Comparability.** The closest precedent (Ye & Borde) and the benchmark (Gu, Kelly & Xiu) use snapshot
+   MLPs.
+3. **Compute.** Sequence experts have hundreds of thousands to millions of parameters against a few thousand;
+   the design (gates x depths x seeds x folds) would not fit the laptop budget.
+
+**How it could be done after the thesis.**
+
+- **Step 1, a standalone sequence model.** Train an LSTM and a transformer on the same S&P 500 panel, target
+  and walk-forward folds, and compare them with the snapshot MLP base. This answers whether the raw path
+  adds anything beyond the 57 characteristics at a 5-day horizon.
+- **Step 2, sequence experts under a frozen gate.** Replace the MLP experts with sequence experts, keep the
+  regime gate frozen, and test whether the gate still adds anything once the experts can see history
+  (the competition question above, measured instead of assumed).
+- **Step 3, market-guided attention.** Let the gate's regime probabilities steer the attention (as MASTER
+  does with market-status features), which merges the two schools.
+- **Data note.** The CRSP extract already has open, high, low, close, bid, ask and volume, enough for daily
+  sequences; intraday sequences would need new data. The code base already has a sequence input mode
+  (`snapshot_plus_hidden`, `SEQUENCE_FEATURES`) and a GRU encoder that could be the starting point.
+- **Discipline.** Same rules as E2: everything inside the walk-forward folds, settings chosen on pre-test
+  years only, and the snapshot MoE kept as the reference arm.
+
+**Reading (a couple of hours to get oriented).**
+
+- Kelly, Kuznetsov, Malamud & Xu (2025), "Artificial intelligence asset pricing models", NBER working paper
+  33351. Transformers that attend across stocks for the cross-section of returns; the most relevant recent
+  reference.
+- Li, Liu et al. (2024), "MASTER: Market-guided stock transformer for stock price forecasting", *AAAI* 38
+  (from SJTU; code at github.com/SJTU-DMTai/MASTER). Attention within each stock's history and across stocks,
+  steered by market-status features; the closest design to a regime-guided sequence model.
+- Jiang, Kelly & Xiu (2023), "(Re-)Imag(in)ing price trends", *Journal of Finance* 78(6). Convolutional
+  networks on price-chart images; evidence that raw price paths hold information beyond standard signals.
+- Fischer & Krauss (2018), "Deep learning with long short-term memory networks for financial market
+  predictions", *European Journal of Operational Research* 270(2). The classic LSTM study on the S&P 500,
+  and its decay after 2010.
+- Dynamic TMoE (arXiv:2605.20678). A mixture of experts with a GRU router; already discussed in Q13.

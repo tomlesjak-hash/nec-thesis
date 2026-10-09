@@ -71,6 +71,15 @@ $$\pi_{(k,l)}(i,t)=\pi^{\text{mkt}}_k(t)\,\pi^{\,s(i)}_l(t)$$
    reversal; the pilot must show the industry regime adds information beyond them.
 6. A descriptive check on 2000-2009 only: how often a sector is stressed while the market is calm.
 
+**Descriptive check, run 2026-10-09 (brief 11 C, 2000-2006, two-state gate per GICS sector).** Sector-relative
+regimes still largely follow the market's (median correlation of stress probabilities 0.64, against 0.76 for raw sector
+returns). A sector is stressed while the market is calm on 6-9% of days (conditional probability 10-16%); the clearest
+sector-own episode is Energy in 2005-06, with sporadic Health Care and Communication Services spikes. Real Estate has no
+names before 2016; Communication Services is thin (median 12). Caveat: the index contains the sector, so "sector minus
+index" partly cancels the largest sectors (technology was a fifth to a third of the index in 2000). Reading: sector-own
+stress exists but is concentrated in a few sectors; this informs sub-questions 1, 2 and 6 and does not decide the form.
+A sector-minus-rest-of-market series (excluding the sector from the benchmark) would remove the cancellation.
+
 **Ask the advisor:** which form, and is the factorial expert count acceptable given the data per expert?
 
 ---
@@ -407,6 +416,37 @@ detail?
 
 ### Q9. Which metric family should the thesis commit to, and what if the families disagree?
 **Status:** open — raised 2026-09-12 after verifying Gu, Kelly & Xiu against the full published paper.
+
+**Update 2026-10-09: reporting additions decided (Tom).** These are added to every arm's evaluation (gates,
+control, base, baselines). They are reporting only: they change no model choice, and they are fixed now,
+before any test-period number is computed. The primary metric family (this question) and transaction costs
+(ask (c)) stay open.
+
+1. **Long leg against short leg.** The long-short spread split into the long leg (mean market-neutral
+   return of the top quantile) and the short leg (minus the mean of the bottom quantile), each with
+   Hansen-Hodrick standard errors, plus the rank IC computed separately within the upper and the lower half
+   of the forecast distribution. Reported overall, by regime and by episode. Motivation: in the LightGBM
+   pipeline (`OP model/lgbm`) nearly all the edge sat in the short leg; if the regime gain lives only in the
+   short leg during stress, that changes how it can be used.
+2. **Decile monotonicity.** Mean market-neutral h-day return by forecast decile (sorted each date), with
+   standard errors, and the monotonic relation test of Patton & Timmermann (2010): do returns rise
+   steadily from decile 1 to 10, or does one extreme bucket carry the result?
+3. **IC by calendar year (2010-2024) and by named episode.** Episodes fixed now, before scoring:
+   - 2010 euro debt and flash crash: 2010-04-26 to 2010-07-02;
+   - 2011 US downgrade and euro crisis: 2011-07-25 to 2011-10-31;
+   - 2015-16 China devaluation and oil collapse: 2015-08-17 to 2016-02-29;
+   - 2018 fourth-quarter sell-off: 2018-10-01 to 2018-12-31;
+   - COVID crash: 2020-02-20 to 2020-04-30;
+   - COVID rebound: 2020-05-01 to 2020-12-31 (the momentum-crash setting);
+   - 2022 bear market: 2022-01-03 to 2022-10-31;
+   - 2023 regional bank stress: 2023-03-08 to 2023-05-05.
+   Episode windows are short, so their intervals are wide; they are read for sign and size, not
+   significance.
+4. **Execution-lag knob.** A config field `execution_lag` (trading days, default 0): the forecast made at
+   the close of t is scored against the market-neutral return over (t + L, t + L + h]. Evaluation only;
+   training is unchanged. Every headline table is reported at L = 0 and L = 1. Motivation: the book assumes
+   trading at the close where the signal is computed; the IC decay curve showed several signals carry most
+   of their information in the first two or three days.
 
 **The observation.** Gu, Kelly and Xiu's own results select *different network depths depending on
 which family of criterion is applied*, and the paper reports this without reconciling it.

@@ -21,7 +21,11 @@ Metrics so far (brief 12 A): ``ic`` (the headline rank IC, the run's own
 HAC lags and kernel, so it equals the run's number), ``ic_lower`` and
 ``ic_upper`` (half-sample ICs), ``spread``, ``long`` and ``short`` (the
 book's gross spread and its legs, lag 0) and ``book_*`` (the existing book's
-summary with the run's cost rate, as the run reports it).
+summary with the run's cost rate, as the run reports it). Brief 12 B:
+``group_01`` .. ``group_10`` (the mean target of each forecast decile, lag
+h - 1), ``monotonic`` (Patton & Timmermann's statistic, the smallest
+adjacent difference, with its stationary-bootstrap ``p``) and
+``group_spearman`` (group number against mean return).
 
 Usage (from nec_baseline/), after a run has completed::
 
@@ -45,7 +49,14 @@ sys.path.insert(0, str(ROOT))
 import run_experiment as rx  # noqa: E402
 from nec_moe.data import Panel  # noqa: E402
 from nec_moe.evaluation import portfolio_summary, rank_ic_by_date  # noqa: E402
-from nec_moe.reporting import half_sample_ics, leg_returns, series_summary  # noqa: E402
+from nec_moe.reporting import (  # noqa: E402
+    half_sample_ics,
+    leg_returns,
+    monotonic_relation_test,
+    series_summary,
+    shape_spearman,
+    sort_group_returns,
+)
 from nec_moe.runstore import Run, RunStore, data_fingerprint  # noqa: E402
 
 
@@ -59,6 +70,11 @@ class ReportSettings:
     cost_rate: float | None = None  # the run's cost_rate (only for book_* rows)
     ic_hac_lags: int | None = None  # the run's ic_hac_lags, else h - 1
     ic_hac_kernel: str | None = None  # the run's ic_hac_kernel
+    # brief 12 B: forecast sort groups and the monotonic relation test
+    n_sort_groups: int = 10
+    mr_bootstrap_reps: int = 1000
+    mr_mean_block: float | None = None  # None: max(10, 2h) trading days
+    mr_seed: int = 0
     out_name: str = "reporting"
 
 
@@ -178,10 +194,11 @@ def _labelled(codes: torch.Tensor, values: torch.Tensor, labels: tuple[str, ...]
 
 
 def predictor_series(blocks: list[Block], predictor: str, n_quantiles: int | None,
-                     scheme: str, horizon: int) -> dict[str, pd.DataFrame]:
+                     scheme: str, horizon: int, n_groups: int) -> dict[str, pd.DataFrame]:
     """Every per-date series of one predictor, pooled over the folds in fold
     order (the harness's pooling order)."""
-    out: dict[str, list[pd.DataFrame]] = {"ic": [], "ic_lower": [], "ic_upper": [], "book": []}
+    out: dict[str, list[pd.DataFrame]] = {"ic": [], "ic_lower": [], "ic_upper": [], "book": [],
+                                          "groups": []}
     for b in blocks:
         p = b.preds[predictor]
         d, ics = rank_ic_by_date(p, b.y, b.date)
@@ -200,11 +217,18 @@ def predictor_series(blocks: list[Block], predictor: str, n_quantiles: int | Non
             frame["gross_f32"] = list(gross)  # the book's own values, for book_* rows
             frame["turnover_f32"] = list(tno)
             out["book"].append(frame)
+        gd, groups = sort_group_returns(p, b.y, b.date, n_groups)
+        frame = _labelled(gd, torch.zeros(len(gd)), b.date_labels, "unused").drop(
+            columns="unused")
+        for j in range(n_groups):
+            frame[f"group_{j + 1:02d}"] = groups[:, j]
+        out["groups"].append(frame)
     return {k: pd.concat(v, ignore_index=True) for k, v in out.items() if v}
 
 
 def summary_rows(series: dict[str, pd.DataFrame], *, horizon: int, ic_lags: int,
-                 ic_kernel: str, cost_rate: float, scheme: str) -> list[dict[str, Any]]:
+                 ic_kernel: str, cost_rate: float, scheme: str,
+                 s: ReportSettings) -> list[dict[str, Any]]:
     """The slice "all" rows of one predictor."""
     from nec_moe.evaluation import ic_summary
 
@@ -216,8 +240,8 @@ def summary_rows(series: dict[str, pd.DataFrame], *, horizon: int, ic_lags: int,
                  "n": head.n_dates, "lags": head.hac_lags, "kernel": head.hac_kernel,
                  "icir": head.icir})
     for name in ("ic_lower", "ic_upper"):
-        s = series_summary(series[name]["value"].to_numpy(), horizon - 1)
-        rows.append({"metric": name} | s.as_dict() | {"icir": s.mean / s.std})
+        half = series_summary(series[name]["value"].to_numpy(), horizon - 1)
+        rows.append({"metric": name} | half.as_dict() | {"icir": half.mean / half.std})
     if "book" in series:
         book = series["book"]
         for name in ("spread", "long", "short"):
@@ -228,6 +252,18 @@ def summary_rows(series: dict[str, pd.DataFrame], *, horizon: int, ic_lags: int,
                                scheme=scheme, period_dates=period)
         for name in ("mean_gross", "mean_net", "ir_gross", "ir_net", "mean_turnover"):
             rows.append({"metric": f"book_{name}", "mean": getattr(ps, name), "n": ps.n_dates})
+    groups = series["groups"].filter(like="group_")
+    for name in groups.columns:
+        rows.append({"metric": name} | series_summary(groups[name].to_numpy(),
+                                                      horizon - 1).as_dict())
+    block = s.mr_mean_block if s.mr_mean_block is not None else max(10, 2 * horizon)
+    mr = monotonic_relation_test(groups.to_numpy(), mean_block=block,
+                                 reps=s.mr_bootstrap_reps, seed=s.mr_seed)
+    rows.append({"metric": "monotonic", "mean": mr["statistic"], "p": mr["p"],
+                 "n": mr["dates"], "lags": None, "kernel": f"stationary bootstrap, mean block "
+                 f"{block}, {s.mr_bootstrap_reps} reps"})
+    rows.append({"metric": "group_spearman", "mean": shape_spearman(groups.mean().to_numpy()),
+                 "n": len(groups.columns)})
     return rows
 
 
@@ -244,9 +280,9 @@ def report(inputs: RunInputs, s: ReportSettings) -> pd.DataFrame:
     rows = []
     for group, blocks in inputs.groups.items():
         for predictor in blocks[0].preds:
-            series = predictor_series(blocks, predictor, n_q, scheme, h)
+            series = predictor_series(blocks, predictor, n_q, scheme, h, s.n_sort_groups)
             for r in summary_rows(series, horizon=h, ic_lags=ic_lags, ic_kernel=kernel,
-                                  cost_rate=cost, scheme=scheme):
+                                  cost_rate=cost, scheme=scheme, s=s):
                 rows.append({"group": group, "predictor": predictor, "execution_lag": 0,
                              "slice_kind": "all", "slice": "all"} | r)
     return pd.DataFrame(rows)
@@ -267,6 +303,11 @@ def write_report(inputs: RunInputs, frame: pd.DataFrame, s: ReportSettings) -> N
             "spread / long / short": "the book's gross spread and its legs (long + short = "
                                      "spread), lag 0: the book's periods do not overlap",
             "book_*": "the existing book's pooled summary, as the run reports it",
+            "group_NN": "mean market-neutral h-day return of forecast group NN (1 = lowest), "
+                        "Hansen-Hodrick lag h - 1",
+            "monotonic": "Patton-Timmermann (2010): the smallest adjacent difference of the "
+                         "group means; p from the stationary bootstrap (H0: not increasing)",
+            "group_spearman": "Spearman correlation of group number and mean return",
         },
     })
 

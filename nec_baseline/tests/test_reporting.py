@@ -210,3 +210,72 @@ def test_the_report_refuses_an_unfinished_run_or_changed_data(rr, synthetic_run)
     other = dict(experiment, synth_entities=21)
     with pytest.raises(ValueError, match="fingerprint"):
         rr.load_panel(other, run_obj)
+
+
+# --------------------------------------------------------------------------- #
+# Part B: decile monotonicity
+# --------------------------------------------------------------------------- #
+
+
+def test_sort_groups_split_each_date_by_forecast():
+    pred = torch.tensor([5.0, 1.0, 4.0, 2.0, 3.0, 0.0, 9.0])
+    y = torch.tensor([50.0, 10.0, 40.0, 20.0, 30.0, 0.0, 90.0])
+    date = torch.zeros(7, dtype=torch.long)
+    _, r = rp.sort_group_returns(pred, y, date, 3)
+    # sorted 0, 1, 2 | 3, 4 | 5, 9: sizes 3, 2, 2 (extra names in the low groups)
+    np.testing.assert_allclose(r[0], [10.0, 35.0, 70.0])
+    with pytest.raises(ValueError, match="fewer than"):
+        rp.sort_group_returns(pred[:2], y[:2], date[:2], 3)
+
+
+def test_the_stationary_bootstrap_draws_blocks_of_the_mean_length():
+    idx = rp.stationary_bootstrap_indices(5000, 10.0, 3, np.random.default_rng(0))
+    assert idx.shape == (3, 5000) and idx.min() >= 0 and idx.max() < 5000
+    cont = (idx[:, 1:] == (idx[:, :-1] + 1) % 5000).mean()
+    assert cont == pytest.approx(0.9, abs=0.02)  # a new block with probability 1/10
+    again = rp.stationary_bootstrap_indices(5000, 10.0, 3, np.random.default_rng(0))
+    assert np.array_equal(idx, again)
+
+
+def test_the_monotonic_relation_test_is_reproducible_under_a_seed():
+    rng = np.random.default_rng(4)
+    r = rng.normal(0, 0.02, (400, 10)) + 0.001 * np.arange(10)
+    a = rp.monotonic_relation_test(r, mean_block=10, reps=200, seed=7)
+    b = rp.monotonic_relation_test(r, mean_block=10, reps=200, seed=7)
+    c = rp.monotonic_relation_test(r, mean_block=10, reps=200, seed=8)
+    assert a == b and a["p"] != c["p"]
+    assert a["statistic"] == pytest.approx(min(np.diff(r.mean(axis=0))))
+
+
+def test_increasing_means_reject_flat_ones_hold_size_one_extreme_does_not():
+    flat = rp.mr_simulation(np.zeros(10), n_sims=300, seed=1)
+    rising = rp.mr_simulation(0.006 * np.arange(10), n_sims=60, seed=2)
+    extreme = rp.mr_simulation(np.r_[np.zeros(9), 0.03], n_sims=300, seed=3)
+    print(f"\n[monotonic] flat {flat['rejection_rate']:.3f}, rising "
+          f"{rising['rejection_rate']:.3f}, one extreme {extreme['rejection_rate']:.3f}")
+    assert 0.01 <= flat["rejection_rate"] <= 0.10
+    assert rising["rejection_rate"] >= 0.9
+    assert extreme["rejection_rate"] <= 0.10
+
+
+def test_the_shape_spearman():
+    assert rp.shape_spearman(np.arange(10.0)) == pytest.approx(1.0)
+    assert rp.shape_spearman(-np.arange(10.0)) == pytest.approx(-1.0)
+    assert rp.shape_spearman(np.array([1.0, 1.0, 2.0])) == pytest.approx(np.sqrt(3) / 2)
+
+
+def test_the_report_has_the_decile_tables(rr, synthetic_run):
+    inputs = rr.load_inputs(synthetic_run["run_id"], synthetic_run["root"])
+    s = rr.ReportSettings(mr_bootstrap_reps=50)
+    frame = rr.report(inputs, s)
+    rows = frame[(frame["group"] == "markov_seed0") & (frame["predictor"] == "model")
+                 ].set_index("metric")
+    assert [f"group_{j:02d}" for j in range(1, 11)] == [
+        m for m in rows.index if m.startswith("group_") and m != "group_spearman"]
+    assert rows.loc["group_01", "lags"] == inputs.horizon - 1
+    assert 0.0 <= rows.loc["monotonic", "p"] <= 1.0
+    assert "mean block 10" in rows.loc["monotonic", "kernel"]  # max(10, 2h), h = 1
+    assert -1.0 <= rows.loc["group_spearman", "mean"] <= 1.0
+    # the same seed, the same p
+    again = rr.report(inputs, s).set_index(["group", "predictor", "metric"])
+    assert again.loc[("markov_seed0", "model", "monotonic"), "p"] == rows.loc["monotonic", "p"]
